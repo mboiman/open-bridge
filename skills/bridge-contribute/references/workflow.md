@@ -4,10 +4,12 @@ Scans your user branch for files worth contributing to one of the upstream
 repos, classifies them by `scope:` (which destination), runs adaptation
 where needed, and submits PRs.
 
-Three destinations:
-- `bks-lab/open-bridge:main` — generic CORE (scope: core, MIT, public OSS)
-- `<your-org>/<your-bridge>:development` — your org overlay (scope: org)
-- stays local — personal (scope: user / private)
+Destinations, each selected by matching the file's scope to an
+`upstreams[].scope` field (never by `role:`):
+- `bks-lab/open-bridge:main` — generic CORE (the `scope: core` upstream, MIT, public OSS)
+- `<your-org>/<your-bridge>:development` — your org overlay (the `scope: org` upstream)
+- your personal overlay — the `scope: personal` upstream, if configured
+- stays local — `scope: user` / `private`
 
 Architecture: see CLAUDE.md § Tier Model.
 
@@ -75,18 +77,63 @@ git diff --name-only "${CORE_BRANCH}..HEAD" -- \
 If `{path}` argument is provided, restrict the scan to that path only.
 
 ### Step 2: Categorize each file by scope
+#### never_promote filter (run FIRST, before any selection)
 
-For each file found, determine destination:
+Some files exist on **both** sides and are per-tier **inverted** — `.gitignore`,
+`.bridge-origin`, a materialized `ecosystem.<org>.yaml` fragment. A tier cannot
+express "belongs to neither side"; copying one over the other silently
+reconfigures the destination (`.bridge-origin` in particular tells the push
+guard whether the origin is public). Drop them before anything else looks at the
+list, so no later step can reintroduce them.
+
+```bash
+# Paths that must never move, in either direction.
+NEVER=$(yq -r '.promote.never_promote[]?.path' bridge-config.yaml 2>/dev/null)
+
+drop_never_promote() {        # stdin: paths, stdout: paths minus the list
+  if [ -z "$NEVER" ]; then cat; return; fi
+  grep -vxF "$NEVER" || true  # -x: whole line, -F: literal — no regex surprises
+}
+
+# Report what was dropped rather than dropping it silently: a guard nobody sees
+# fire is a guard nobody notices breaking.
+printf '%s\n' "$FILES" | grep -xF "$NEVER" | while read -r p; do
+  [ -n "$p" ] && echo "  ⊘ never_promote: $p — $(yq -r ".promote.never_promote[] | select(.path==\"$p\") | .reason" bridge-config.yaml)"
+done
+FILES=$(printf '%s\n' "$FILES" | drop_never_promote)
+```
+
+
+For each file found, determine destination. **The destination is selected by
+SCOPE, never by `role:` alone** — a file of scope `S` goes to the
+`bridge-config.yaml.upstreams[]` entry whose **`scope:` field == `S`**:
 
 1. **Read frontmatter** if it's a `.md` file under `skills/` or `.claude/agents/`:
-   - `scope: core` (or unset) → candidate for **open-bridge**
-   - `scope: org`            → candidate for **your org overlay**
+   - `scope: core` (or unset) → candidate for the **`scope: core`** upstream (open-bridge)
+   - `scope: org`            → candidate for the **`scope: org`** upstream (your org overlay)
+   - `scope: personal`       → candidate for the **`scope: personal`** upstream (your personal overlay)
    - `scope: user`/`private` → not contributable
 
 2. **Path inference** for raw config files (rules/operations.md § CORE/USER):
-   - `rules/`, `themes/`, `docs/` (except tier-model/public-release-cleanup) → **open-bridge**
-   - `ecosystem.yaml`, `workflow/context.{customer-a,doc-system}.yaml`, Org-overlay → **your org overlay**
+   - `rules/`, `themes/`, `docs/` (except tier-model/public-release-cleanup) → **`scope: core` upstream**
+   - `ecosystem.yaml`, `workflow/context.{customer-a,doc-system}.yaml`, Org-overlay → **`scope: org` upstream**
    - `bridge-config.yaml`, persona/mandant/calendar instances → **not contributable**
+
+**FAIL-CLOSED guard (mandatory, run before Step 3).** Two upstreams may now
+share `role: org-overlay` (an org overlay **and** a personal overlay). Count
+the upstreams with `role: org-overlay`; if `> 1` **and** any candidate's
+destination would still be chosen by `role`, **ABORT** — do not guess:
+*"Ambiguous routing: N upstreams carry `role: org-overlay` ({names}) but a
+destination is being chosen by role. Route by `upstreams[].scope`
+(org→`scope: org`, personal→`scope: personal`) instead. Aborting rather than
+risk sending personal PII to the org overlay or customer content to the
+personal repo."*
+
+**HARD GATE — personal upstream disabled for real contributions until proven.**
+Do not open a real PR to the `scope: personal` upstream until a dry-run routing
+matrix shows **every** `scope: personal` file → the personal upstream **and
+every** `scope: org` file → the org upstream, with **zero cross-routes**.
+Until then, treat `scope: personal` files as local-only.
 
 ### Step 3: Per-destination content-safety classification (MANDATORY)
 

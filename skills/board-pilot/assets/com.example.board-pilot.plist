@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  board-pilot — launchd template for the tick. Rename the {{LABEL}} to your own
+  reverse-DNS label (e.g. com.example.board-pilot.<slug>).
+
+  The launchd timer IS the loop: every StartInterval seconds (300 = 5 min) it
+  runs ONE `python3 -m engine.cli ... --once`. The CLI never sleeps internally,
+  so a hung tick can never wedge the loop — the next interval simply fires again.
+
+  DEPLOY
+  ------
+  Do NOT hand-copy this file. Render the {{PLACEHOLDERS}} and install it via your
+  scheduler (on the Bridge, the /schedule skill writes the resolved plist into the
+  per-user GUI domain and bootstraps it). The placeholders:
+    {{LABEL}}            — the launchd label, e.g. com.example.board-pilot.<slug>
+    {{PROJECT_YAML}}     — abs path to the project YAML carrying the pipeline: block
+    {{STATE_DIR}}        — abs path to the durable state dir (prev.json, locks/, budget.json, PAUSED)
+    {{LOG}}              — abs path for combined StandardOut/StandardError ledger
+    {{BOARD_PILOT_DIR}}  — abs path to skills/board-pilot (the dir that CONTAINS engine/,
+                           so `-m engine.cli` resolves)
+
+  DOMAIN / KEYCHAIN (macOS)
+  -------------------------
+  Load into the per-user GUI domain so `claude -p` (dispatched by the stage runner)
+  can reach the macOS login keychain for credentials — a daemon (system domain) or
+  a bare LaunchAgent loaded over SSH cannot. Target gui/<your-uid> (`id -u`):
+
+    launchctl bootstrap   gui/$(id -u) ~/Library/LaunchAgents/{{LABEL}}.plist
+    launchctl kickstart -k gui/$(id -u)/{{LABEL}}     # force one run now
+    launchctl print       gui/$(id -u)/{{LABEL}}      # status (LIVE truth, not this file)
+    launchctl bootout     gui/$(id -u)/{{LABEL}}      # stop + unload
+
+  PAUSE (kill-file)
+  -----------------
+  The engine bails instantly on a PAUSED file in the state dir — no unload needed:
+    touch {{STATE_DIR}}/PAUSED      # pause: next tick is a no-op (paused:true)
+    rm    {{STATE_DIR}}/PAUSED      # resume
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{LABEL}}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>engine.cli</string>
+        <string>--project</string>
+        <string>{{PROJECT_YAML}}</string>
+        <string>--state-dir</string>
+        <string>{{STATE_DIR}}</string>
+        <string>--once</string>
+    </array>
+
+    <!-- Resolve `engine.cli` from skills/board-pilot/ -->
+    <key>WorkingDirectory</key>
+    <string>{{BOARD_PILOT_DIR}}</string>
+
+    <!-- The loop: one tick every 5 minutes. No internal sleep. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Fire once immediately on (re)load so a fresh deploy doesn't wait 5 min. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- One greppable ledger: every tick's JSON summary + any error. -->
+    <key>StandardOutPath</key>
+    <string>{{LOG}}</string>
+    <key>StandardErrorPath</key>
+    <string>{{LOG}}</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

@@ -1,10 +1,11 @@
 # /promote — Scope-Routed Cherry-Pick Workflow
 
-Analyzes commits on the user branch and routes them to the right upstream
-based on `scope:` frontmatter. Three destinations:
+Analyzes commits on the user branch and routes them to the right upstream by
+matching each file's `scope:` to an `upstreams[].scope` field (never by `role:`):
 
-- `bks-lab/open-bridge:main` (OSS, MIT) — for `scope: core` commits
-- `<your-org>/<your-bridge>:development` (your org overlay) — for `scope: org`
+- `bks-lab/open-bridge:main` (OSS, MIT) — the `scope: core` upstream
+- `<your-org>/<your-bridge>:development` (your org overlay) — the `scope: org` upstream
+- your personal overlay — the `scope: personal` upstream, if configured
 - stays local on `user/{name}` — for `scope: user` / `private`
 
 Architecture: see CLAUDE.md § Tier Model.
@@ -66,6 +67,32 @@ Detect disjoint history: `git merge-base HEAD {upstream}/{branch}`
 returns empty → fall back to `--since`.
 
 ### Step 2: Categorize Each Commit by Scope
+#### never_promote filter (run FIRST, before any selection)
+
+Some files exist on **both** sides and are per-tier **inverted** — `.gitignore`,
+`.bridge-origin`, a materialized `ecosystem.<org>.yaml` fragment. A tier cannot
+express "belongs to neither side"; copying one over the other silently
+reconfigures the destination (`.bridge-origin` in particular tells the push
+guard whether the origin is public). Drop them before anything else looks at the
+list, so no later step can reintroduce them.
+
+```bash
+# Paths that must never move, in either direction.
+NEVER=$(yq -r '.promote.never_promote[]?.path' bridge-config.yaml 2>/dev/null)
+
+drop_never_promote() {        # stdin: paths, stdout: paths minus the list
+  if [ -z "$NEVER" ]; then cat; return; fi
+  grep -vxF "$NEVER" || true  # -x: whole line, -F: literal — no regex surprises
+}
+
+# Report what was dropped rather than dropping it silently: a guard nobody sees
+# fire is a guard nobody notices breaking.
+printf '%s\n' "$FILES" | grep -xF "$NEVER" | while read -r p; do
+  [ -n "$p" ] && echo "  ⊘ never_promote: $p — $(yq -r ".promote.never_promote[] | select(.path==\"$p\") | .reason" bridge-config.yaml)"
+done
+FILES=$(printf '%s\n' "$FILES" | drop_never_promote)
+```
+
 
 Use the helper:
 
@@ -110,10 +137,42 @@ Commit category from its files' scopes:
 
 | Commit category | Files | Goes to |
 |---|---|---|
-| `CORE` | all `core` | open-bridge **and** your org overlay |
-| `Org` | only `org` (or `core+org`) | your org overlay only |
-| `MIXED` | mix that includes `user` | **path-split** in Step 4 — cannot promote whole commit |
+| `CORE` | all `core` | the `scope: core` upstream **and** any org/personal overlay |
+| `Org` | only `org` (or `core+org`) | the `scope: org` upstream only |
+| `Personal` | only `personal` (or `core+personal`) | the `scope: personal` upstream only |
+| `MIXED` | mix that includes `user`, **or** mixes `org`+`personal` | **path-split** in Step 4 — cannot promote whole commit |
 | `USER` | all `user` / `private` | stays local |
+
+#### Destination resolution — by SCOPE, never by `role:` alone
+
+Each commit/file of scope `S` goes to the `bridge-config.yaml.upstreams[]`
+entry whose **`scope:` field == `S`**: `core`→the `scope: core` upstream,
+`org`→the `scope: org` upstream, `personal`→the `scope: personal` upstream,
+`user`/`private`→no upstream. Do **not** select a destination by matching
+`role: org-overlay` — two upstreams (an org overlay and a personal overlay)
+may now carry that role, so it is no longer a unique key.
+
+**FAIL-CLOSED guard (mandatory, run before Step 4).** Count the upstreams
+with `role: org-overlay`. If `> 1` **and** the routing would still choose any
+destination by `role`, **ABORT** — do not guess:
+
+```
+Ambiguous routing: N upstreams carry role: org-overlay ({names}) but a
+destination is being chosen by role. Route by upstreams[].scope instead
+(core→scope:core, org→scope:org, personal→scope:personal). Aborting rather
+than risk sending personal PII to the org overlay or customer content to the
+personal repo.
+```
+
+**HARD GATE — personal upstream disabled for real promotes until proven.**
+Do not run a non-`--dry-run` promote against the `scope: personal` upstream
+until a `--dry-run` matrix (Step 4) shows **every** `scope: personal` file →
+the personal upstream and **every** `scope: org` file → the org upstream,
+with **zero cross-routes**. Until then, treat `scope: personal` as local-only.
+
+A commit mixing `org` and `personal` files is a `MIXED` case — path-split it
+in Step 4 (org paths → the org upstream, personal paths → the personal
+upstream); never send the whole commit to one overlay.
 
 ### Step 3: Per-Destination Content Safety Check (MANDATORY)
 

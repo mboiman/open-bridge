@@ -37,8 +37,9 @@ Daily and on-demand briefing. Read the referenced file ONLY when triggered.
 - `bridge-config.yaml` with `work.enabled: true`. If not: offer setup.
 - Standing orders are loaded at session start (per CLAUDE.md). If `/briefing`
   is invoked **standalone** (e.g. via cron or a long-running session), manually
-  load `protocols/standing-orders/*.md` before Phase 1 — the `applications`
-  surface logic in Stream C depends on them.
+  load `protocols/standing-orders/*.md` **and `protocols/standing-orders/user/*.md`**
+  before Phase 1 — the `applications` surface logic in Stream C depends on them, and
+  an applications order is user-tier (a `*.md` glob alone does not reach `user/`).
 
 ## Decision Tree
 

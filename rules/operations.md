@@ -60,17 +60,23 @@ Before committing, verify paths match the branch:
 
 **On `main` (or preparing `/promote`) — Scope-Routing:**
 
-Three scope tiers control which upstream a path can land on. The scope
-comes from frontmatter (`scope: core | org | user | private`) for
-skills/agents — **skills** nest it under `metadata:` (`metadata.scope`),
-**sub-agents** keep it top-level; for raw config paths it's inferred from
-the path itself.
+Four scope tiers control which upstream a path can land on. Scope comes from
+frontmatter (`scope: core | org | personal | user | private`) — **skills** nest
+it under `metadata:` (`metadata.scope`), **sub-agents** and **rules** keep it
+top-level. For the cluster-wrapper config paths
+(`identity/{personas,mandants,accounts,contracts}`, `infra/channels`,
+`workflow/{contexts,projects}`) a frontmatter `scope:` **wins over** the path
+default; with no frontmatter the path decides (defaulting these to `user` — the
+fail-safe: a missing or mistaken tag never leaks upward, it just fails to
+promote). `personal` is an optional fourth tier — a private overlay under your
+**own** account, separate from your org's overlay (see the § Tier Model).
 
 | Scope | Allowed upstream | Path examples |
 |---|---|---|
 | `core` (or unset) | **open-bridge** + your org overlay | CLAUDE.md, README.md, CONTRIBUTING.md, docs/**, skills/** (`metadata.scope: core`), .claude/skills/**, .claude/agents/** (`scope: core` or unset), rules/*.md (top-level only = CORE tier; org/user rules live in `rules/org/` + `rules/user/` — see those rows), identity/{personas,accounts,mandants,contracts}/{_schema,_template}.yaml, infra/{remotes,channels,backups,instances}/{_schema,_template}.yaml, workflow/{calendars,contexts,projects}/{_schema,_template}.yaml, themes/**, trackers/**, scripts/{generate-bridge,validate-ecosystem,validate-bridge,validate-skill-scope}.py, scripts/scaffold-user.sh, .pre-commit-config.yaml, .github/workflows/validate.yml, protocols/standing-orders/*.md (CORE default orders) |
-| `org` | **your org overlay ONLY** (never open-bridge) | skills/customer-a-coordinator/ (= `metadata.scope: org`), .claude/agents/{customer-a-*,network-*}.md, ecosystem.yaml, rules/org/** (wiki-navigation, wiki-principles), workflow/contexts/{customer-a,doc-system}.yaml, identity/mandants/org.yaml |
-| `user` / `private` | **stays local** (never any upstream) | bridge-config.yaml, identity/personas/<id>.yaml, identity/mandants/<id>.yaml, identity/contracts/<id>.yaml, infra/remotes/<id>.yaml + setup.md, infra/channels/<id>.yaml, infra/instances/<id>.yaml, infra/backups/topology.yaml + _state.yaml, workflow/calendars/entries.yaml, workflow/projects/<slug>.yaml, work/ (incl. work/streams/applications/), rules/user/** (applications), protocols/standing-orders/user/** (user-authored orders) |
+| `org` | **your org overlay ONLY** (never open-bridge) | skills/customer-a-coordinator/ (= `metadata.scope: org`), .claude/agents/{customer-a-*,network-*}.md, ecosystem.yaml, ecosystem.<org>.yaml, rules/org/** (wiki-navigation, wiki-principles), workflow/contexts/customer-a.yaml (+ any context carrying `scope: org`), identity/mandants/org.yaml |
+| `personal` | **your personal overlay ONLY** (never open-bridge, never your org overlay) | cluster-wrapper config carrying `scope: personal` — identity/{personas,mandants,accounts,contracts}/<id>.yaml, infra/channels/<id>.yaml, workflow/{contexts,projects}/<id>.yaml; rules/personal/**; ecosystem.personal.yaml |
+| `user` / `private` | **stays local** (never any upstream) | bridge-config.yaml, cluster-wrapper config with `scope: user` or **no** frontmatter (identity/{personas,mandants,accounts,contracts}, infra/{remotes,channels}, workflow/{contexts,projects}), infra/instances/<id>.yaml, infra/backups/topology.yaml + _state.yaml, workflow/calendars/entries.yaml, work/ (incl. work/streams/applications/), rules/user/**, protocols/standing-orders/user/** (user-authored orders) |
 
 **Routing-logic for `/promote` (per commit, per file):**
 1. Read `scope:` frontmatter — skills: `metadata.scope`; sub-agents/rules:
@@ -78,8 +84,9 @@ the path itself.
 2. Route the commit to ALL upstreams that the scope allows:
    - `core` → both open-bridge AND your org overlay (open-bridge first, then the overlay pulls)
    - `org` → your org overlay only
+   - `personal` → your personal overlay only (a private overlay under your own account)
    - `user`/`private` → stay local
-3. Mixed-scope commits are split — never push a commit with `org` content to open-bridge.
+3. Mixed-scope commits are split — never push a commit with `org` (or `personal`) content to open-bridge.
 
 Language is a parallel tier rule: CORE (`scope: core`) is authored in
 English; `org`/`user` tiers may stay in the author's language. See

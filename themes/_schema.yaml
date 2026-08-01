@@ -72,6 +72,18 @@ properties:
         type: [string, "null"]
         default: null
         description: "Parent theme to inherit from (null = standalone)"
+      scope:
+        type: string
+        enum: [core, org, personal, user]
+        description: >-
+          Promote tier for this theme AND the logo it names in
+          `branding.logo_ascii`. Optional: `themes/` is whole-folder CORE, so
+          the two shipped themes declare nothing and stay core, while an
+          undeclared local theme falls back to `user`. Declare it when a theme
+          should travel — `org` puts a shared brand in the org overlay so every
+          member's Bridge inherits it instead of each person re-authoring it.
+          Read by scripts/categorize-commits.py; the same idea as a skill's
+          `metadata.scope`, and it keeps org names out of that CORE router.
 
   # --- vocabulary ---
   # Key-value pairs: internal concept name -> displayed term.

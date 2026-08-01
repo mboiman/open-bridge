@@ -30,7 +30,7 @@ properties:
     description: "Schema version, currently 1"
 
   scope:
-    enum: [core, org, user, private]
+    enum: [core, org, personal, user, private]
     description: |
       Promote-routing scope — REQUIRED. A persona is an identity the
       USER holds (tax data, signatures, PII), so it is always `user`

@@ -528,29 +528,51 @@ def enrich_issue_state(items: list[dict], cache: dict) -> None:
                 it["issue_state"] = life
 
 
+def ecosystem_files(root: Path) -> list[Path]:
+    """Every ecosystem fragment this instance loads, in precedence order.
+
+    The registry may be split across `ecosystem.yaml` (instance base) plus
+    overlay-materialized / tier-scoped fragments (`ecosystem.<tier>.yaml`) —
+    the same set CLAUDE.md `@`-imports. `ecosystem.example.yaml` is the CORE
+    template shipped for fresh clones and is deliberately excluded: its demo
+    entries are not real boards.
+    """
+    files = []
+    base = root / "ecosystem.yaml"
+    if base.is_file():
+        files.append(base)
+    for path in sorted(root.glob("ecosystem.*.yaml")):
+        if path.name == "ecosystem.example.yaml":
+            continue
+        files.append(path)
+    return files
+
+
 def resolve_boards(root: Path, registries: dict) -> list[dict]:
-    """Boards to pull, from ecosystem.yaml github_projects."""
-    eco = root / "ecosystem.yaml"
+    """Boards to pull, from `github_projects` across all ecosystem fragments."""
     boards = []
-    if not eco.is_file():
-        return boards
-    try:
-        data = yaml.safe_load(eco.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return boards
-    for entry in data.get("github_projects", []) or []:
-        org = entry.get("org")
-        number = entry.get("number")
-        reg = registries.get((org, number))
-        slug = reg["_slug"] if reg else slugify(entry.get("name", f"{org}-{number}"))
-        boards.append({
-            "org": org,
-            "number": number,
-            "name": entry.get("name", slug),
-            "issue_repo": entry.get("issue_repo"),
-            "slug": slug,
-            "registry": reg,
-        })
+    seen = set()
+    for eco in ecosystem_files(root):
+        try:
+            data = yaml.safe_load(eco.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        for entry in data.get("github_projects", []) or []:
+            org = entry.get("org")
+            number = entry.get("number")
+            if (org, number) in seen:
+                continue          # first fragment wins — base overrides overlay
+            seen.add((org, number))
+            reg = registries.get((org, number))
+            slug = reg["_slug"] if reg else slugify(entry.get("name", f"{org}-{number}"))
+            boards.append({
+                "org": org,
+                "number": number,
+                "name": entry.get("name", slug),
+                "issue_repo": entry.get("issue_repo"),
+                "slug": slug,
+                "registry": reg,
+            })
     return boards
 
 
@@ -610,7 +632,8 @@ def cmd_pull(args) -> int:
     if args.project and args.project != "all":
         boards = [b for b in boards if b["slug"] == args.project]
     if not boards:
-        print("No boards resolved from ecosystem.yaml github_projects.",
+        scanned = ", ".join(p.name for p in ecosystem_files(root)) or "(none)"
+        print(f"No boards resolved from `github_projects` in: {scanned}.",
               file=sys.stderr)
         return 0
 

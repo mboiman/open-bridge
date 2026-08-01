@@ -68,7 +68,7 @@ properties:
     additionalProperties: false
     properties:
       scope:
-        enum: [core, org, user, private]
+        enum: [core, org, personal, user, private]
         default: org
         description: |
           Promote-routing tier the mirrored files inherit. An overlay's content

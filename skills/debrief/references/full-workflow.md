@@ -206,9 +206,32 @@ Analyze the transcript and extract:
 | **Decisions** | What was decided, by whom, with what rationale |
 | **Problems** | Issues raised, blockers, complaints |
 | **Contradictions** | Conflicting statements or requirements |
-| **Action Items** | Who does what by when (explicit commitments) |
+| **Action Items** | Who does what by when — **explicit commitments AND hedged ones** (see below) |
 | **Context** | Background information that explains decisions |
 | **Open Questions** | Unresolved questions that need follow-up |
+
+### Hedged action items — the most-missed category
+
+Most real action items are **not** phrased as commitments. Searching only for
+"X does Y by Z" reliably drops half the work of a session. Treat these as action
+items too, and extract them with the same weight:
+
+| Surface form | Example phrasing | Why it counts |
+|---|---|---|
+| Subjunctive / conditional | "we should probably re-check that", "one would have to challenge it" | a decision to revisit = work |
+| Doubt about an existing solution | "maybe there is already a standard — we built this ourselves again" | an evaluation task |
+| Delegation to a future agent | "some task could just look at what's still relevant in there" | a task, with the executor named |
+| Preference without an owner | "those YAML files — I actually like them" | something must survive a rewrite = scope |
+| Naming a thing to drop | "I'd just drop that package" | an action, not only a decision |
+| Deferred judgement | "we'll only find that out once X is solved" | a **blocked** item — record it WITH its blocker |
+
+**Cluster check before leaving Phase 4.** After extracting, ask once: *do several
+of these items answer the same underlying question?* If yes, that cluster is a
+work-stream in its own right and must be named as such — otherwise the individual
+items look like loose ends and the stream stays invisible. A rewrite almost always
+carries a second, quieter stream next to "introduce the new thing": **"what happens
+to the old thing"** (what survives · what was needless in-house build · what gets
+dropped · what becomes decidable only later).
 
 ### Daily Insights Aggregation (NEW)
 
@@ -267,6 +290,23 @@ Read `references/task-reconciliation.md` for the full flow. Summary:
    aim for 1–5 operations per meeting, group related micro-tasks into one
    comment on the parent issue rather than splitting.
 4. Present **Checkpoint 2** — the matrix with WAS / WARUM / ASSIGNEE columns.
+   **Every action item must appear as a matrix row, including the ones you propose
+   NOT to track.** An item you decided to leave untracked belongs in the matrix as
+   an explicit row (`SKIP — reason`), never as prose under the table. A remark below
+   an approved table is not a question: the user approves the *matrix*, and anything
+   outside it is silently lost.
+
+   **Unbound action items force a question.** If action items have no tracker
+   binding — no issue, no board item — Checkpoint 2 must ask outright whether to
+   create them, as its own decision line:
+
+   ```
+   N action items have no issue. Create them?  [y] all  [n] none  [s N] selected
+   ```
+
+   **Inferring the answer from the transcript does not count.** "He said in the
+   call he'd write the tasks himself" is context, not consent — people say that
+   and still expect the agent to do it. Ask.
 5. On `[y]`: execute approved operations (gh api + issue comments + assignees).
 6. Return `updated_issues[]` and `new_issues[]` with URLs for later phases.
 
@@ -400,6 +440,26 @@ read the `anchor` column of the matching row. Use `i-NNN` for claims from
 **Issue/Task column:** leave `—` when the row is first written; fill with the
 GitHub issue URL once the task is created via `github-projects-manager` (Phase 5
 runs before this step for exactly that reason — real URLs are available here).
+
+**The reference column is mandatory in every task/action-item table you write —
+protocol, wiki page and summary alike.** When no issue exists it carries an
+explicit, self-explaining value, never nothing and never a bare slug:
+
+| Situation | Value |
+|---|---|
+| Issue exists | the linked issue reference |
+| No issue yet | local task link + `— (no issue yet)` |
+| Deliberately no issue | `— (decision)` / `— (blocked until X)` — say which |
+
+Dropping the column when there happen to be no issues is the failure mode this
+rule exists for: it makes "not tracked" indistinguishable from "not noticed".
+
+**Propagate links to EVERY artifact, not just the one you looked at last.** When
+issues are created after the protocol was written, the same references must land
+in *all* documents this debrief produced — gold summary, wiki protocol, the daily
+insights file, the person/topic stream files, and each cross-linked task. Walk the
+list explicitly; a link that exists in one artifact and not the others reads as
+"nothing was created" to whoever opens the other one.
 
 **Worked example shape:** a meeting home like
 `work/tasks/_meetings/<date>-<slug>/` containing `summary.md` plus the

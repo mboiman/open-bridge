@@ -1,0 +1,69 @@
+# Utility definition
+#
+# One supply contract at one location — electricity, gas, water, district
+# heating, internet, waste collection. It holds the master data you need
+# exactly when you do not have it to hand: the meter number while you are
+# standing at the meter, the customer number while you are on the phone, the
+# portal login while you are submitting a reading.
+#
+# Copy to utilities/{slug}.yaml and fill in.
+# Optional operating notes: utilities/{slug}-setup.md
+#
+# WHY infra/ and not workflow/: these are the master data of a physical
+# installation at a site — the same class as infra/remotes/ (machines) and
+# infra/channels/ (transports). The recurring METER-READING appointment belongs
+# in workflow/calendars/ instead and points back here via utility_ref.
+
+name: my-utility
+scope: user              # REQUIRED — a supply contract is private site and
+                         # contract data; never promoted.
+type: electricity        # electricity | gas | water | district-heating | internet | waste
+status: active           # active | terminated | pending
+
+# Where the consumption happens
+location:
+  label: "Flat"          # free-form, e.g. "Flat", "Office", "Holiday home"
+  address: "1 Example Street, 12345 Exampletown"
+
+# Who supplies (the energy retailer — sends the bill)
+supplier:
+  name: "Exampletown Municipal Utilities"
+  customer_number: ""    # your customer number with the supplier
+  tariff: ""             # tariff name, if relevant
+  monthly_payment: ""    # current instalment, e.g. "120.00 EUR"
+  billing_month: ""      # month of the annual statement, e.g. "August"
+
+# Who meters (the metering point operator — requests the reading; often NOT
+# the same company as the supplier, and that is precisely where the confusion
+# starts)
+metering_operator:
+  name: ""
+  customer_number: ""    # grid customer number — usually a DIFFERENT number
+  reading_portal: ""     # URL of the meter-reading portal
+  portal_user: ""
+  portal_password_ref: ""  # NEVER the cleartext password here —
+                           # keychain://… / 1password://… / "see reading card"
+
+# The meters themselves. Several are possible (e.g. peak/off-peak, power + heat).
+meters:
+  - number: ""           # the COMPLETE meter number — reading cards and
+                         # reminder e-mails routinely redact it (`** 011995`);
+                         # the full number appears on the annual statement.
+                         # That is exactly why this file exists.
+    kind: "Electricity peak"   # Electricity peak | Electricity off-peak | Gas | Cold water | …
+    obis: ""             # OBIS code, e.g. 1.8.0
+    location_hint: ""    # where it sits, e.g. "Basement, meter cabinet on the left"
+
+# Grid / market-location identifiers, used when switching supplier and for
+# queries. Names vary by national market — these two are the German ones
+# (Messlokations-ID / Marktlokations-ID); rename or drop them for yours.
+identifiers:
+  metering_location_id: ""
+  market_location_id: ""
+
+# Where the documents live (relative to the document root)
+documents:
+  invoices: ""           # e.g. "2_AREAS/Home/Utilities"
+
+notes: |
+  Free text — quirks, switching history, open disputes.

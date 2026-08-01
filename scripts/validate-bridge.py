@@ -47,7 +47,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # An instance's concrete org tag (e.g. "acme") is NOT hardcoded here — it is
 # declared in bridge-config.yaml `promote.scopes.org_aliases` and routes like
 # `org`. This keeps THIS file generic so it promotes to open-bridge unchanged.
-GENERIC_SCOPES = {"core", "org", "user", "private"}
+# `personal` is a first-class tier (its own overlay destination, its own
+# PERSONAL_PATTERNS block in the scope router, its own `promote.upstreams` entry).
+# It was missing here — as it was in identity/{personas,mandants}/_schema.yaml —
+# so every file honestly declaring it was reported invalid.
+GENERIC_SCOPES = {"core", "org", "personal", "user", "private"}
 
 
 def org_scope_aliases() -> set[str]:
@@ -185,8 +189,13 @@ def validate_surface(surface: dict, *, validator: str) -> tuple[int, int]:
 # rule inherits `core` and would leak to open-bridge; this gate forbids that.
 MD_SCOPE_SURFACES = [
     {
+        # `rules/**/*.md`, not `rules/*.md`. The non-recursive glob left all of
+        # rules/org, rules/personal and rules/user unguarded — 17 files, on the
+        # one surface where AGENTS.md § Rules says the FOLDER is the tier and the
+        # frontmatter is the required backstop. A validator that cannot see a
+        # file cannot guard it, and it reported green the whole time.
         "name": "rules",
-        "instances": "rules/*.md",
+        "instances": "rules/**/*.md",
         "exclude_prefixes": ["_"],
     },
 ]
@@ -209,6 +218,22 @@ def _load_frontmatter_extractor():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.extract
+
+
+#: Tier-bearing subfolders — the folder name IS the tier for anything inside it.
+TIER_FOLDERS = ("org", "personal", "user")
+
+
+def tier_folder_of(rel) -> str | None:
+    """Return the tier folder a path sits in, or None for the top-level surface.
+
+    `rules/personal/finance.md` → "personal"; `rules/theme.md` → None (top level
+    is core by path, which the surface's own allowed-scopes check covers).
+    """
+    parts = rel.parts
+    if len(parts) >= 3 and parts[1] in TIER_FOLDERS:
+        return parts[1]
+    return None
 
 
 def validate_md_scope_surface(surface: dict) -> tuple[int, int]:
@@ -235,6 +260,14 @@ def validate_md_scope_surface(surface: dict) -> tuple[int, int]:
             failed += 1
         elif scope not in allowed:
             print(f"  FAIL  {rel} — invalid scope '{scope}' (allowed: {', '.join(sorted(allowed))})")
+            failed += 1
+        elif (tier := tier_folder_of(rel)) and tier != scope:
+            # AGENTS.md § Rules: the FOLDER is the tier, and the frontmatter must
+            # AGREE with it. Checking only that a `scope:` exists lets the two
+            # disagree silently — and then the router (folder) and the reader
+            # (frontmatter) believe different things about the same file.
+            print(f"  FAIL  {rel} — in rules/{tier}/ but declares scope '{scope}'"
+                  f" — folder and frontmatter disagree")
             failed += 1
         else:
             print(f"  PASS  {rel} [scope: {scope}]")
