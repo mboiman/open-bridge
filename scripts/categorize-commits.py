@@ -121,7 +121,8 @@ ORG_PATTERNS = [
     r"^docs/(public-release-cleanup|three-tier-architecture|wiki-architecture)\.md$",
 ]
 
-# Personal tier — Michael's private + freelance overlay (→ alice/alice-bridge-config).
+# Personal tier — the operator's own private overlay (a `role: org-overlay` upstream
+# with `scope: personal`; the repo is named in bridge-config.yaml, not here).
 # Path-based personal tiers below; cluster-wrapper CONFIG files reach `personal`
 # via a frontmatter `scope: personal` (see _CLUSTER_WRAPPER_RE / classify_file).
 PERSONAL_PATTERNS = [
