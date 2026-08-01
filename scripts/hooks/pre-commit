@@ -18,6 +18,62 @@ set +e
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" 2>/dev/null || exit 0
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HARD GATE — a staged `.env` is refused. BLOCKS, and runs on EVERY branch.
+#
+# Everything below this block is warn-only and instance-only (`user/*` + work/).
+# This one is different for the same reason pre-push is: it is a leak guard, not
+# a reminder. It sits ABOVE the branch gate deliberately — otherwise a `.env`
+# staged on `main` would exit 0 before any check ran.
+#
+# `.gitignore` already excludes `.env` at every depth and none has ever been
+# committed here, but `.gitignore` is advisory: `git add -f` walks straight past
+# it. This is the layer that does not depend on anyone remembering.
+#
+# Carve-out: `.env.template` / `.env.example` are documentation and must stay
+# committable — but only while their values are EMPTY. A template someone filled
+# in for a quick test is a secrets file wearing a template's name, so the
+# exemption tests the CONTENT, not the filename. Put example values in a comment
+# above the key, never to the right of the `=`.
+# ─────────────────────────────────────────────────────────────────────────────
+env_blocked=""
+git diff --cached --name-only -z 2>/dev/null |
+  tr '\0' '\n' |
+  grep -E '(^|/)\.env($|\.)' > /tmp/.bridge-env-staged.$$ 2>/dev/null
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "${f##*/}" in
+    .env.template|.env.example)
+      # non-empty value to the right of `=` ⇒ not a template any more
+      if git show ":$f" 2>/dev/null |
+         grep -qE '^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*[^[:space:]"'"'"']'; then
+        env_blocked="$env_blocked
+$f (Template mit ausgefülltem Wert)"
+      fi
+      ;;
+    *)
+      env_blocked="$env_blocked
+$f"
+      ;;
+  esac
+done < /tmp/.bridge-env-staged.$$
+rm -f /tmp/.bridge-env-staged.$$
+
+if [ -n "$env_blocked" ]; then
+  printf '%s\n' "── bridge pre-commit · BLOCKIERT ──────────────────────────────────" >&2
+  printf '%s\n' "✗ .env darf nie committet werden. Staged:" >&2
+  printf '%s\n' "$env_blocked" | sed '/^$/d; s/^/    /' >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "  Diese Dateien tragen Zugangsdaten. .gitignore schließt sie aus," >&2
+  printf '%s\n' "  aber \`git add -f\` geht daran vorbei — deshalb dieser Hook." >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "  Aus dem Index nehmen:  git restore --staged <datei>" >&2
+  printf '%s\n' "  Erlaubt sind nur .env.template / .env.example mit LEEREN Werten" >&2
+  printf '%s\n' "  (Beispielwerte in den Kommentar über den Key, nie hinter das \`=\`)." >&2
+  printf '%s\n' "───────────────────────────────────────────────────────────────────" >&2
+  exit 1
+fi
+
 # Instance-only: run on user/* branches with a work/ tree. No-op on CORE
 # branches (main/development) and repos without a work-system.
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")

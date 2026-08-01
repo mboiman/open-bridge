@@ -50,6 +50,7 @@ Full design: docs/org-overlays.md
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import hashlib
 import importlib.util
@@ -118,6 +119,80 @@ RAW_SECRET_PATTERNS = [
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),  # JWT
     re.compile(r"AccountKey=[A-Za-z0-9+/]{20,}={0,2}"),        # Azure conn-string key
 ]
+
+# Opaque base64 credentials — Elastic Cloud ApiKey and the same shape used by
+# several other services — carry NO distinctive prefix, so no format regex can
+# separate them from ordinary data. They do have one checkable property: the
+# blob base64-decodes to `<id>:<secret>`, two non-trivial opaque tokens. The
+# decode is what makes this precise enough to run on CODE, where the key:value
+# heuristic below is deliberately off — which is exactly the gap that let a live
+# `API_KEY = "<base64>"` sit in a tracked .py file (see work/log.md 2026-08-01).
+_B64_BLOB = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+_ID_SECRET = re.compile(r"\A[A-Za-z0-9_-]{12,}:[A-Za-z0-9_-]{12,}\Z")
+
+
+def decoded_id_secret(line: str) -> str | None:
+    """Return the offending blob if `line` carries a base64 `id:secret` credential.
+
+    Public surface — scripts/tests/test_overlay_secret_scan.py pins the contract.
+    Returns None for ordinary base64 payloads (binary, JSON, data URIs): those
+    either fail strict base64 validation, fail the ASCII decode, or decode to
+    something that is not two opaque colon-separated tokens.
+    """
+    for blob in _B64_BLOB.findall(line):
+        if len(blob) % 4:
+            continue
+        try:
+            decoded = base64.b64decode(blob, validate=True).decode("ascii")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if _ID_SECRET.match(decoded):
+            return blob
+    return None
+
+
+# The SAME credential written out in plaintext. decoded_id_secret above hunts
+# base64 BLOBS, which makes it blind to its own quarry once someone pastes the
+# decoded pair — and that is not hypothetical: an adversarial pre-publication
+# review on 2026-08-01 found the live Elastic key sitting in plaintext in a
+# comment in scripts/tests/test_overlay_secret_scan.py, the very test that pins
+# this detector, in a file the router had marked publishable to the PUBLIC repo.
+# It got there in the same commit that "removed" the key (80196d9): the base64
+# form left the script and the plaintext form entered the test explaining it.
+#
+# No prefix to anchor on, so precision comes from ENTROPY: both halves must mix
+# upper, lower and digit, and the pair must stand free (not part of a URL, a
+# path, or a `host:port`). Measured over all 2896 tracked text files: exactly
+# ONE hit, the synthetic fixture that is supposed to look like a credential —
+# zero false positives on real content.
+_PLAIN_PAIR = re.compile(
+    r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_-]{16,}):([A-Za-z0-9_-]{16,})(?![A-Za-z0-9_./:-])"
+)
+
+#: Inline opt-out for deliberate synthetic fixtures. Standard practice
+#: (detect-secrets spells it the same way) — a real secret never carries it.
+ALLOWLIST_PRAGMA = "pragma: allowlist secret"
+
+
+def _entropic(token: str) -> bool:
+    return (
+        any(c.isupper() for c in token)
+        and any(c.islower() for c in token)
+        and any(c.isdigit() for c in token)
+    )
+
+
+def plaintext_id_secret(line: str) -> str | None:
+    """Return the offending `id:secret` pair if `line` carries one in plaintext.
+
+    Public surface — scripts/tests/test_overlay_secret_scan.py pins the contract.
+    """
+    if ALLOWLIST_PRAGMA in line:
+        return None
+    for m in _PLAIN_PAIR.finditer(line):
+        if _entropic(m.group(1)) and _entropic(m.group(2)):
+            return m.group(0)
+    return None
 # password:/secret:/token: assignments to a literal that is NOT a URI ref
 # Anchored to a YAML-key position (^\s*, optional list dash) so the heuristic
 # fires on an actual assignment — not a secret word mid-prose or a trailing
@@ -844,10 +919,26 @@ def leak_check(content: bytes, target_scope: str = "org", dest: str = "") -> lis
         ".java", ".kt", ".c", ".h", ".cpp", ".cs", ".php", ".sh", ".bash",
         ".zsh", ".ps1", ".psm1", ".lua", ".pl", ".swift", ".sql"))
     for raw_line in text.splitlines():
+        hit = None
         for pat in RAW_SECRET_PATTERNS:
             if pat.search(raw_line):
-                reasons.append(f"raw secret material: {raw_line.strip()[:60]}")
+                hit = raw_line.strip()[:60]
                 break
+        if hit is None:
+            blob = decoded_id_secret(raw_line)
+            if blob:
+                hit = f"base64 id:secret credential {blob[:20]}…"
+        if hit is None:
+            # Deliberately on the RAW line, BEFORE the comment strip below: the
+            # real find was inside a `#` comment, which the assignment heuristic
+            # discards. Only the first 8 chars are echoed — a reason string that
+            # quotes the whole pair re-materializes the secret in the log that
+            # was supposed to stop it.
+            pair = plaintext_id_secret(raw_line)
+            if pair:
+                hit = f"plaintext id:secret credential {pair[:8]}… (redacted)"
+        if hit:
+            reasons.append(f"raw secret material: {hit}")
         if is_code:
             continue                                # format scan only on code
         code = raw_line.split("#", 1)[0]            # drop trailing comment

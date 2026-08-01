@@ -39,7 +39,7 @@ properties:
     const: 1
 
   scope:
-    enum: [core, org, user, private]
+    enum: [core, org, personal, user, private]
     description: |
       Promote-routing scope — REQUIRED so a mandant never silently
       defaults into the wrong tier (incident: scope-less org mandants were

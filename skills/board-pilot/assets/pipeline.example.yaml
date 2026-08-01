@@ -1,0 +1,176 @@
+# board-pilot — example `pipeline:` block (generic, copy-and-adapt)
+#
+# This is the per-project config the engine reads. The engine itself is generic:
+# every project specific (which stages, which handler runs each one, the trigger
+# column, the budget) lives HERE. Drop this block into your project YAML
+# (workflow/projects/<slug>.yaml) and point the CLI at it:
+#
+#     python3 -m engine.cli --project workflow/projects/<slug>.yaml --state-dir <dir> --once
+#
+# Two ownership rules to keep in mind while editing:
+#   * `status`   is HUMAN-owned. A person drags a card into the trigger column to
+#                arm it; the engine only READS status to start, and writes it once
+#                (to `pr_status`) when it reaches the gated PR stage.
+#   * `pipeline` is ENGINE-owned — a separate single-select field on the board that
+#                is the durable program counter. Never the same field as Status.
+
+# --- Board binding (read by the CLI, not the generic engine) -----------------
+# Project-specific wiring for the real GitHub Projects v2 adapter. Generic
+# placeholders below — swap for your org/board. The two single-select FIELD
+# names matter: `status_field` is the human-owned trigger column, `pipeline_field`
+# is the engine-owned program counter (must be a DIFFERENT field from Status).
+board:
+  project_number: 1                  # `gh project view <number>` — the Projects v2 number
+  owner: your-org                    # org or user login that owns the project
+  repo: your-org/your-repo           # repo whose PRs/branches back the items
+  status_field: Status               # human-owned trigger column
+  pipeline_field: Pipeline           # engine-owned program counter (separate field!)
+  branch_template: bridge/{project}/{item_id}   # per-item working branch
+  # repo_path: ~/Developer/your-org/your-repo   # optional: local checkout (cmd: cwd); defaults to `repo`
+
+  # Where the per-stage `criteria:` files live. A RELATIVE path is anchored to
+  # `repo_path` (the cwd each stage runs in), so this only resolves if the criteria
+  # ship inside the repo being worked on — use an absolute path when they do not.
+  # No default on purpose: absent means no stage may declare `criteria:` (the loader
+  # refuses one that does), because a guessed default would point into the repo the
+  # agent edits, letting a stage rewrite the standard it is judged against.
+  criteria_dir: skills/board-pilot/criteria
+
+pipeline:
+  # Human label for logs/summaries. Not load-bearing.
+  project: example-project
+
+  # --- Trigger -------------------------------------------------------------
+  # An item is ARMED (pipeline := queued) the moment a human sets its Status to
+  # this column AND it has no pipeline value yet. That is the only entry point.
+  trigger:
+    on_status: Todo
+
+  # Status written at ARM, so a card an agent has taken visibly leaves the free
+  # column. Omit it and the engine writes no such column (today's behaviour).
+  # Safe because ARMING hangs on `pipeline is None`, never on status — the engine
+  # writing a status can therefore never re-arm anything.
+  working_status: In Progress
+
+  # Status written at EVERY park. Omit it and a parked card — one whose rework
+  # budget is spent — keeps sitting in the trigger column looking freshly pulled.
+  park_status: Blocked
+
+  # Status the engine sets ONCE, after the gated PR stage passes. It then STOPS.
+  pr_status: In Review
+
+  # The engine MUST NEVER set this. Marking work truly Done stays human-only.
+  # It also HALTS the engine: a human setting Done mid-flight stops the pipeline
+  # rather than having this column stamped back over their decision.
+  done_status: Done
+
+  # Refuse to arm a card with no issue behind it (a draft card). Such an item can
+  # carry no `Closes #N` and no comment, so the record and the reject edge have no
+  # channel — the run would burn every expensive stage and report nowhere.
+  require_issue: true
+
+  # --- Concurrency ---------------------------------------------------------
+  # Max in-flight items advanced per tick. Each item also takes a per-item lock,
+  # so a slow stage from a previous tick is skipped (not double-run).
+  concurrency: 1
+
+  # --- Budget --------------------------------------------------------------
+  # Cumulative output-token ceiling, persisted across ticks (budget.json in the
+  # state dir). When reached, every tick is a no-op until the counter is reset.
+  budget:
+    max_tokens: 200000
+
+  # --- Rework (reject-and-return edge) -------------------------------------
+  # A downstream review/verify stage can REJECT an item and return it to an
+  # upstream producer with a human-readable annotation. The bounce is counted in
+  # a durable board Number field; once it reaches max_rounds the item parks.
+  rework:
+    max_rounds: 3            # REQUIRED positive int — enforced at config load
+    bounce_field: Bounces    # board Number field = the durable bounce counter
+
+  # --- Record (the run trail) ----------------------------------------------
+  # ONE sticky comment per run on the item's issue, edited in place, carrying a
+  # row per decision. Edits do not notify, so a thorough trail costs exactly one
+  # notification — the reject notes are separate, discrete comments (never folded
+  # into the sticky: the engine reads those back, and a sticky quoting one would
+  # feed the producer its own record as "feedback").
+  record:
+    enabled: true            # false = today's engine: no record written at all
+    events: [armed, stage, reject, park, gate]   # closed set; an unknown one fails at load
+    sticky_marker: board-pilot:run               # fixed machine token: [A-Za-z0-9._:-], no `--`
+    max_body_chars: 60000    # GitHub's hard ceiling is 65536
+    # redact | off. Applies to the RECORD only — the PR body is fail-closed
+    # regardless. Redaction is per-span, so a false positive costs one placeholder
+    # rather than blanking the cell. It is a denylist regex, not a secret scanner.
+    scan: redact
+    # templates_dir: skills/board-pilot/templates
+    #   ^ parsed and validated, but NOT yet read by the renderer — the row format is
+    #     still built in code. Listed so the key is discoverable, commented out so
+    #     this file does not advertise a knob that currently changes nothing.
+
+  # --- Evidence (what a stage's receipt is made of) ------------------------
+  # For a stage with `evidence: true` the ENGINE tees the child's stdout/stderr and
+  # exit code out of the pipe into <dir>/<stage_id>/. The stage never authors its
+  # own receipt: a stage that merely TYPES "5 passed" would satisfy an existence
+  # check identically to one that ran the tests.
+  evidence:
+    # Per-ITEM template. The SUBSTITUTION IS SPLIT: the CLI renders `{state_dir}`
+    # (only it knows --state-dir); the runner renders `{item_id}` / `{project}` per
+    # item. Omit this key entirely and no evidence is captured at all.
+    dir: "{state_dir}/evidence/{item_id}"
+    # Only a `cmd:` stage may be an evidence source — an LLM stage would be
+    # reporting on its own work while the dossier labels it machine-captured.
+    require_deterministic: true
+
+  # --- Stages --------------------------------------------------------------
+  # Ordered. Each stage advances an item by exactly ONE step per tick; the next
+  # tick re-reads the board (confirmed-advance). `on_success` is the pipeline
+  # value to set when the stage passes — it chains to the NEXT stage's "before"
+  # state. Handler grammar for `run`:
+  #     skill:<name>        run a Bridge skill
+  #     workflow:<harness>  run a build harness
+  #     agent:<name>        dispatch a `claude -p` sub-agent role
+  #     cmd:<shell>         run a shell command (board values passed as argv, never interpolated)
+  stages:
+    - uses: spec                       # stage id (also the pipeline "before" key via chaining)
+      run: skill:spec-kickoff          # turn the card into a SPEC.md
+      on_success: spec-done            # pipeline value after this stage
+
+    - uses: implement
+      run: agent:code-implementer      # implement against the spec
+      on_success: implementing
+      on_fail:
+        retry: 2                       # retry up to 2 ticks before parking
+        then: park
+
+    - uses: verify
+      run: cmd:make verify             # deterministic gate — the strongest check
+      evidence: true                   # engine tees this stage's stdout/stderr + exit
+                                       # code; requires a cmd: run (see require_deterministic)
+      on_success: verified
+      on_fail:
+        then: rewind                   # send it back to re-implement
+        to: spec-done
+
+    - uses: review
+      run: agent:code-reviewer         # adversarial review pass; writes its verdict
+                                       # to the $VERDICT_FILE sidecar (not stdout)
+      # Filename relative to board.criteria_dir, exported to the stage as
+      # $CRITERIA_FILE and cited in the record as `name@<git-blob-sha>`. THE tuning
+      # knob: it answers what a stage decided ON, not just what it decided, so
+      # "the reviewer rejected for the wrong reason" becomes an editable, tracked,
+      # diffable file instead of a guess. The engine refuses the stage (no LLM
+      # spend) if the file is missing — deciding against nothing, silently, is the
+      # blindness this knob exists to remove.
+      criteria: review.md
+      on_success: reviewed
+      on_reject:                       # the gegen-check → backward edge
+        to: implement                  # STAGE-ID (engine resolves it to a before-key),
+                                       # validated STRICTLY UPSTREAM at config load
+        max_rounds: 2                  # per-edge override of rework.max_rounds
+        on_exhausted: park             # v1: only park (terminal)
+
+    - uses: pr
+      run: cmd:gh pr create --draft    # open a draft PR (idempotent: at most one)
+      on_success: pr-open
+      gate: human                      # STOP here: set Status=In Review, hand to the human

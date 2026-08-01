@@ -120,7 +120,20 @@ ZERO="0000000000000000000000000000000000000000"
 # rule below is the primary guard; this content net is the backstop that catches
 # USER instance files smuggled onto ANY other branch name (main, feature/*, a
 # renamed user branch, …) — names are not trusted, content is.
-USER_PATHS='^(work/(log\.md|board\.md|tasks/|streams/|done/|archive/)|identity/agent/(IDENTITY|SOUL)\.md|identity/(personas|mandants|accounts)/[^_]|infra/(remotes|channels|backups)/[^_]|workflow/calendars/[^_]|bridge-config\.yaml$)'
+USER_PATHS='^(work/(log\.md|board\.md|tasks/|streams/|done/|archive/)|identity/agent/[^_]|identity/(personas|mandants|accounts|contracts)/[^_]|identity/voiceprints/|infra/(remotes|channels|backups|instances|utilities|transcriptions)/[^_]|workflow/(calendars|contexts|projects|checks|workspaces)/[^_]|agents/[^_]|ecosystem\.[a-z0-9-]+\.yaml$|(overlays|workspaces)\.lock\.yaml$|bridge-config\.yaml$)'
+
+# CORE companions that live INSIDE the USER_PATHS prefixes and must keep flowing
+# upstream. Stripped before the match, so this list is the only thing standing
+# between a legitimate /promote and a false block — keep it exact.
+#
+# It replaces a blanket `grep -v '/README.md$'`, which exempted EVERY README at
+# any depth. That was a leak: it stripped
+# infra/channels/bots/igor-zahnarzt/README.md (a freelance client) and
+# identity/voiceprints/README.md (biometric, GDPR Art. 9) before the regex ever
+# saw them, while the sibling .yaml in the same directory was correctly blocked.
+# Only a cluster-wrapper's own TYPE-level README is a core companion; anything
+# nested below it is instance content.
+CORE_EXEMPT='^((agents|identity/(personas|mandants|accounts|contracts|agent)|infra/(remotes|channels|backups|instances|utilities|transcriptions)|workflow/(calendars|contexts|projects|checks|workspaces))/README\.md$|agents/(tests/|pyproject\.toml$|__init__\.py$|\.gitignore$)|ecosystem\.example\.yaml$)'
 
 blocked=""
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -146,7 +159,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
   changed=$(printf '%s\n' "$push_commits" | sed '/^$/d' \
             | git diff-tree -r --no-commit-id --name-only --root --stdin 2>/dev/null \
-            | grep -v '/README\.md$') || changed=""
+            | grep -Ev "$CORE_EXEMPT") || changed=""
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq "$USER_PATHS"; then
     blocked="$blocked ${dest}(USER-content)"
   fi

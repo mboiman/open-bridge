@@ -337,3 +337,64 @@ async def test_tool_argument_deltas_do_not_stream_as_text(monkeypatch):
     events = await _collect(_runner())
     assert not [e for e in events if e.get("kind") == "delta"]
     assert _answers(events)[0]["text"] == "grounded answer"
+
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTEXT_ID env injection — 2026-07-18 incident: report_concern's mail said
+# "Sitzung: unbekannt" because the model has no reliable way to know its own
+# context_id. The runtime now injects it into the claude -p subprocess env, which
+# is inherited by the tool subprocesses (book_request.py / report_concern.py) it
+# spawns via Bash — so the tools can read AGENT_CONTEXT_ID themselves instead of
+# depending on the model to pass --context-id correctly.
+# ---------------------------------------------------------------------------
+
+def _capture_env_exec(monkeypatch, captured: dict, *, lines: list[bytes]):
+    async def fake_exec(*args, env=None, limit=None, **kwargs):
+        captured["env"] = env
+        return _FakeProc(_streamreader(lines, limit=limit))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+
+async def test_stream_injects_agent_context_id_into_subprocess_env(monkeypatch):
+    captured: dict = {}
+    _capture_env_exec(monkeypatch, captured, lines=[_line(_result("ok"))])
+    events = [evt async for evt in _runner().stream("hi", context_id="ctx-abc-123")]
+    assert captured["env"] is not None
+    assert captured["env"].get("AGENT_CONTEXT_ID") == "ctx-abc-123"
+    assert _answers(events)[0]["text"] == "ok"
+
+
+async def test_stream_without_context_id_omits_env_var(monkeypatch):
+    """No context_id known (e.g. a caller that predates this feature) → the subprocess
+    env is untouched, never a fabricated/placeholder value.
+
+    Asserted as a contract, not as an implementation: CORE signals "untouched" by
+    passing ``env=None`` (asyncio then inherits the parent env natively) rather than
+    by handing down an explicit ``os.environ`` copy. Both satisfy the guarantee that
+    matters — no placeholder reaches the child — so pinning either shape would make
+    this test break on a legitimate CORE refactor, which is exactly what it did."""
+    captured: dict = {}
+    _capture_env_exec(monkeypatch, captured, lines=[_line(_result("ok"))])
+    events = [evt async for evt in _runner().stream("hi")]
+    env = captured["env"]
+    assert env is None or "AGENT_CONTEXT_ID" not in env
+    assert _answers(events)[0]["text"] == "ok"
+
+
+async def test_call_injects_agent_context_id_into_subprocess_env(monkeypatch):
+    """The buffered (__call__) path gets the same env treatment as stream()."""
+    captured: dict = {}
+
+    class _CommProc(_FakeProc):
+        async def communicate(self):
+            return json.dumps({"result": "buffered ok"}).encode(), b""
+
+    async def fake_exec(*args, env=None, **kwargs):
+        captured["env"] = env
+        return _CommProc(None)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    answer = await _runner().__call__("hi", context_id="ctx-buffered-9")
+    assert captured["env"].get("AGENT_CONTEXT_ID") == "ctx-buffered-9"
+    assert answer == "buffered ok"

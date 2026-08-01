@@ -14,6 +14,29 @@ scrubbing and parallel PR creation.
 > applies (keyed by the name), so the eventual public cut stays clean. The
 > `bks-lab/open-bridge:main` / `<your-org>/<your-bridge>:development` literals in the
 > examples below are illustrative defaults — resolve the real target from config.
+>
+> **Route by SCOPE, never by `role:` alone.** A commit/file of scope `S` goes to the
+> `upstreams[]` entry whose **`scope:` field == `S`**: `core`→the `scope: core`
+> upstream, `org`→the `scope: org` upstream, `personal`→the `scope: personal`
+> upstream, `user`/`private`→stays local. Two upstreams may now share
+> `role: org-overlay` (an org overlay **and** a personal overlay), so `role` is no
+> longer a unique destination key — the single-`PROMOTE_REPO` assumption in the
+> examples below only holds for a config with exactly one overlay.
+>
+> **FAIL-CLOSED guard (mandatory, before Step 2 classification).** Count the
+> upstreams with `role: org-overlay`. If `> 1` **and** the routing would still pick
+> any destination by `role`, **ABORT** — do not guess: *"Ambiguous routing: N
+> upstreams carry `role: org-overlay` ({names}) but a destination is being chosen by
+> role. Route by `upstreams[].scope` (org→`scope: org`, personal→`scope: personal`)
+> instead. Aborting rather than risk sending personal PII to the org overlay or
+> customer content to the personal repo."*
+>
+> **HARD GATE — personal upstream disabled for real syncs until proven.** Do not run
+> a non-`--dry-run` `/bridge-sync` against the `scope: personal` upstream until a
+> `--dry-run` routing matrix (Step 4) shows **every** `scope: personal` file → the
+> personal upstream **and every** `scope: org` file → the org upstream, with
+> **zero cross-routes**. Until that matrix is green, treat `scope: personal` files as
+> local-only.
 
 ## Workflow
 
@@ -56,6 +79,32 @@ git log "$SINCE..HEAD" --oneline --no-merges
 ```
 
 ### Step 2: Per-commit scope classification
+#### never_promote filter (run FIRST, before any selection)
+
+Some files exist on **both** sides and are per-tier **inverted** — `.gitignore`,
+`.bridge-origin`, a materialized `ecosystem.<org>.yaml` fragment. A tier cannot
+express "belongs to neither side"; copying one over the other silently
+reconfigures the destination (`.bridge-origin` in particular tells the push
+guard whether the origin is public). Drop them before anything else looks at the
+list, so no later step can reintroduce them.
+
+```bash
+# Paths that must never move, in either direction.
+NEVER=$(yq -r '.promote.never_promote[]?.path' bridge-config.yaml 2>/dev/null)
+
+drop_never_promote() {        # stdin: paths, stdout: paths minus the list
+  if [ -z "$NEVER" ]; then cat; return; fi
+  grep -vxF "$NEVER" || true  # -x: whole line, -F: literal — no regex surprises
+}
+
+# Report what was dropped rather than dropping it silently: a guard nobody sees
+# fire is a guard nobody notices breaking.
+printf '%s\n' "$FILES" | grep -xF "$NEVER" | while read -r p; do
+  [ -n "$p" ] && echo "  ⊘ never_promote: $p — $(yq -r ".promote.never_promote[] | select(.path==\"$p\") | .reason" bridge-config.yaml)"
+done
+FILES=$(printf '%s\n' "$FILES" | drop_never_promote)
+```
+
 
 For each commit in the window, classify:
 
@@ -81,16 +130,21 @@ Then classify the **commit**:
 
 | Files in commit | Commit category |
 |---|---|
-| All `core` | `CORE` — goes to open-bridge AND your org overlay |
-| All `org` (or core+org) | `ORG` — goes to your org overlay only |
-| Mixed `core`+`org` | `MIXED-CB` — split required (`/promote` instead) |
-| Mixed `core`/`org` + `user` | `MIXED-CU` — per-file cherry-pick (drop user-scope paths) |
+| All `core` | `CORE` — goes to the `scope: core` upstream AND every overlay |
+| All `org` (or core+org) | `ORG` — goes to the `scope: org` upstream only |
+| All `personal` (or core+personal) | `PERSONAL` — goes to the `scope: personal` upstream only |
+| Mixed `core`+`org`, `core`+`personal`, or `org`+`personal` | `MIXED-CB` — split required (`/promote` instead) |
+| Mixed `core`/`org`/`personal` + `user` | `MIXED-CU` — per-file cherry-pick (drop user-scope paths) |
 | All `user`/`private` | `LOCAL` — skip |
 
-`MIXED-CB` (core+org) commits: refuse with hint "split this commit
-before running /bridge-sync, or use /promote per-commit". Bundling
-core and org fixes into one upstream commit is wrong because they
-go to different repos.
+Route each category to the upstream whose **`scope:` field matches** (see the
+"Route by SCOPE" callout at the top) — never by `role:`.
+
+`MIXED-CB` commits (any two of core / org / personal together): refuse with
+hint "split this commit before running /bridge-sync, or use /promote
+per-commit". Bundling fixes with different scopes into one upstream commit is
+wrong because they go to different repos — and `org`+`personal` in particular
+must never share a destination.
 
 `MIXED-CU` (core/org + user) commits: do **not** skip. Use the
 **MIXED-CU recipe** below. The resulting commit on the target only
@@ -210,7 +264,7 @@ Bridge Sync — window: bridge-sync-2026-04-26 .. HEAD (12 commits)
   → local only            (0 commits)
 
   Open-bridge scrub preview (3 hits):
-     skills/bridge-sync/SKILL.md:42     "<bks-lab>" → "{org}/" in code-fences (1×)
+     skills/bridge-sync/SKILL.md:42     "<your-org>" → "{org}/" in code-fences (1×)
      docs/feature-tour.md:88            "<your-username>" → "{user}" (2×)
 
   Proceed?
@@ -491,7 +545,7 @@ For each merged destination:
 ```bash
 # Fresh shallow-clone the merged state
 TMP_VERIFY=$(mktemp -d)/verify-<repo>
-git clone --depth=1 -b <base-branch> git@github.com:bks-lab/<repo>.git "$TMP_VERIFY"
+git clone --depth=1 -b <base-branch> git@github.com:your-org/<repo>.git "$TMP_VERIFY"
 
 # Run categorized leak check
 bridge-leak-check --repo <repo> --strict-oss --target-dir "$TMP_VERIFY"

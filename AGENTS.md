@@ -302,8 +302,9 @@ load-bearing instead of drift-prone. USER-scoped skills never land on `main` —
 
 | Scope | Ships to | Skills |
 |-------|----------|--------|
-| `core` | open-bridge + your org overlay + local | `archive`, `bridge-audit`, `bridge-contribute`, `bridge-curator`, `bridge-dashboard`, `bridge-explorer`, `bridge-greeting`, `bridge-leak-check`, `bridge-learn`, `bridge-onboard`, `bridge-overlay`, `bridge-promote`, `bridge-status`, `bridge-sync`, `briefing`, `calendar`, `channel`, `dashboard`, `debrief`, `doc-system`, `github-projects-manager`, `html-canvas`, `knowledge-repo-init`, `mandants`, `meeting-transcription`, `onboard-sim`, `project-advisor`, `remote`, `schedule`, `task-close-postmortem`, `tracker-sync`, `workspace` |
+| `core` | open-bridge + your org overlay + local | `archive`, `board-pilot`, `bridge-audit`, `bridge-contribute`, `bridge-curator`, `bridge-dashboard`, `bridge-explorer`, `bridge-greeting`, `bridge-leak-check`, `bridge-learn`, `bridge-onboard`, `bridge-overlay`, `bridge-promote`, `bridge-status`, `bridge-sync`, `briefing`, `calendar`, `capability-broker`, `channel`, `dashboard`, `debrief`, `doc-system`, `github-projects-manager`, `html-canvas`, `knowledge-repo-init`, `mandants`, `meeting-transcription`, `onboard-sim`, `project-advisor`, `remote`, `schedule`, `spec-kickoff`, `task-close-postmortem`, `tracker-sync`, `workspace` |
 | `org` | your org overlay + local | — |
+| `personal` | your personal overlay + local | — |
 | `user` | local only | — |
 
 <!-- SKILL-SCOPE:END -->
@@ -370,6 +371,7 @@ apply to your instance at session start.
 | `org-overlays.md` | core | Fail-closed contract for materializing an org overlay's `scope:org` content into a consumer Bridge |
 | `promote-safety.md` | core | Content-leak prevention before cherry-pick/merge to CORE branches — scope-check for `skills/` and `.claude/agents/` |
 | `push-guard.md` | core | Push-boundary gate blocking `user/*` branches and USER content from reaching a public upstream |
+| `recording-provenance.md` | core | Documenting a recording archives its original out of the inbox + links the source in every derived doc — both halves, never one |
 | `skill-routing.md` | core | Discipline for picking skills over ad-hoc prompts |
 | `task-management-workflow.md` | core | Detailed workflow for task management — reflex pause, plan/build classification, similarity, cluster detection |
 | `theme.md` | core | Theme system — resolution order, built-in themes, custom theme authoring |

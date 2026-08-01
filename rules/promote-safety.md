@@ -49,20 +49,22 @@ allowed to carry user content by design.
    - If the diff touches `skills/<name>/`, read
      `skills/<name>/SKILL.md` frontmatter — for skills the field lives
      under `metadata:` (`metadata.scope`), not top-level. If `scope:` is
-     `user` or `private`, **block the entire skill directory** from the promote.
-     Only `scope: core` (or no `scope:` field) may land on
-     `main`.
+     `org`, `personal`, `user`, or `private`, **block the entire skill
+     directory** from open-bridge / `main` (`org` → org overlay only,
+     `personal` → your personal overlay only, `user`/`private` → never).
+     Only `scope: core` (or no `scope:` field) may land on `main`.
    - If the diff touches `.claude/agents/<name>.md`, read that file's
-     frontmatter. Same rule — `scope: org` or `scope: private` means
-     **block the file** from the promote. Only `scope: core` (or
-     absent) is allowed for `main`. The sub-agent frontmatter shape differs from
-     skills (`name`/`description`/`tools`/`model`) but the `scope:`
-     field is the shared convention.
+     frontmatter. Same rule — `scope: org`, `scope: personal`, or
+     `scope: private` means **block the file** from the promote. Only
+     `scope: core` (or absent) is allowed for `main`. The sub-agent frontmatter
+     shape differs from skills (`name`/`description`/`tools`/`model`) but the
+     `scope:` field is the shared convention.
    - If the diff touches `rules/`, the **folder is the tier** (no per-file
      frontmatter needed): top-level `rules/*.md` is core and **may land**;
-     `rules/org/**` and `rules/user/**` are non-core — **block them** from
-     open-bridge / `main` (`rules/org/` routes to your org overlay
-     only, `rules/user/` never promotes). Structure is the primary guard
+     `rules/org/**`, `rules/personal/**`, and `rules/user/**` are non-core —
+     **block them** from open-bridge / `main` (`rules/org/` → your org overlay
+     only, `rules/personal/` → your personal overlay only, `rules/user/` never
+     promotes). Structure is the primary guard
      here; this content scan is the **backstop** that catches a real name
      accidentally left in a core-tier file.
 1. **Files in the diff** — every added / modified file, full new content
@@ -111,7 +113,7 @@ These catch classes of leakage that are never CORE-appropriate:
 |---|---|
 | Absolute user paths | `/Users/[a-z0-9._-]+/`, `/home/[a-z0-9._-]+/`, `C:\\Users\\` |
 | Private SSH / keys | `BEGIN [A-Z ]+PRIVATE KEY`, `ssh-rsa AAAA`, `ssh-ed25519 AAAA` |
-| Common API-token prefixes | `sk-[-A-Za-z0-9_]{20,}`, `ghp_[A-Za-z0-9]{20,}`, `xox[bp]-[-A-Za-z0-9]{10,}`, `AKIA[0-9A-Z]{16}`, `Bearer [-A-Za-z0-9._~+/=]{20,}` |
+| Common API-token prefixes | `\bsk-[-A-Za-z0-9_]{20,}`, `ghp_[A-Za-z0-9]{20,}`, `xox[bp]-[-A-Za-z0-9]{10,}`, `AKIA[0-9A-Z]{16}`, `Bearer [-A-Za-z0-9._~+/=]{20,}` |
 | OneDrive / Dropbox personal | `OneDrive-[A-Za-z]+`, `Dropbox/.*/Apps/` |
 | Phone numbers (E.164) | `\+?[1-9][0-9]{7,14}` — flag for review, false positives possible |
 | Email addresses | `[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}` — flag unless it is the git author |
@@ -244,7 +246,45 @@ STRINGS=$(yq -r ".promote.content_blocklist.\"${REPO}\".strings[]?" bridge-confi
 PATTERNS=$(yq -r ".promote.content_blocklist.\"${REPO}\".patterns[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 [ -z "$STRINGS" ] && STRINGS=$(yq -r '.promote.fallback_blocklist[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 
-UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|sk-[-A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|/Users/[a-z0-9._-]+/'
+UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|\bsk-[-A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AccountKey=[A-Za-z0-9+/]{20,}|/Users/[a-z0-9._-]+/'
+
+# Prefix-less credentials (Elastic Cloud ApiKey and the same shape elsewhere)
+# cannot be matched by a format regex — they are just base64. They ARE
+# recognisable by decoding: the blob yields `<id>:<secret>`. Grep cannot decode,
+# so this check is a one-liner rather than part of $UNIVERSAL.
+#
+# It scans for BOTH forms, and the second one is not theoretical. On 2026-08-01
+# an adversarial pre-publication review found the live key sitting in PLAINTEXT
+# in a code comment — put there by the same commit that removed its base64 form,
+# in a file marked publishable to the PUBLIC repo. A detector that only decodes
+# base64 is blind to its own quarry once someone pastes the decoded pair.
+# The plaintext half has no prefix to anchor on, so precision comes from ENTROPY
+# (both halves must mix upper/lower/digit) and from requiring the pair to stand
+# free — not inside a URL, a path, or a `host:port`. Measured over all 2896
+# tracked text files: zero false positives.
+# `# pragma: allowlist secret` on the line exempts a deliberate synthetic
+# fixture; a real secret never carries it.
+scan_opaque() {   # usage: scan_opaque <file>   → prints offending blobs, exit 1 on hit
+  python3 -c '
+import base64, re, sys
+BLOB = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+PAIR = re.compile(r"\A[A-Za-z0-9_-]{12,}:[A-Za-z0-9_-]{12,}\Z")
+PLAIN = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_-]{16,}):([A-Za-z0-9_-]{16,})(?![A-Za-z0-9_./:-])")
+ent = lambda t: any(c.isupper() for c in t) and any(c.islower() for c in t) and any(c.isdigit() for c in t)
+bad = False
+for n, line in enumerate(open(sys.argv[1], errors="ignore"), 1):
+    for b in BLOB.findall(line):
+        if len(b) % 4: continue
+        try: d = base64.b64decode(b, validate=True).decode("ascii")
+        except Exception: continue
+        if PAIR.match(d):
+            print(f"  → opaque credential (base64 id:secret) at line {n}: {b[:20]}…"); bad = True
+    if "pragma: allowlist secret" in line: continue
+    for m in PLAIN.finditer(line):
+        if ent(m.group(1)) and ent(m.group(2)):
+            print(f"  → opaque credential (plaintext id:secret) at line {n}: {m.group(0)[:8]}… (redacted)"); bad = True
+sys.exit(1 if bad else 0)' "$1"
+}
 
 DRAFT_MSG_FILE=$(mktemp) && : > "$DRAFT_MSG_FILE"
 # ... write the drafted commit message into $DRAFT_MSG_FILE ...
@@ -253,6 +293,11 @@ DRAFT_MSG_FILE=$(mktemp) && : > "$DRAFT_MSG_FILE"
 [ -n "$STRINGS" ]  && git diff --cached | grep -niEw "^\+.*($STRINGS)"  && echo "  → blocklist hit in staged diff (repo=$REPO)"
 [ -n "$PATTERNS" ] && git diff --cached | grep -niE  "^\+.*($PATTERNS)" && echo "  → pattern hit in staged diff (repo=$REPO)"
 git diff --cached | grep -niE "^\+.*($UNIVERSAL)" && echo "  → universal pattern in staged diff"
+
+# Prefix-less credentials — grep cannot see these, they need the decode
+git diff --cached --name-only --diff-filter=d | while read -r f; do
+  [ -f "$f" ] && scan_opaque "$f"
+done
 
 # Drafted commit message body — the one that will end up in git log
 [ -n "$STRINGS" ]  && grep -niEw "$STRINGS"  "$DRAFT_MSG_FILE" && echo "  → in commit message"
@@ -286,12 +331,51 @@ STRINGS=$(yq -r ".promote.content_blocklist.\"${REPO}\".strings[]?" bridge-confi
 PATTERNS=$(yq -r ".promote.content_blocklist.\"${REPO}\".patterns[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 [ -z "$STRINGS" ] && STRINGS=$(yq -r '.promote.fallback_blocklist[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 
-UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|sk-[-A-Za-z0-9_]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|/Users/[a-z0-9._-]+/'
+UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|\bsk-[-A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AccountKey=[A-Za-z0-9+/]{20,}|/Users/[a-z0-9._-]+/'
+
+# Prefix-less credentials (Elastic Cloud ApiKey and the same shape elsewhere)
+# cannot be matched by a format regex — they are just base64. They ARE
+# recognisable by decoding: the blob yields `<id>:<secret>`. Grep cannot decode,
+# so this check is a one-liner rather than part of $UNIVERSAL.
+#
+# It scans for BOTH forms, and the second one is not theoretical. On 2026-08-01
+# an adversarial pre-publication review found the live key sitting in PLAINTEXT
+# in a code comment — put there by the same commit that removed its base64 form,
+# in a file marked publishable to the PUBLIC repo. A detector that only decodes
+# base64 is blind to its own quarry once someone pastes the decoded pair.
+# The plaintext half has no prefix to anchor on, so precision comes from ENTROPY
+# (both halves must mix upper/lower/digit) and from requiring the pair to stand
+# free — not inside a URL, a path, or a `host:port`. Measured over all 2896
+# tracked text files: zero false positives.
+# `# pragma: allowlist secret` on the line exempts a deliberate synthetic
+# fixture; a real secret never carries it.
+scan_opaque() {   # usage: scan_opaque <file>   → prints offending blobs, exit 1 on hit
+  python3 -c '
+import base64, re, sys
+BLOB = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+PAIR = re.compile(r"\A[A-Za-z0-9_-]{12,}:[A-Za-z0-9_-]{12,}\Z")
+PLAIN = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_-]{16,}):([A-Za-z0-9_-]{16,})(?![A-Za-z0-9_./:-])")
+ent = lambda t: any(c.isupper() for c in t) and any(c.islower() for c in t) and any(c.isdigit() for c in t)
+bad = False
+for n, line in enumerate(open(sys.argv[1], errors="ignore"), 1):
+    for b in BLOB.findall(line):
+        if len(b) % 4: continue
+        try: d = base64.b64decode(b, validate=True).decode("ascii")
+        except Exception: continue
+        if PAIR.match(d):
+            print(f"  → opaque credential (base64 id:secret) at line {n}: {b[:20]}…"); bad = True
+    if "pragma: allowlist secret" in line: continue
+    for m in PLAIN.finditer(line):
+        if ent(m.group(1)) and ent(m.group(2)):
+            print(f"  → opaque credential (plaintext id:secret) at line {n}: {m.group(0)[:8]}… (redacted)"); bad = True
+sys.exit(1 if bad else 0)' "$1"
+}
 
 for f in $FILES; do
     [ -n "$STRINGS" ]  && git show <commit>:"$f" 2>/dev/null | grep -niEw "$STRINGS"  && echo "  → blocklist hit in $f (repo=$REPO)"
     [ -n "$PATTERNS" ] && git show <commit>:"$f" 2>/dev/null | grep -niE  "$PATTERNS" && echo "  → pattern hit in $f (repo=$REPO)"
     git show <commit>:"$f" 2>/dev/null | grep -niE "$UNIVERSAL" && echo "  → universal hit in $f"
+    tmp=$(mktemp); git show <commit>:"$f" >"$tmp" 2>/dev/null && scan_opaque "$tmp"; rm -f "$tmp"
 done
 
 [ -n "$STRINGS" ] && printf '%s\n' "$MSG" | grep -niEw "$STRINGS" && echo "  → in commit message"

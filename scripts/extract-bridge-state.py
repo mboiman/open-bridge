@@ -30,14 +30,84 @@ def run(cmd: list[str], cwd: Path = REPO) -> str:
         return ""
 
 
-def branch_state() -> dict:
+def ref_exists(ref: str) -> bool:
+    return bool(run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]).strip())
+
+
+def symref(ref: str) -> str:
+    return run(["git", "symbolic-ref", "--short", "--quiet", ref]).strip()
+
+
+def resolve_refs() -> tuple[str, str]:
+    """Resolve the CORE and USER refs LIVE, never by name.
+
+    Branch names differ per instance (open-bridge: `main` · org overlay:
+    `development` · a personal instance: `user/{name}`), so a hardcoded name
+    resolves to nothing and `git ls-tree` returns an EMPTY tree — which the
+    views cannot tell apart from "no files". Detect instead:
+
+    - USER = this repo's own default branch (`origin/HEAD`), else the current
+      branch's upstream, else `HEAD`.
+    - CORE = the default branch of the framework upstream, i.e. the first
+      non-`origin` remote's HEAD (`open-bridge/main`), with `main`/`development`
+      per remote and finally `origin/{development,main}` as fallbacks — which is
+      what an org-overlay clone (single remote, CORE on `development`) needs.
+    """
+    user_cands = [
+        symref("refs/remotes/origin/HEAD"),
+        run(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).strip(),
+        "HEAD",
+    ]
+    core_cands: list[str] = []
+    for remote in run(["git", "remote"]).split():
+        if remote == "origin":
+            continue
+        core_cands += [symref(f"refs/remotes/{remote}/HEAD"), f"{remote}/main",
+                       f"{remote}/development"]
+    core_cands += ["origin/development", "origin/main"]
+
+    user = next((r for r in user_cands if r and ref_exists(r)), "HEAD")
+    core = next((r for r in core_cands if r and ref_exists(r)), "")
+    return core, user
+
+
+def github_slug(remote: str) -> str:
+    """`owner/name` for a remote, from its URL (SSH or HTTPS). Empty if unknown."""
+    url = run(["git", "remote", "get-url", remote]).strip()
+    if not url:
+        return ""
+    url = url.removesuffix(".git")
+    if url.startswith("git@") or url.startswith("ssh://"):
+        url = url.split(":")[-1]
+    parts = [p for p in url.split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else ""
+
+
+def ref_identity(ref: str) -> dict:
+    """Split a remote-tracking ref into the GitHub repo + branch it points at, so a
+    view can build a WORKING link instead of hardcoding owner/branch (a
+    dashboard once linked a hardcoded owner/branch pair — neither of which existed)."""
+    if not ref or "/" not in ref:
+        return {"repo": "", "branch": ref}
+    remote, branch = ref.split("/", 1)
+    return {"repo": github_slug(remote), "branch": branch}
+
+
+def branch_state(core_ref: str, user_ref: str) -> dict:
     branch = run(["git", "branch", "--show-current"]).strip()
-    counts = run(
-        ["git", "rev-list", "--left-right", "--count", "HEAD...development"]
-    ).strip().split()
-    ahead, behind = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
-    last_dev = run(["git", "log", "-1", "--format=%cI", "development"]).strip()
-    return {"branch": branch, "ahead": ahead, "behind": behind, "last_sync": last_dev}
+    ahead, behind, last_core = 0, 0, ""
+    if core_ref:
+        counts = run(
+            ["git", "rev-list", "--left-right", "--count", f"HEAD...{core_ref}"]
+        ).strip().split()
+        ahead, behind = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
+        last_core = run(["git", "log", "-1", "--format=%cI", core_ref]).strip()
+    # core_ref/user_ref travel with the payload so a view can show WHICH refs the
+    # tree came from instead of silently rendering an empty one; core/user carry the
+    # resolved GitHub repo + branch so links are built from git, never hardcoded.
+    return {"branch": branch, "ahead": ahead, "behind": behind, "last_sync": last_core,
+            "core_ref": core_ref, "user_ref": user_ref,
+            "core": ref_identity(core_ref), "user": ref_identity(user_ref)}
 
 
 def parse_log_md() -> list[dict]:
@@ -256,21 +326,25 @@ def counts(inv: dict) -> dict:
     return {k: len(v) for k, v in inv.items()}
 
 
-def branch_files() -> dict:
-    """Tracked files per branch, restricted to interesting prefixes the
+def branch_files(core_ref: str, user_ref: str) -> dict:
+    """Tracked files per tier, restricted to interesting prefixes the
     constellation might link to. Used by network.html to determine the
-    authoritative branch for any visualized path (eliminates static overrides)."""
+    authoritative branch for any visualized path (eliminates static overrides)
+    and by structure.html as the containment tree it renders."""
     PREFIXES = (
         "CLAUDE.md", "README.md", "AGENTS.md", "DESIGN.md",
         "ecosystem.yaml",
         "docs/", "rules/", "themes/", "trackers/", "skills/",
         ".claude/", "examples/", "protocols/",
         "identity/", "infra/", "workflow/",
+        "agents/", "scripts/", "bin/",
         "work/",
     )
     out = {"core": [], "user": []}
-    for branch, key in [("development", "core"), ("user/user", "user")]:
-        raw = run(["git", "ls-tree", "-r", "--name-only", f"origin/{branch}"])
+    for ref, key in [(core_ref, "core"), (user_ref, "user")]:
+        if not ref:
+            continue
+        raw = run(["git", "ls-tree", "-r", "--name-only", ref])
         if not raw:
             continue
         files = [f for f in raw.splitlines() if any(f.startswith(p) for p in PREFIXES)]
@@ -280,17 +354,18 @@ def branch_files() -> dict:
 
 def main() -> int:
     inv = inventory()
+    core_ref, user_ref = resolve_refs()
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "schema_version": 3,
-        "branch_state": branch_state(),
+        "branch_state": branch_state(core_ref, user_ref),
         "log": parse_log_md(),
         "active_tasks": active_tasks(),
         "standing_orders": standing_orders(),
         "commits": recent_commits(20),
         "counts": counts(inv),
         "inventory": inv,
-        "branch_files": branch_files(),
+        "branch_files": branch_files(core_ref, user_ref),
     }
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=None)
     sys.stdout.write("\n")

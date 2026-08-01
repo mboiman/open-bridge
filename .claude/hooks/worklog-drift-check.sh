@@ -69,6 +69,12 @@ for sf in $status_files; do
   [ -z "$fm_status" ] && continue       # no status field → not in scope
   [ "$fm_status" = "done" ] && continue # already done → no mismatch
 
+  # Blocked task (non-empty blocked_by:) → legitimately carries close/done language
+  # in its body while status stays doing/review; the flag IS the "not yet done"
+  # signal. This matches the reminder's own "Blocked? keep doing/review + add
+  # blocked_by:" guidance, so skip it rather than fire a guaranteed false positive.
+  grep -qE '^blocked_by:[[:space:]]*"?[^"[:space:]]' "$sf" 2>/dev/null && continue
+
   # Body (drop the leading YAML frontmatter block) asserts completion?
   body=$(awk 'BEGIN{fm=0} /^---[[:space:]]*$/{fm++; next} fm>=2' "$sf" 2>/dev/null)
   if echo "$body" | grep -qiE 'done|✅|erledigt|abgeschlossen|fertig'; then
