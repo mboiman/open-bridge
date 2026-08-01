@@ -470,12 +470,12 @@ def test_secrets_in_a_free_text_cell_are_redacted_per_span():
     rec.emit(
         "park", item, stage=_stage("pr", on_success="pr-open"),
         result=StageResult(ok=False, duration_s=1.0),
-        reason="push rejected for ghp_AAAAAAAAAAAAAAAAAAAAAAAA at /Users/someone/Developer/x",  # pragma: allowlist secret
+        reason="push rejected for ghp_AAAAAAAAAAAAAAAAAAAAAAAA at /Users/alice/Developer/x",  # pragma: allowlist secret
     )
 
     row = _rows(sink.sticky())[-1]
     assert "ghp_AAAA" not in row
-    assert "/Users/someone" not in row
+    assert "/Users/alice" not in row
     assert "[redacted:secret]" in row
     assert "push rejected for" in row, "span redaction, never a stubbed cell"
 
@@ -567,9 +567,9 @@ def test_scan_off_posts_the_text_unredacted():
     rec.emit("armed", item, to="queued", status_to="In Progress")
     rec.emit(
         "park", item, stage=_stage(), result=StageResult(ok=False),
-        reason="failed at /Users/someone/Developer/x",
+        reason="failed at /Users/alice/Developer/x",
     )
-    assert "/Users/someone/Developer/x" in sink.sticky()
+    assert "/Users/alice/Developer/x" in sink.sticky()
 
 
 def test_a_mangled_sticky_is_never_silently_truncated():

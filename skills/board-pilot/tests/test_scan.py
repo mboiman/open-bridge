@@ -68,10 +68,10 @@ def test_benign_body_passes_through_unchanged():
 def test_repo_root_path_is_redacted_but_context_survives():
     """Stubbing the whole body on one hit blanks the note while Bounces still climbs:
     the producer reworks against nothing and the ledger reports a healthy loop."""
-    text = "See /Users/dev/work/repo/engine/scan.py:41 for the signature."
+    text = "See /Users/alice/work/repo/engine/scan.py:41 for the signature."
     clean, hits = scrub(text)
     assert [h.rule for h in hits] == ["repo-root"]
-    assert "alice" not in clean
+    assert "michaelboiman" not in clean
     assert clean == "See [redacted:repo-root] for the signature."
 
 
@@ -94,7 +94,7 @@ def test_repo_root_inside_code_fence_is_still_redacted():
     text = (
         "```console\n"
         "$ python3 -m pytest -q\n"
-        "E   FileNotFoundError: /Users/dev/work/repo/x.py\n"
+        "E   FileNotFoundError: /Users/alice/work/repo/x.py\n"
         "```\n"
     )
     clean, hits = scrub(text)

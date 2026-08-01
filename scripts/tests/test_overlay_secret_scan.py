@@ -148,10 +148,10 @@ def test_plaintext_detector_runs_inside_comments():
 
 @pytest.mark.parametrize("line", [
     "https://user:supersecretpassword@example.test/path",   # inside a URL
-    "host: homeserver.local:8080",                            # host:port
+    "host: macminim4.local:8080",                            # host:port
     "see docs/architecture:overview for the rationale",      # prose with a colon
     "timestamp: 2026-08-01T09:53:12",                        # timestamp
-    "path: /Users/dev/work/repo:/opt/homebrew/bin",    # PATH-like
+    "path: /Users/alice/work/repo:/opt/homebrew/bin",    # PATH-like
     "key: allLowercaseNoDigitsHere:alsoAllLowercaseHere",    # no entropy mix
     "ID_ONLY: aB3xK9mQ2pLr7TvW1zYc",                         # single token
 ])
