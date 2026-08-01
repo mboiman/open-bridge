@@ -24,7 +24,67 @@ cart-a11y waits on PR #214.
 
 **▶ [See the full live session](https://bks-lab.github.io/open-bridge/demo.html)** — the clip above is the `/briefing` dashboard; the browser walkthrough adds three more real flows: the morning session-start, an incident taken from log triage to a TDD fix shipped to UAT, and first-run onboarding.
 
-**▶ Try it yourself in 2 minutes — nothing to configure:**
+---
+
+<a id="start-here"></a>
+
+## Start here — hand this prompt to your agent
+
+You already run an AI coding agent. Paste this into **Claude Code, Codex, or Copilot CLI** and it does the setup with you: it plans first and waits for your go, gives your data a **private** home before writing any of it, arms the push guard, shows you the proof, and hands you to onboarding.
+
+```text
+Set up BKS open-bridge for me — https://github.com/bks-lab/open-bridge
+It is a plain-text memory layer (markdown + YAML in a git repo) that an AI coding
+agent reads at the start of every session.
+
+First, before you touch anything: check that git is installed, check whether the
+GitHub CLI (gh) is authenticated, ask me what to call my private copy
+(default: my-bridge), then show me your plan and wait for my go.
+
+Then, in this order:
+
+1. Clone it and give it a PRIVATE home. The public repo ends up as a read-only
+   "upstream", my own private repo as "origin":
+       git clone https://github.com/bks-lab/open-bridge.git <name>
+       cd <name>
+       git remote rename origin upstream
+       gh repo create <me>/<name> --private --source=. --remote=origin --push
+   Use this order rather than GitHub's "Use this template" button: a template copy
+   starts a fresh history, and the documented update path (git merge upstream/main)
+   then refuses to run.
+   No gh? Stop and ask me to create an empty PRIVATE repo on github.com, then
+   continue with: git remote add origin <url> && git push -u origin main
+
+2. Everything below runs inside <name>. Arm the safety hooks:
+       ./bin/setup                      # native Windows: bin/setup.ps1
+
+3. Record that my new origin is private. Without this the push guard cannot
+   classify the target offline, and it refuses my first legitimate push:
+       printf 'repo: <me>/<name>\nis_public: false\n' > .bridge-origin
+   Do this only because the repo you created in step 1 is private.
+
+4. Show me all three proofs:
+       git remote -v                    # origin must be MY private repo
+       git config core.hooksPath        # must be scripts/hooks
+       cat .bridge-origin
+
+5. Stop here and tell me to restart you inside <name>. A session loads this repo's
+   skills and instructions from the folder it starts in, so /bridge-onboard cannot
+   exist in your current session — that folder did not exist when it began.
+
+6. In the new session it should greet me and offer the setup lanes by itself. If it
+   does not, run /bridge-onboard. No slash commands? Read
+   skills/bridge-onboard/SKILL.md, then skills/bridge-onboard/references/workflow.md,
+   and run the phases with me inline.
+
+Hard rules: never push anything to bks-lab/open-bridge; my user/* branch goes only
+to my private origin; never write a secret into a file; ask me before anything
+destructive.
+```
+
+Nothing there is hidden — every line is a command you can read before you approve it. Prefer to run it yourself? [The same steps by hand](#adopt-it--private-origin-first).
+
+**Just looking?** The demo workspace runs in 2 minutes and touches nothing:
 
 ```bash
 git clone https://github.com/bks-lab/open-bridge.git
@@ -157,7 +217,7 @@ That row is in the repo six months from now, in a diff, readable by any agent.
 
 BKS open-bridge uses two branches that split your data from shared templates. Your accumulated context — tasks, config, agent definitions, credential references — lives on `user/{name}`. Shipped templates, skills, and docs live on CORE (`main`). The two touch different paths, so:
 
-- **Merges never conflict** — pull CORE updates anytime with `git fetch upstream && git merge upstream/main`.
+- **Merges never conflict** — pull CORE updates anytime with `git fetch upstream && git merge upstream/main`. (Copies made with GitHub's *Use this template* button need `--allow-unrelated-histories` on the first merge only — see [Adopt it](#adopt-it--private-origin-first).)
 - **Your data stays private** — your `user/{name}` branch lives on **your own private repo**, never a public upstream; a `pre-push` guard ([`rules/push-guard.md`](rules/push-guard.md)) blocks publishing it by accident. Privacy is about which *remote* you push to, not just which *branch*.
 - **Improvements flow back** — `/promote` reads each file's `scope:` and routes `scope: core` changes upstream as fork-based PRs.
 
@@ -292,52 +352,38 @@ If this resonates: star the repo and 👍 the [ROADMAP](ROADMAP.md) issues you w
 > to the world. The steps below make your **own private repo** your `origin` and
 > keep BKS open-bridge as a read-only `upstream`.
 
+**Don't want to type this?** [The prompt at the top](#start-here) does exactly these steps, with your agent driving.
+
 ```bash
-# 1. Make your own PRIVATE copy. Primary path: GitHub "Use this template" → Private,
-#    then clone THAT and add this repo as read-only upstream:
-#      git remote add upstream https://github.com/bks-lab/open-bridge.git
+# 1. Clone, then immediately re-home the remotes: BKS open-bridge becomes a
+#    READ-ONLY upstream, your own private repo becomes origin.
 #    (A fork of a public repo is itself public, so a fork won't do.)
-#    Fallback without the template: clone here and re-home the remotes in step 2:
 git clone https://github.com/bks-lab/open-bridge.git my-bridge
 cd my-bridge
-
-# 2. (fallback path) BKS open-bridge becomes a READ-ONLY upstream; your private repo
-#    becomes origin:
 git remote rename origin upstream
 gh repo create <you>/my-bridge --private --source=. --remote=origin --push
 
-# 3. Onboard inside Claude Code — it writes your data to a user/{name} branch
+# 2. Tell the push guard your new origin is private, so it can classify the
+#    target without asking GitHub (offline, or with no gh on PATH):
+printf 'repo: <you>/my-bridge\nis_public: false\n' > .bridge-origin
+
+# 3. Arm the guard and repair the cross-tool discovery symlinks:
+./bin/setup                 # native Windows: bin/setup.ps1
+
+# 4. Onboard inside Claude Code — it writes your data to a user/{name} branch
 #    on your PRIVATE origin, never the public upstream:
 /bridge-onboard
 ```
 
-On first run the Bridge reflects what it detects — a fresh public clone, your git name, your tool — arms the safety guard, and offers four ways in: see it run first, describe what you'll use it for (and it tailors the setup), make it private first, or bind a workspace across repos. `/bridge-onboard` walks the guided setup (optional ecosystem detection, work-system config, your own `user/{name}` branch) and **arms the `pre-push` guard** ([`rules/push-guard.md`](rules/push-guard.md)) *before* creating that branch — the git-layer backstop that blocks publishing it by accident. If you skip the wizard, run `./bin/setup` once on any OS (`bin/setup.ps1` on native Windows) — it arms the same guard and repairs the cross-tool discovery symlinks. Onboarding also asks one privacy choice — `discovery.mode`, default **confined**: your bridge stays inside this folder and never scans your other repos, apps, devices, or mail unless you opt in per item. Reverse it anytime in `bridge-config.yaml`. Pull CORE updates anytime, conflict-free, with `git fetch upstream && git merge upstream/main`.
+> **The "Use this template" button works too — with one caveat.** A template copy is
+> private from the first second, which is why the button exists. But GitHub gives it a
+> fresh, single-commit history that shares no ancestor with this repo, so the update
+> path below aborts with `fatal: refusing to merge unrelated histories`. Your **first**
+> CORE update then needs `git merge --allow-unrelated-histories upstream/main` once;
+> every merge after that is ordinary. The clone-and-re-home path above keeps the full
+> history and needs no such exception.
 
-**Or: hand the whole setup to your agent.** You already run an AI coding agent — paste this prompt into Claude Code, Codex, or Copilot CLI, and it plans first, creates your private copy, arms the push guard, verifies both, and starts onboarding:
-
-```text
-Set up BKS open-bridge for me (https://github.com/bks-lab/open-bridge — a
-plain-text memory layer your agent reads at session start). Plan first:
-check that git and the GitHub CLI (gh) are installed and authenticated,
-ask me what to name my private copy (default: my-bridge), then show me
-your plan before you act. Then:
-
-1. Create my PRIVATE copy from the template and clone it:
-   gh repo create <name> --template bks-lab/open-bridge --private --clone
-   (If templating fails: clone bks-lab/open-bridge, rename origin to
-   upstream, create a private repo, add it as origin, push main there.)
-2. Add the public repo as read-only upstream if it is missing:
-   git remote add upstream https://github.com/bks-lab/open-bridge.git
-3. Arm the safety hooks: run ./bin/setup (native Windows: bin/setup.ps1).
-4. Verify and show me: git remote -v (origin = MY private repo), and
-   git config core.hooksPath (= scripts/hooks).
-5. Start onboarding: run /bridge-onboard if you support slash commands;
-   otherwise read skills/bridge-onboard/SKILL.md and walk me through it.
-
-Hard rules: never push anything to bks-lab/open-bridge; my user/* branch
-goes only to my private origin; no secrets in files; ask before anything
-destructive.
-```
+On first run the Bridge reflects what it detects — a fresh public clone, your git name, your tool — arms the safety guard, and offers four ways in: see it run first, describe what you'll use it for (and it tailors the setup), make it private first, or bind a workspace across repos. `/bridge-onboard` walks the guided setup (optional ecosystem detection, work-system config, your own `user/{name}` branch) and **arms the `pre-push` guard** ([`rules/push-guard.md`](rules/push-guard.md)) *before* creating that branch — the git-layer backstop that blocks publishing it by accident. If you skip the wizard, run `./bin/setup` once on any OS (`bin/setup.ps1` on native Windows) — it arms the same guard and repairs the cross-tool discovery symlinks. Onboarding also asks one privacy choice — `discovery.mode`, default **confined**: your bridge stays inside this folder and never scans your other repos, apps, devices, or mail unless you opt in per item. Reverse it anytime in `bridge-config.yaml`. Pull CORE updates anytime with `git fetch upstream && git merge upstream/main` — CORE and USER touch disjoint paths, so it stays conflict-free.
 
 **Just kicking the tires?** Skip all of this — [the shipped demo workspace runs in 2 minutes](#try-it-in-2-minutes--nothing-to-configure), nothing to configure.
 

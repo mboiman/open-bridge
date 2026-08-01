@@ -593,9 +593,12 @@ auf PR #214.</div>
       </p>
 
       <div class="cta-row">
-        <a class="btn btn-primary" href="#get-started">
-          <span data-lang="en">Try it in 2 minutes</span><span data-lang="de">In 2 Minuten ausprobieren</span>
+        <button class="btn btn-primary" id="hero-setup" type="button">
+          <span data-lang="en">Set it up — copy the prompt</span><span data-lang="de">Einrichten — Prompt kopieren</span>
           <span class="arrow">→</span>
+        </button>
+        <a class="btn btn-secondary" href="#get-started">
+          <span data-lang="en">Try it in 2 minutes</span><span data-lang="de">In 2 Minuten ausprobieren</span>
         </a>
         <a class="btn btn-secondary" href="demo.html">
           <span data-lang="en">▶ See it work — 90 sec</span><span data-lang="de">▶ Sieh es arbeiten — 90 Sek.</span>
@@ -1209,70 +1212,125 @@ claude        <span class="cmt"># or: codex, copilot</span></div>
       <!-- Path 2 — Adopt: private origin first -->
       <div class="card path">
         <h3 class="h4"><span data-lang="en">Adopt — private origin first</span><span data-lang="de">Übernehmen — erst ein privates Origin</span></h3>
-        <p class="path-note"><span data-lang="en">This is a public repo, so step 1 gives your data a private home: GitHub's "Use this template" button makes a private copy in one click (clone-and-re-home is the fallback). Your repo becomes <code>origin</code>; BKS open-bridge stays a read-only <code>upstream</code>, so a stray push can't publish your branch.</span><span data-lang="de">Das ist ein öffentliches Repo, darum gibt Schritt 1 deinen Daten ein privates Zuhause: der GitHub-Button „Use this template" erstellt eine private Kopie mit einem Klick (Fallback: klonen und umziehen). Dein Repo wird <code>origin</code>; BKS open-bridge bleibt ein read-only <code>upstream</code> — ein versehentlicher Push kann deinen Branch nicht veröffentlichen.</span></p>
-        <div class="code" id="start-code"><button class="copy-btn" id="copy-start" type="button">copy</button><span class="cmt"># 1. Make your own PRIVATE copy — GitHub "Use this template" → Private, then clone THAT.</span>
-<span class="cmt">#    Prefer plain git? Clone here and re-home the remotes in step 2:</span>
+        <p class="path-note"><span data-lang="en">This is a public repo, so step 1 gives your data a private home: clone it, then re-home the remotes at once. Your repo becomes <code>origin</code>; BKS open-bridge stays a read-only <code>upstream</code>, so a stray push can't publish your branch.</span><span data-lang="de">Das ist ein öffentliches Repo, darum gibt Schritt 1 deinen Daten ein privates Zuhause: klonen, dann sofort die Remotes umziehen. Dein Repo wird <code>origin</code>; BKS open-bridge bleibt ein read-only <code>upstream</code> — ein versehentlicher Push kann deinen Branch nicht veröffentlichen.</span></p>
+        <div class="code" id="start-code"><button class="copy-btn" id="copy-start" type="button">copy</button><span class="cmt"># 1. Clone, then re-home the remotes at once: open-bridge becomes a read-only</span>
+<span class="cmt">#    upstream, your own private repo becomes origin.</span>
 git clone https://github.com/bks-lab/open-bridge.git my-bridge
 cd my-bridge
-
-<span class="cmt"># 2. BKS open-bridge becomes a read-only upstream; your private repo becomes origin:</span>
 git remote rename origin upstream
 gh repo create &lt;you&gt;/my-bridge --private --source=. --remote=origin --push
 
-<span class="cmt"># 3. Onboard in Claude Code — writes to a user/{name} branch on YOUR private origin:</span>
+<span class="cmt"># 2. Let the push guard classify your new origin offline:</span>
+printf 'repo: &lt;you&gt;/my-bridge\nis_public: false\n' &gt; .bridge-origin
+
+<span class="cmt"># 3. Arm the guard and repair the cross-tool discovery symlinks:</span>
+./bin/setup
+
+<span class="cmt"># 4. Onboard in Claude Code — writes to a user/{name} branch on YOUR private origin:</span>
 /bridge-onboard</div>
-        <p class="path-note"><span data-lang="en"><code>/bridge-onboard</code> then sets everything up and arms the <code>pre-push</code> guard before your <code>user/{name}</code> branch exists. On native Windows, run <code>bin/setup.ps1</code> once.</span><span data-lang="de"><code>/bridge-onboard</code> richtet dann alles ein und schaltet den <code>pre-push</code>-Guard scharf, bevor dein <code>user/{name}</code>-Branch existiert. Unter nativem Windows einmal <code>bin/setup.ps1</code> ausführen.</span></p>
+        <p class="path-note"><span data-lang="en"><code>/bridge-onboard</code> then sets everything up and arms the <code>pre-push</code> guard before your <code>user/{name}</code> branch exists. On native Windows, run <code>bin/setup.ps1</code> instead of <code>./bin/setup</code>.</span><span data-lang="de"><code>/bridge-onboard</code> richtet dann alles ein und schaltet den <code>pre-push</code>-Guard scharf, bevor dein <code>user/{name}</code>-Branch existiert. Unter nativem Windows <code>bin/setup.ps1</code> statt <code>./bin/setup</code> ausführen.</span></p>
+        <p class="path-note"><span data-lang="en"><b>The "Use this template" button works too</b> — private from the first second. But GitHub gives that copy a fresh history, so your <i>first</i> CORE update needs <code>git merge --allow-unrelated-histories upstream/main</code> once; every merge after that is ordinary.</span><span data-lang="de"><b>Der Knopf „Use this template" geht auch</b> — privat ab der ersten Sekunde. GitHub gibt dieser Kopie aber eine frische History, deshalb braucht dein <i>erstes</i> CORE-Update einmalig <code>git merge --allow-unrelated-histories upstream/main</code>; jeder weitere Merge ist gewöhnlich.</span></p>
 
         <!-- Agent-setup prompt: the native install path for people who already run an agent.
              One .code block per language (the page shows only the active data-lang variant),
              each with its own copy button so "copy" always grabs the visible prompt. -->
         <p class="eyebrow"><span data-lang="en">Or hand it to your agent</span><span data-lang="de">Oder gib es deinem Agenten</span></p>
         <p class="path-note"><span data-lang="en">One prompt — it plans, builds your private copy, verifies the guard, and onboards you.</span><span data-lang="de">Ein Prompt — er plant, baut deine private Kopie, verifiziert den Guard und onboardet dich.</span></p>
-        <div class="code" data-lang="en" id="agent-prompt-en"><button class="copy-btn" id="copy-agent-en" type="button">copy</button>Set up BKS open-bridge for me (https://github.com/bks-lab/open-bridge — a
-plain-text memory layer your agent reads at session start). Plan first:
-check that git and the GitHub CLI (gh) are installed and authenticated,
-ask me what to name my private copy (default: my-bridge), then show me
-your plan before you act. Then:
+        <div class="code" data-lang="en" id="agent-prompt-en"><button class="copy-btn" id="copy-agent-en" type="button">copy</button>Set up BKS open-bridge for me — https://github.com/bks-lab/open-bridge
+It is a plain-text memory layer (markdown + YAML in a git repo) that an AI coding
+agent reads at the start of every session.
 
-1. Create my PRIVATE copy from the template and clone it:
-   gh repo create &lt;name&gt; --template bks-lab/open-bridge --private --clone
-   (If templating fails: clone bks-lab/open-bridge, rename origin to
-   upstream, create a private repo, add it as origin, push main there.)
-2. Add the public repo as read-only upstream if it is missing:
-   git remote add upstream https://github.com/bks-lab/open-bridge.git
-3. Arm the safety hooks: run ./bin/setup (native Windows: bin/setup.ps1).
-4. Verify and show me: git remote -v (origin = MY private repo), and
-   git config core.hooksPath (= scripts/hooks).
-5. Start onboarding: run /bridge-onboard if you support slash commands;
-   otherwise read skills/bridge-onboard/SKILL.md and walk me through it.
+First, before you touch anything: check that git is installed, check whether the
+GitHub CLI (gh) is authenticated, ask me what to call my private copy
+(default: my-bridge), then show me your plan and wait for my go.
 
-Hard rules: never push anything to bks-lab/open-bridge; my user/* branch
-goes only to my private origin; no secrets in files; ask before anything
+Then, in this order:
+
+1. Clone it and give it a PRIVATE home. The public repo ends up as a read-only
+   "upstream", my own private repo as "origin":
+       git clone https://github.com/bks-lab/open-bridge.git &lt;name&gt;
+       cd &lt;name&gt;
+       git remote rename origin upstream
+       gh repo create &lt;me&gt;/&lt;name&gt; --private --source=. --remote=origin --push
+   Use this order rather than GitHub's "Use this template" button: a template copy
+   starts a fresh history, and the documented update path (git merge upstream/main)
+   then refuses to run.
+   No gh? Stop and ask me to create an empty PRIVATE repo on github.com, then
+   continue with: git remote add origin &lt;url&gt; &amp;&amp; git push -u origin main
+
+2. Everything below runs inside &lt;name&gt;. Arm the safety hooks:
+       ./bin/setup                      # native Windows: bin/setup.ps1
+
+3. Record that my new origin is private. Without this the push guard cannot
+   classify the target offline, and it refuses my first legitimate push:
+       printf 'repo: &lt;me&gt;/&lt;name&gt;\nis_public: false\n' &gt; .bridge-origin
+   Do this only because the repo you created in step 1 is private.
+
+4. Show me all three proofs:
+       git remote -v                    # origin must be MY private repo
+       git config core.hooksPath        # must be scripts/hooks
+       cat .bridge-origin
+
+5. Stop here and tell me to restart you inside &lt;name&gt;. A session loads this repo's
+   skills and instructions from the folder it starts in, so /bridge-onboard cannot
+   exist in your current session — that folder did not exist when it began.
+
+6. In the new session it should greet me and offer the setup lanes by itself. If it
+   does not, run /bridge-onboard. No slash commands? Read
+   skills/bridge-onboard/SKILL.md, then skills/bridge-onboard/references/workflow.md,
+   and run the phases with me inline.
+
+Hard rules: never push anything to bks-lab/open-bridge; my user/* branch goes only
+to my private origin; never write a secret into a file; ask me before anything
 destructive.</div>
-        <div class="code" data-lang="de" id="agent-prompt-de"><button class="copy-btn" id="copy-agent-de" type="button">copy</button>Richte BKS open-bridge für mich ein (https://github.com/bks-lab/open-bridge —
-eine Plain-Text-Gedächtnisschicht, die dein Agent bei Session-Start
-liest). Plane zuerst: prüfe, ob git und die GitHub CLI (gh) installiert
-und eingeloggt sind, frag mich, wie meine private Kopie heißen soll
-(Default: my-bridge), und zeig mir deinen Plan, bevor du handelst. Dann:
+        <div class="code" data-lang="de" id="agent-prompt-de"><button class="copy-btn" id="copy-agent-de" type="button">copy</button>Richte BKS open-bridge für mich ein — https://github.com/bks-lab/open-bridge
+Das ist eine Plain-Text-Gedächtnisschicht (Markdown + YAML in einem Git-Repo), die
+ein KI-Coding-Agent zu Beginn jeder Session liest.
 
-1. Erstelle meine PRIVATE Kopie aus dem Template und klone sie:
-   gh repo create &lt;name&gt; --template bks-lab/open-bridge --private --clone
-   (Falls das Template scheitert: bks-lab/open-bridge klonen, origin zu
-   upstream umbenennen, privates Repo anlegen, als origin hinzufügen,
-   main dorthin pushen.)
-2. Ergänze das öffentliche Repo als read-only upstream, falls es fehlt:
-   git remote add upstream https://github.com/bks-lab/open-bridge.git
-3. Aktiviere die Safety-Hooks: ./bin/setup ausführen (natives Windows:
-   bin/setup.ps1).
-4. Verifiziere und zeig mir: git remote -v (origin = MEIN privates Repo)
-   und git config core.hooksPath (= scripts/hooks).
-5. Starte das Onboarding: /bridge-onboard, wenn du Slash-Commands
-   unterstützt; sonst lies skills/bridge-onboard/SKILL.md und führe mich
-   interaktiv hindurch.
+Zuerst, bevor du irgendetwas anfasst: prüfe, ob git installiert ist, prüfe, ob die
+GitHub CLI (gh) eingeloggt ist, frag mich, wie meine private Kopie heißen soll
+(Default: my-bridge), zeig mir deinen Plan und warte auf mein Go.
+
+Dann, in dieser Reihenfolge:
+
+1. Klone es und gib ihm ein PRIVATES Zuhause. Das öffentliche Repo wird zum
+   read-only "upstream", mein eigenes privates Repo zum "origin":
+       git clone https://github.com/bks-lab/open-bridge.git &lt;name&gt;
+       cd &lt;name&gt;
+       git remote rename origin upstream
+       gh repo create &lt;ich&gt;/&lt;name&gt; --private --source=. --remote=origin --push
+   Nimm diesen Weg statt GitHubs "Use this template"-Knopf: eine Template-Kopie
+   beginnt eine frische History, und der dokumentierte Update-Pfad
+   (git merge upstream/main) verweigert danach den Dienst.
+   Kein gh? Halt an und bitte mich, ein leeres PRIVATES Repo auf github.com
+   anzulegen, dann weiter mit: git remote add origin &lt;url&gt; &amp;&amp; git push -u origin main
+
+2. Alles Weitere läuft in &lt;name&gt;. Aktiviere die Safety-Hooks:
+       ./bin/setup                      # natives Windows: bin/setup.ps1
+
+3. Halte fest, dass mein neues origin privat ist. Ohne das kann der Push-Guard das
+   Ziel offline nicht einordnen und verweigert meinen ersten legitimen Push:
+       printf 'repo: &lt;ich&gt;/&lt;name&gt;\nis_public: false\n' &gt; .bridge-origin
+   Mach das nur, weil das in Schritt 1 angelegte Repo privat ist.
+
+4. Zeig mir alle drei Nachweise:
+       git remote -v                    # origin muss MEIN privates Repo sein
+       git config core.hooksPath        # muss scripts/hooks sein
+       cat .bridge-origin
+
+5. Halt hier an und sag mir, dass ich dich in &lt;name&gt; neu starten soll. Eine Session
+   lädt die Skills und Anweisungen dieses Repos aus dem Ordner, in dem sie startet —
+   /bridge-onboard kann es in deiner jetzigen Session nicht geben, weil dieser Ordner
+   bei ihrem Start noch nicht existierte.
+
+6. In der neuen Session sollte es mich begrüßen und die Setup-Wege von selbst
+   anbieten. Falls nicht, führe /bridge-onboard aus. Keine Slash-Commands? Lies
+   skills/bridge-onboard/SKILL.md, dann skills/bridge-onboard/references/workflow.md,
+   und geh die Phasen interaktiv mit mir durch.
 
 Harte Regeln: niemals irgendetwas nach bks-lab/open-bridge pushen; mein
-user/*-Branch geht nur auf mein privates origin; keine Secrets in
-Dateien; vor allen destruktiven Aktionen nachfragen.</div>
+user/*-Branch geht nur auf mein privates origin; niemals ein Secret in eine Datei
+schreiben; vor allen destruktiven Aktionen nachfragen.</div>
       </div>
     </div>
 
@@ -1541,32 +1599,76 @@ Dateien; vor allen destruktiven Aktionen nachfragen.</div>
   });
 
   // ---- Copy buttons (Adopt + Try code blocks) ----
+  // wireCopy(btnId)        → copies the block the button sits in, read live from the
+  //                          DOM. Preferred: what you copy cannot drift from what you
+  //                          read, because there is only one copy of the text.
+  // wireCopy(btnId, text)  → copies a literal (legacy; keep the literal in sync by hand).
   function wireCopy(btnId, text){
     var copyBtn = document.getElementById(btnId);
     if(!copyBtn){ return; }
+    function payload(){
+      if(typeof text === "string"){ return text; }
+      var block = copyBtn.parentNode.cloneNode(true);
+      var btn = block.querySelector(".copy-btn");
+      if(btn){ btn.parentNode.removeChild(btn); }
+      return block.textContent.replace(/^\n+/, "").replace(/\s+$/, "");
+    }
     copyBtn.addEventListener("click", function(){
+      var out = payload();
       var done = function(){
         var prev = copyBtn.textContent;
         copyBtn.textContent = "copied";
         setTimeout(function(){ copyBtn.textContent = prev; }, 1400);
       };
       if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).then(done, function(){});
+        navigator.clipboard.writeText(out).then(done, function(){});
       } else {
         try {
           var ta = document.createElement("textarea");
-          ta.value = text; document.body.appendChild(ta); ta.select();
+          ta.value = out; document.body.appendChild(ta); ta.select();
           document.execCommand("copy"); document.body.removeChild(ta); done();
         } catch(e){}
       }
     });
   }
-  wireCopy("copy-start", "# 1. Make your own PRIVATE copy — GitHub \"Use this template\" → Private, then clone THAT.\n#    Prefer plain git? Clone here and re-home the remotes in step 2:\ngit clone https://github.com/bks-lab/open-bridge.git my-bridge\ncd my-bridge\n\n# 2. BKS open-bridge becomes a read-only upstream; your private repo becomes origin:\ngit remote rename origin upstream\ngh repo create <you>/my-bridge --private --source=. --remote=origin --push\n\n# 3. Onboard in Claude Code — writes to a user/{name} branch on YOUR private origin:\n/bridge-onboard");
-  wireCopy("copy-try", "git clone https://github.com/bks-lab/open-bridge.git\ncd open-bridge/examples/agency\nclaude        # or: codex, copilot");
+  // Hero CTA — copy the agent setup prompt for the ACTIVE language, then jump to the
+  // block so the reader can see what landed on their clipboard. Reads the same DOM
+  // node the copy button reads, so there is exactly one copy of that text on the page.
+  (function(){
+    var hero = document.getElementById("hero-setup");
+    if(!hero){ return; }
+    hero.addEventListener("click", function(){
+      var lang = root.getAttribute("data-active-lang") === "de" ? "de" : "en";
+      var block = document.getElementById("agent-prompt-" + lang);
+      if(!block){ location.hash = "get-started"; return; }
+      var clone = block.cloneNode(true);
+      var btn = clone.querySelector(".copy-btn");
+      if(btn){ btn.parentNode.removeChild(btn); }
+      var out = clone.textContent.replace(/^\n+/, "").replace(/\s+$/, "");
+      var flash = function(){
+        var prev = hero.innerHTML;
+        hero.textContent = lang === "de" ? "kopiert ✓" : "copied ✓";
+        setTimeout(function(){ hero.innerHTML = prev; }, 1600);
+      };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(out).then(flash, function(){});
+      } else {
+        try {
+          var ta = document.createElement("textarea");
+          ta.value = out; document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); document.body.removeChild(ta); flash();
+        } catch(e){}
+      }
+      location.hash = "get-started";
+    });
+  })();
+
+  wireCopy("copy-start");
+  wireCopy("copy-try");
   // Agent-setup prompt — one button per language variant; only the visible
   // (active-language) block is clickable, so copy always matches what you see.
-  wireCopy("copy-agent-en", "Set up BKS open-bridge for me (https://github.com/bks-lab/open-bridge — a\nplain-text memory layer your agent reads at session start). Plan first:\ncheck that git and the GitHub CLI (gh) are installed and authenticated,\nask me what to name my private copy (default: my-bridge), then show me\nyour plan before you act. Then:\n\n1. Create my PRIVATE copy from the template and clone it:\n   gh repo create <name> --template bks-lab/open-bridge --private --clone\n   (If templating fails: clone bks-lab/open-bridge, rename origin to\n   upstream, create a private repo, add it as origin, push main there.)\n2. Add the public repo as read-only upstream if it is missing:\n   git remote add upstream https://github.com/bks-lab/open-bridge.git\n3. Arm the safety hooks: run ./bin/setup (native Windows: bin/setup.ps1).\n4. Verify and show me: git remote -v (origin = MY private repo), and\n   git config core.hooksPath (= scripts/hooks).\n5. Start onboarding: run /bridge-onboard if you support slash commands;\n   otherwise read skills/bridge-onboard/SKILL.md and walk me through it.\n\nHard rules: never push anything to bks-lab/open-bridge; my user/* branch\ngoes only to my private origin; no secrets in files; ask before anything\ndestructive.");
-  wireCopy("copy-agent-de", "Richte BKS open-bridge für mich ein (https://github.com/bks-lab/open-bridge —\neine Plain-Text-Gedächtnisschicht, die dein Agent bei Session-Start\nliest). Plane zuerst: prüfe, ob git und die GitHub CLI (gh) installiert\nund eingeloggt sind, frag mich, wie meine private Kopie heißen soll\n(Default: my-bridge), und zeig mir deinen Plan, bevor du handelst. Dann:\n\n1. Erstelle meine PRIVATE Kopie aus dem Template und klone sie:\n   gh repo create <name> --template bks-lab/open-bridge --private --clone\n   (Falls das Template scheitert: bks-lab/open-bridge klonen, origin zu\n   upstream umbenennen, privates Repo anlegen, als origin hinzufügen,\n   main dorthin pushen.)\n2. Ergänze das öffentliche Repo als read-only upstream, falls es fehlt:\n   git remote add upstream https://github.com/bks-lab/open-bridge.git\n3. Aktiviere die Safety-Hooks: ./bin/setup ausführen (natives Windows:\n   bin/setup.ps1).\n4. Verifiziere und zeig mir: git remote -v (origin = MEIN privates Repo)\n   und git config core.hooksPath (= scripts/hooks).\n5. Starte das Onboarding: /bridge-onboard, wenn du Slash-Commands\n   unterstützt; sonst lies skills/bridge-onboard/SKILL.md und führe mich\n   interaktiv hindurch.\n\nHarte Regeln: niemals irgendetwas nach bks-lab/open-bridge pushen; mein\nuser/*-Branch geht nur auf mein privates origin; keine Secrets in\nDateien; vor allen destruktiven Aktionen nachfragen.");
+  wireCopy("copy-agent-en");
+  wireCopy("copy-agent-de");
 
   // ---- Reveal on scroll (also un-gates the diagram-frame animations) ----
   var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
