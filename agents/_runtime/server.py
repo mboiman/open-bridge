@@ -34,6 +34,9 @@ from a2a.utils.errors import JSON_RPC_ERROR_CODE_MAP, VersionNotSupportedError
 from .card import build_agent_card
 from .config import AgentConfig, load_agent_config
 from .executor import ClaudeAgentExecutor
+from .otlp_logging import current_status as logging_status
+from .otlp_logging import setup_otlp_logging, setup_transcript_logging
+from .otlp_logging import transcript_status
 from .runner import SubprocessClaudeRunner
 
 logger = logging.getLogger(__name__)
@@ -108,6 +111,7 @@ def build_app(cfg: AgentConfig) -> Starlette:
         extra_read_dirs=cfg.extra_read_dirs,
         timeout=cfg.timeout,
         allowed_tools=cfg.allowed_tools,
+        trust=cfg.trust,
         timeout_message=cfg.messages.get(
             "timeout", "The request could not be processed in time. Please try again."
         ),
@@ -133,7 +137,20 @@ def build_app(cfg: AgentConfig) -> Starlette:
     )
 
     async def health_endpoint(_request):
-        return JSONResponse({"status": "ok", "agent": cfg.instance})
+        # `logging` is here because a deploy that forgot the export config is
+        # otherwise indistinguishable from a healthy one: the agent answers
+        # normally and writes nothing to the collector, and the first person to
+        # notice is whoever searches for a line that never arrived.
+        return JSONResponse(
+            {
+                "status": "ok",
+                "agent": cfg.instance,
+                "logging": logging_status(),
+                # Whether conversations are being recorded is not a config-file
+                # detail. It belongs where anyone operating this can see it.
+                "transcript": transcript_status(),
+            }
+        )
 
     routes = [
         *(
@@ -172,6 +189,14 @@ def main(instance: str, host: str | None, port: int | None, model: str | None) -
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Right after the console handler and BEFORE the first startup line, so the
+    # startup diagnostics are the first thing the collector sees rather than the
+    # first thing it misses. Never raises: without configuration this is a no-op
+    # and the agent keeps logging to the console.
+    log_export_status, _ = setup_otlp_logging(instance)
+    logger.info("log export: %s", log_export_status)
+    transcript_export_status, _ = setup_transcript_logging(instance)
+    logger.info("transcript export: %s", transcript_export_status)
 
     cfg = load_agent_config(instance)
     if host:
@@ -183,8 +208,8 @@ def main(instance: str, host: str | None, port: int | None, model: str | None) -
 
     app = build_app(cfg)
     logger.info(
-        "Starting Bridge-Agent '%s' (%s) on %s:%d — public=%s cwd=%s",
-        cfg.instance, cfg.name, cfg.host, cfg.port, cfg.public_url, cfg.working_dir,
+        "Starting Bridge-Agent '%s' (%s) on %s:%d — public=%s cwd=%s trust=%s",
+        cfg.instance, cfg.name, cfg.host, cfg.port, cfg.public_url, cfg.working_dir, cfg.trust,
     )
     logger.info("CORS origins: %s", cfg.cors_origins)
     print(f"Bridge-Agent '{cfg.instance}' starting at http://{cfg.host}:{cfg.port}")

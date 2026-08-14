@@ -84,7 +84,7 @@ regions:
       (Phase 0 detection), operations.md (Phase 1, commit hygiene), theme.md
       (vocabulary resolution), promote-safety.md (content scan before cherry-pick),
       deploy-reconciliation.md (don't trust status, ask the service manager),
-      skill-routing.md, moc-navigation.md, contribute-advisor.md.
+      skill-routing.md, contribute-advisor.md.
     examples:
       - "rules/session-start.md — branch + config detection"
       - "rules/operations.md — allowed/blocked paths"

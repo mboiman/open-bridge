@@ -130,16 +130,26 @@ conflict/precedence model, and 3-way base recovery live in `references/workflow.
 7. **Never auto-merge config.** The ecosystem fragment is wired as an
    idempotent `@ecosystem.<org>.yaml` `@import` line — never block-merged into
    `ecosystem.yaml`. No config file is structurally merged.
-8. **Exclude the managed dests from git.** At materialize, the engine writes a
-   marked, idempotent `# >>> overlay:<name>` block into the **local, untracked**
-   `.git/info/exclude` (never the tracked `.gitignore`) listing every managed
-   dest — because skills/agents land in **tracked** paths (`skills/`,
-   `.claude/agents/`) that config patterns don't cover, and a fork of a public
-   repo is itself public: without this a `git add -A` would publish org-internal
-   content. Using `.git/info/exclude` keeps the dests ignored **without** touching
-   any tracked file, so neither the content nor the org filenames can be
-   published. The block is dropped on `remove`. Org content is consumed, never
-   re-committed.
+8. **Exclude the managed dests from git — by default.** At materialize, the
+   engine writes a marked, idempotent `# >>> overlay:<name>` block into the
+   **local, untracked** `.git/info/exclude` (never the tracked `.gitignore`)
+   listing every managed dest — because skills/agents land in **tracked**
+   paths (`skills/`, `.claude/agents/`) that config patterns don't cover, and
+   a fork of a public repo is itself public: without this a `git add -A`
+   would publish org-internal content. Using `.git/info/exclude` keeps the
+   dests ignored **without** touching any tracked file, so neither the
+   content nor the org filenames can be published. The block is dropped on
+   `remove`. Org content is consumed, not re-committed — **unless** the
+   subscription sets `materialize.track_managed_dests: true` (off by
+   default, `/overlay add --track-managed-dests` or a hand-edit +
+   `sync`/`apply`): an explicit, per-overlay, self-service opt-in for a
+   consumer (typically private) that wants its consumed org content backed
+   up in its own git history instead of relying solely on the overlay's
+   source repo. Never auto-derived from the consumer repo's visibility.
+   Flipping the switch on drops any exclude block already written for that
+   overlay on the next materialize, so it takes effect without a manual
+   `.git/info/exclude` edit. Full model: [`docs/org-overlays.md`](../../docs/org-overlays.md)
+   § Git tracking of managed dests.
 
 ## Authoring note — org facts mirror VERBATIM, not as prompt-fields
 
@@ -164,7 +174,7 @@ behaviour.** Run before every commit:
 bash scripts/tests/test-overlay.sh        # must end "N passed, 0 failed"
 ```
 
-The suite's 21 sections assert, among others:
+The suite's 23 sections assert, among others:
 
 - subscribe + materialize (every dest exists · inline `scope: org` · lock hashes);
   idempotent re-apply; dry-run writes nothing; `remove` restores a clean tree
@@ -182,6 +192,12 @@ The suite's 21 sections assert, among others:
   SKILL.md/agent still ships (the carve-out doesn't over-refuse)
 - **§22 ecosystem_fragment name** is enforced in-engine (flat `ecosystem.<org>.yaml`)
   even on a consumer without check-jsonschema
+- **§20 the default git-exclude guard** — managed dests land in
+  `.git/info/exclude`, `git check-ignore` confirms them ignored, `.gitignore`
+  untouched; **§23 the `track_managed_dests` opt-in** — off by default is
+  byte-identical to §20; `--track-managed-dests` writes no exclude block and
+  the dests are normal trackable files; flipping an existing subscription's
+  switch on and re-syncing drops its stale exclude block automatically
 
 **When carrying skills/agents in a real overlay**, also smoke-test a full
 materialize before you publish — `add --dry-run` then `status` — and confirm

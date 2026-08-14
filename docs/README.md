@@ -20,7 +20,7 @@ instead of a bespoke `_MOC.md` / `index.md` convention.
 - [`repo-layout.md`](repo-layout.md) — Visualisations. The primary C-prime view is generated on demand; brain-metaphor variants v1–v4 are alternatives.
 - [`extension-model.md`](extension-model.md) — how CORE extends, how USER customises.
 - [`multi-instance.md`](multi-instance.md) — running multiple Bridge instances.
-- [`org-overlays.md`](org-overlays.md) — the downstream inverse of `/promote`: how a Bridge subscribes to an org's `scope:org` content and materializes it as tracked copies.
+- [`org-overlays.md`](org-overlays.md) — the downstream inverse of `/promote`: how a Bridge subscribes to an org's `scope:org` content and materializes it as copies (git-excluded by default, opt-in tracked).
 - [`workspaces.md`](workspaces.md) — binding config overlays + member repos into a named workspace (shared cross-tool identity + repo-local materialization).
 - [`workspace-acceptance-test.md`](workspace-acceptance-test.md) — standalone, zero-prior-context acceptance-test playbook for the workspace feature.
 - [`capability-registry.md`](capability-registry.md) — machine-global registry (`~/.bridge-capabilities/`) that lets a Bridge instance declare a shared capability (a transcription worker, a backup pipeline) exists and how to reach it, opt-in, without weakening data isolation.

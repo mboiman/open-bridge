@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections import OrderedDict
 
@@ -30,9 +31,16 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import TaskState, UnsupportedOperationError
 
+from .otlp_logging import transcript_logger
 from .runner import SubprocessClaudeRunner
 
 logger = logging.getLogger(__name__)
+
+# Question and answer go to a SEPARATE logger and from there into their own data
+# stream (see otlp_logging). Never propagates, so content cannot reach the
+# console handler. Without OTEL_TRANSCRIPT_ENABLED the logger has no handler at
+# all and these calls are a no-op.
+transcript = transcript_logger()
 
 # English defaults; an instance overrides any subset via config.messages.
 DEFAULT_MESSAGES = {
@@ -80,6 +88,11 @@ class ClaudeAgentExecutor(AgentExecutor):
     ) -> None:
         self._runner = runner
         self._history: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        # claude's own session id per context, for --resume continuity (private
+        # trust only — the runner ignores this for a public agent, so tracking it
+        # unconditionally here is harmless either way). Bounded the same as
+        # ``_history`` via ``_remember``.
+        self._resume_sessions: OrderedDict[str, str] = OrderedDict()
         self._max_turns = max_turns
         self._max_contexts = max(1, max_contexts)
         self._max_input_chars = max_input_chars
@@ -165,9 +178,30 @@ class ClaudeAgentExecutor(AgentExecutor):
         if cid in self._history:
             self._history.move_to_end(cid)
         prompt = self._build_prompt(prior, user_text, runtime_context)
+        # `prior` holds two entries per exchange (user + agent), so this is the
+        # 1-based number of the turn about to run. turn=1 IS the conversation start.
+        turn = len(prior) // 2 + 1
+        started = time.monotonic()
+        # Fields in `extra`, not the message: a queryable attribute beats a
+        # substring match, and it is the only form a Kibana aggregation can
+        # group or count by (see infra/channels/*.yaml observability blocks).
         logger.info(
-            "executor: task=%s context=%s prompt_len=%d",
-            context.task_id, context.context_id, len(prompt),
+            "executor: turn started",
+            extra={
+                "task_id": context.task_id,
+                "context_id": context.context_id,
+                "turn": turn,
+                "prompt_len": len(prompt),
+            },
+        )
+        transcript.info(
+            "question",
+            extra={
+                "context_id": cid,
+                "task_id": context.task_id,
+                "turn": turn,
+                "question": user_text,
+            },
         )
 
         answer = ""
@@ -177,7 +211,10 @@ class ClaudeAgentExecutor(AgentExecutor):
         answer_artifact_id = str(uuid.uuid4())
         try:
             if hasattr(self._runner, "stream"):
-                async for evt in self._runner.stream(prompt, context_id=cid):
+                resume_id = self._resume_sessions.get(cid)
+                async for evt in self._runner.stream(
+                    prompt, context_id=cid, resume_session_id=resume_id
+                ):
                     kind = evt.get("kind")
                     if kind == "step":
                         await updater.update_status(
@@ -193,6 +230,13 @@ class ClaudeAgentExecutor(AgentExecutor):
                             artifact_id=answer_artifact_id,
                             name="answer",
                         )
+                    elif kind == "session_id":
+                        # Private trust only (the runner never emits this for a
+                        # public agent) — remember for --resume on the next turn.
+                        session_id = evt.get("id")
+                        if session_id:
+                            self._resume_sessions[cid] = session_id
+                            self._resume_sessions.move_to_end(cid)
                     elif kind == "answer":
                         answer = evt.get("text", "")
             else:
@@ -201,12 +245,48 @@ class ClaudeAgentExecutor(AgentExecutor):
             raise
         except Exception as exc:  # noqa: BLE001 — surface a clean failure to the client
             logger.exception("executor: runner error")
+            # Same shape as the success line below, so "how often does a turn
+            # fail and how long does it take to fail" is one query, not two.
+            logger.info(
+                "executor: turn finished",
+                extra={
+                    "task_id": context.task_id,
+                    "context_id": context.context_id,
+                    "turn": turn,
+                    "outcome": "error",
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "answer_len": 0,
+                },
+            )
             await updater.failed(
                 message=updater.new_agent_message(
                     [new_text_part(self._msg["error"].format(error=exc))]
                 )
             )
             return
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        logger.info(
+            "executor: turn finished",
+            extra={
+                "task_id": context.task_id,
+                "context_id": context.context_id,
+                "turn": turn,
+                "outcome": "ok",
+                "duration_ms": duration_ms,
+                "answer_len": len(answer),
+            },
+        )
+        transcript.info(
+            "answer",
+            extra={
+                "context_id": cid,
+                "task_id": context.task_id,
+                "turn": turn,
+                "answer": answer,
+                "duration_ms": duration_ms,
+            },
+        )
 
         self._remember(cid, user_text, answer)
         await updater.add_artifact(
@@ -245,7 +325,8 @@ class ClaudeAgentExecutor(AgentExecutor):
         if excess > 0:
             del turns[:excess]
         while len(self._history) > self._max_contexts:
-            self._history.popitem(last=False)
+            evicted_cid, _ = self._history.popitem(last=False)
+            self._resume_sessions.pop(evicted_cid, None)
 
     @staticmethod
     def _runtime_context_from(message) -> str:

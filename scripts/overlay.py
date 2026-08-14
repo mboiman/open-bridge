@@ -571,16 +571,20 @@ class Consumer:
         atomic_write_bytes(path, new.encode("utf-8"))
         return True
 
-    def drop_git_exclude_block(self, overlay_name: str) -> None:
+    def drop_git_exclude_block(self, overlay_name: str, dry: bool = False) -> bool:
         path = self._git_exclude_path()
         if path is None or not os.path.exists(path):
-            return
+            return False
         begin, end = self._exclude_markers(overlay_name)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         new = self._strip_marked_block(text, begin, end)
-        if new != text:
-            atomic_write_bytes(path, new.encode("utf-8"))
+        if new == text:
+            return False
+        if dry:
+            return True
+        atomic_write_bytes(path, new.encode("utf-8"))
+        return True
 
     # --- fleet record -----------------------------------------------------
     def self_instance_path(self) -> str | None:
@@ -1328,7 +1332,8 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
                 items: list[PlanItem], prune: list[dict], overlay_name: str,
                 url: str, ref: str, resolved: str, manifest_sha: str,
                 precedence: int, lock: dict, old_sha: str | None,
-                dry: bool, assume_yes: bool, interactive: bool) -> dict:
+                dry: bool, assume_yes: bool, interactive: bool,
+                track_managed_dests: bool = False) -> dict:
     counts = {k: 0 for k in ("clean", "locally-modified", "upstream-ahead",
                              "conflict", "orphan", "core-refused",
                              "leak-refused", "skipped")}
@@ -1479,10 +1484,21 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
     # Git-exclude guard (step 14): keep overlay-materialized org content OUT of
     # git (via the LOCAL .git/info/exclude, never tracked .gitignore) so a fork
     # (public by default) can't publish it — nor its filenames — via `git add -A`.
+    # This is the default and stays byte-identical when track_managed_dests is
+    # unset. A user can opt this overlay OUT of the guard via the explicit,
+    # off-by-default materialize.track_managed_dests: true knob in
+    # bridge-config.yaml — the dests then become normal, `git add`-able tracked
+    # files instead. Never auto-derived from the consumer repo's visibility.
     ig_dests = [fl["dest"] for fl in file_locks]
     if fragment:
         ig_dests.append(fragment)
-    if ig_dests and consumer.ensure_git_exclude_block(overlay_name, ig_dests, dry):
+    if track_managed_dests:
+        # Clean up a block a prior run may have written (e.g. the switch was
+        # just flipped on) so it takes effect without a manual exclude edit.
+        if consumer.drop_git_exclude_block(overlay_name, dry):
+            print(f"  .git/info/exclude: dropped overlay:{overlay_name} block "
+                  f"(track_managed_dests: true — {len(ig_dests)} dests now trackable)")
+    elif ig_dests and consumer.ensure_git_exclude_block(overlay_name, ig_dests, dry):
         print(f"  .git/info/exclude ← {len(ig_dests)} managed dests (overlay:{overlay_name})")
 
     # Lockfile (step 15).
@@ -1519,7 +1535,8 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
 
 def upsert_upstream_block(consumer: Consumer, name: str, url: str, ref: str,
                           precedence: int, select: list[str],
-                          source_root: str) -> None:
+                          source_root: str,
+                          track_managed_dests: bool = False) -> None:
     cfg = consumer.load_config()
     upstreams = cfg.get("upstreams")
     if not isinstance(upstreams, list):
@@ -1534,15 +1551,20 @@ def upsert_upstream_block(consumer: Consumer, name: str, url: str, ref: str,
     if entry is None:
         entry = {"name": name}
         upstreams.append(entry)
+    materialize_block = {
+        "url": url, "ref": ref,
+        "cache": f"{CACHE_BASE}/{name}/",
+        "precedence": precedence,
+        "select": select or ["**"],
+    }
+    # Omitted (rather than written as false) when unset, so a default `add`
+    # produces the same materialize block as before this knob existed.
+    if track_managed_dests:
+        materialize_block["track_managed_dests"] = True
     entry.update({
         "repo": repo, "branch": ref, "role": "org-overlay",
         "contribute": True, "pull_interval_days": 7,
-        "materialize": {
-            "url": url, "ref": ref,
-            "cache": f"{CACHE_BASE}/{name}/",
-            "precedence": precedence,
-            "select": select or ["**"],
-        },
+        "materialize": materialize_block,
     })
     consumer.write_config(cfg)
 
@@ -1568,7 +1590,10 @@ def find_subscription(consumer: Consumer, name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def _resolve_overlay_params(consumer: Consumer, name: str) -> dict:
-    """Resolve {url, ref, precedence, select} for a subscribed overlay."""
+    """Resolve {url, ref, precedence, select, track_managed_dests} for a
+    subscribed overlay. Read fresh from bridge-config.yaml on every call, so
+    a hand-edit (e.g. flipping track_managed_dests) takes effect on the next
+    sync/apply without re-running add."""
     sub = find_subscription(consumer, name)
     if sub is None:
         raise OverlayError(f"overlay '{name}' is not subscribed (run: add)")
@@ -1578,6 +1603,7 @@ def _resolve_overlay_params(consumer: Consumer, name: str) -> dict:
         "ref": mat.get("ref") or sub.get("branch") or "main",
         "precedence": mat.get("precedence", 0),
         "select": mat.get("select") or ["**"],
+        "track_managed_dests": bool(mat.get("track_managed_dests", False)),
     }
 
 
@@ -1590,6 +1616,7 @@ def cmd_add(consumer: Consumer, args) -> int:
     ref = args.ref or "main"
     precedence = args.precedence
     select = args.select or ["**"]
+    track_managed_dests = args.track_managed_dests
 
     # 1) cache the repo (need it to read the manifest → name fallback).
     tmp_name = name or "_pending"
@@ -1626,11 +1653,11 @@ def cmd_add(consumer: Consumer, args) -> int:
     # Persist the subscription block BEFORE materializing so a crash mid-write
     # still leaves a recoverable subscription.
     upsert_upstream_block(consumer, name, args.git_url, ref, precedence,
-                          select, defaults["source_root"])
+                          select, defaults["source_root"], track_managed_dests)
     counts = materialize(consumer, cache, manifest, defaults, items, prune,
                          name, args.git_url, ref, resolved, manifest_sha,
                          precedence, lock, None, args.dry_run, args.yes,
-                         interactive)
+                         interactive, track_managed_dests=track_managed_dests)
     report_counts("added", name, counts)
     return 0
 
@@ -1678,7 +1705,8 @@ def _sync_one(consumer: Consumer, name: str, args) -> int:
     counts = materialize(consumer, cache, manifest, defaults, items, prune,
                          name, params["url"], params["ref"], resolved,
                          manifest_sha, params["precedence"], lock, old_sha,
-                         args.dry_run, args.yes, interactive)
+                         args.dry_run, args.yes, interactive,
+                         track_managed_dests=params["track_managed_dests"])
     report_counts("synced", name, counts)
     return 0
 
@@ -1715,7 +1743,8 @@ def cmd_apply(consumer: Consumer, args) -> int:
             counts = materialize(consumer, cache, manifest, defaults, items,
                                  prune, name, params["url"], params["ref"],
                                  resolved, manifest_sha, params["precedence"],
-                                 lock, old_sha, False, args.yes, interactive)
+                                 lock, old_sha, False, args.yes, interactive,
+                                 track_managed_dests=params["track_managed_dests"])
             report_counts("applied", name, counts)
         except OverlayError as exc:
             sys.stderr.write(f"apply {name}: {exc}\n")
@@ -1965,6 +1994,13 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--select", nargs="*", help="extra select glob(s) (default **)")
     a.add_argument("--precedence", type=int, default=0,
                    help="layering order — higher wins a dest collision")
+    a.add_argument("--track-managed-dests", action="store_true",
+                   help="opt this overlay's managed dests INTO git tracking "
+                        "instead of the default .git/info/exclude guard (off "
+                        "by default; see docs/org-overlays.md). Can also be "
+                        "set later by hand-editing bridge-config.yaml's "
+                        "upstreams[].materialize.track_managed_dests and "
+                        "re-running sync/apply.")
     a.add_argument("--dry-run", action="store_true", help="plan only, no writes")
     a.add_argument("--yes", action="store_true",
                    help="batch-confirm non-behavioural (behavioural still gated)")
