@@ -162,7 +162,16 @@ upstreams:
 # `materialize:` sub-block makes the entry overlay-capable: /overlay
 # sparse-clones `url@ref` into `cache`, then materializes the org's
 # scope:org files (skills, agents, contexts, project configs, an ecosystem
-# fragment) into the live tree as tracked copies pinned to immutable hashes.
+# fragment) into the live tree as file copies pinned to immutable hashes.
+# By default those copies are kept OUT of git (written to the local,
+# untracked .git/info/exclude) — a fork of a public repo is itself public,
+# so a `git add -A` must never be able to publish org content. That means
+# the consumer's copy is not backed up anywhere by default; the overlay's
+# own source repo is the authoritative backup. Set
+# materialize.track_managed_dests: true below to opt THIS overlay's dests
+# INTO normal git tracking instead (e.g. on a private instance where you
+# want them backed up in your own history) — off by default, never
+# auto-derived from repo visibility, flip it and re-run `/overlay sync`.
 # Overlay subscriptions are managed by /overlay (skill bridge-overlay) — you
 # opt IN by adding this block via `/overlay add`, never by hand. An entry
 # WITHOUT a materialize block is overlay-incapable (CORE-only no-op).
@@ -179,6 +188,7 @@ upstreams:
 #      cache: .bridge/overlays/my-org/        # own sparse cache (gitignored)
 #      precedence: 10                         # higher wins a dest collision
 #      select: ["**"]                         # glob of overlay paths to pull
+#      track_managed_dests: false             # true = git-track dests instead of excluding (default false)
 
 # ─── Promote Safety ───────────────────────────────────────────────────
 # Content scanned before cherry-pick onto CORE branches.

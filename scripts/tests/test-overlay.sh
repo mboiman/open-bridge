@@ -736,6 +736,90 @@ assert_eq "a valid ecosystem.<org>.yaml fragment name still passes" "$(fragcheck
 
 # ───────────────────────────────────────────────────────────────────
 echo
+echo "── 23. track_managed_dests opt-in — default off vs explicit on ─"
+# 23a. default (unset) — byte-identical to today: exclude block written,
+# managed dests git-ignored.
+CON="$(mkcon)"
+OV="$(mktemp -d "$TMP/ovtrk.XXXXXX")"
+mkdir -p "$OV/tree/skills/demo-skill/scripts"
+cat > "$OV/overlay.manifest.yaml" <<'YAML'
+schema_version: 1
+overlay:
+  name: trk
+  org: trk
+defaults:
+  scope: org
+  source_root: "tree/"
+  on_conflict: prompt
+selection:
+  include: ["**"]
+  exclude: ["**/_*.yaml", "**/README.md"]
+YAML
+cat > "$OV/tree/skills/demo-skill/SKILL.md" <<'MD'
+---
+name: demo-skill
+description: A demo skill.
+metadata:
+  scope: org
+---
+# Demo
+MD
+echo 'print("x")' > "$OV/tree/skills/demo-skill/scripts/run.py"
+git_overlay "$OV" trk-init
+run_overlay "$CON" add "file://$OV" --name trk
+assert_rc "add (default, no flag) succeeds" 0
+assert_grep ".git/info/exclude carries the managed block by default" "$CON/.git/info/exclude" "overlay:trk"
+if ( cd "$CON" && git check-ignore -q skills/demo-skill/scripts/run.py ); then
+  pass "default: git ignores the managed dest (byte-identical to prior behaviour)"
+else
+  fail "default: git unexpectedly does NOT ignore the managed dest"
+fi
+
+# 23b. --track-managed-dests at add time — no exclude block, dests are
+# normal trackable files.
+CON2="$(mkcon)"
+run_overlay "$CON2" add "file://$OV" --name trk --track-managed-dests
+assert_rc "add --track-managed-dests succeeds" 0
+assert_nogrep ".git/info/exclude carries NO block when opted into tracking" "$CON2/.git/info/exclude" "overlay:trk"
+if ( cd "$CON2" && git check-ignore -q skills/demo-skill/scripts/run.py ); then
+  fail "opted-in: git still ignores the managed dest — switch had no effect"
+else
+  pass "opted-in: git does NOT ignore the managed dest (trackable)"
+fi
+if [ -n "$(cd "$CON2" && git status --porcelain skills/demo-skill/scripts/run.py 2>/dev/null)" ]; then
+  pass "opted-in: managed dest shows as a normal untracked/addable file to git status"
+else
+  fail "opted-in: managed dest invisible to git status — still excluded"
+fi
+assert_grep "bridge-config.yaml records track_managed_dests: true" "$CON2/bridge-config.yaml" "track_managed_dests: true"
+
+# 23c. flipping the switch on for an EXISTING (already-excluded) subscription
+# cleans up the previously-written exclude block on the next sync — no manual
+# .git/info/exclude edit required.
+CON3="$(mkcon)"
+run_overlay "$CON3" add "file://$OV" --name trk
+assert_rc "add (default) for flip-test succeeds" 0
+assert_grep "flip-test: exclude block present before the flip" "$CON3/.git/info/exclude" "overlay:trk"
+python3 -c "
+import yaml
+p = '$CON3/bridge-config.yaml'
+d = yaml.safe_load(open(p))
+for u in d['upstreams']:
+    if u.get('name') == 'trk':
+        u['materialize']['track_managed_dests'] = True
+yaml.safe_dump(d, open(p, 'w'), sort_keys=False, allow_unicode=True)
+"
+run_overlay "$CON3" sync trk --yes
+assert_rc "sync after flipping track_managed_dests on succeeds" 0
+assert_nogrep "flip-test: sync removed the stale exclude block" "$CON3/.git/info/exclude" "overlay:trk"
+if ( cd "$CON3" && git check-ignore -q skills/demo-skill/scripts/run.py ); then
+  fail "flip-test: dest still ignored after flipping the switch on"
+else
+  pass "flip-test: dest is trackable after flipping the switch on + sync"
+fi
+
+# ───────────────────────────────────────────────────────────────────
+echo
 echo "════════════════════════════════════════════════════════════════"
 echo "RESULT: $PASS passed, $FAIL failed"
 echo "════════════════════════════════════════════════════════════════"
