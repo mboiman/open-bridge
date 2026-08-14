@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.bks.voicememo-bundler.plist
+  ────────────────────────────────
+  Runs on the capture machine (Michael's Mac). Watches the iPhone Voice Memos
+  folder (synced via iCloud) for new *.m4a recordings, invokes
+  voicememo-bundler.sh to filter (cutoff date, duration, write-stability) and
+  push eligible ones to the worker's "voicememo" transcription context via
+  debrief_sync.sh push. Sibling of com.openbridge.transcribe-bundler.plist —
+  same structure, different watch target and label prefix (this repo's own
+  deployed jobs use the com.bks.* label, not com.openbridge.*).
+
+  REPLACE_ME_HOME: plists cannot expand ~ — substitute REPLACE_ME_HOME with
+  your home directory at deploy time (the deploy step does this — see
+  references/deployment.md), e.g.:
+    sed -i '' "s|REPLACE_ME_HOME|$HOME|g" com.bks.voicememo-bundler.plist
+
+  ROOT CAUSE (found 2026-08-13, see voicememo-bundler-launcher.swift for full
+  writeup + sources): launchd-spawned /bin/bash cannot read
+  ~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings —
+  not a bash/session-type quirk, but two compounding, sourced facts: (1)
+  Apple's own system binaries (/bin/bash, /bin/ls, ...) can no longer be
+  reliably granted Full Disk Access via System Settings — SIP-protected, the
+  drag-and-drop grant silently fails to persist; (2) Group Containers of
+  Apple's own apps carry an extra "container data protection" layer on top of
+  FDA (Apple DTS engineer quinn, re: Notes' container, same mechanism as
+  Voice Memos: https://developer.apple.com/forums/thread/740455).
+
+  FIX: launchd invokes a small compiled, ad-hoc-signed CLI binary
+  (voicememo-bundler-launcher, built from voicememo-bundler-launcher.swift)
+  instead of /bin/bash directly. Unlike /bin/bash it is NOT SIP-protected, so
+  it can be dragged into System Settings → Privacy & Security → Full Disk
+  Access normally and the grant persists. It is a permission-carrying shim
+  ONLY — no duplicated logic, it just Process()-execs this same
+  voicememo-bundler.sh.
+
+  REJECTED FIRST (see git history for both, kept as documented dead ends):
+    - bash-interpreter choice alone (Homebrew vs /bin/bash) — both denied
+      identically, rules out "which shell" as the cause.
+    - an AppleScript .app wrapper (voicememo-bundler-wrapper.applescript) —
+      technically routes around the SIP-binary problem the same way, but is
+      a real NSApplication that needs a genuine Aqua/WindowServer session;
+      under launchd it loaded as spawn type "daemon" even with
+      LimitLoadToSessionType=Aqua and hung indefinitely instead of running
+      its handler. A plain CLI tool has no such GUI dependency.
+    - LimitLoadToSessionType/ProcessType session-type keys on /bin/bash
+      directly — no effect (the Group Container wall is independent of
+      session type when the target isn't a GUI app).
+    - MDM/configuration profiles (`profiles list` — none installed).
+
+  Build the launcher (one-time per machine, before first install):
+    swiftc voicememo-bundler-launcher.swift -o ~/bin/voicememo-bundler-launcher
+    codesign --force --sign - ~/bin/voicememo-bundler-launcher
+
+  Install:
+    cp com.bks.voicememo-bundler.plist ~/Library/LaunchAgents/
+    cp voicememo-bundler.sh ~/bin/ && chmod +x ~/bin/voicememo-bundler.sh
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.bks.voicememo-bundler.plist
+
+  SAME-MACHINE DEPLOYMENT (2026-08-13): when this watcher runs on
+  the transcription WORKER itself (capture and worker are the same box —
+  see work/streams/voice-memo-debrief-automation/), add one more
+  EnvironmentVariables entry after the sed substitution so debrief_sync.sh
+  push uses plain filesystem ops instead of SSH-to-self (which has no
+  standing key and fails):
+    /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:TRANSCRIBE_MODE string local" \
+      ~/Library/LaunchAgents/com.bks.voicememo-bundler.plist
+  See infra/transcriptions/topology.yaml's `local:` block for the matching
+  launchd_label override this requires.
+
+  ONE-TIME MANUAL STEP (cannot be scripted — TCC requires the human click):
+    System Settings → Privacy & Security → Full Disk Access → "+" →
+    Cmd+Shift+G → type ~/bin → select voicememo-bundler-launcher → enable.
+    Until this is done the job will run and exit 0 but never see any files
+    (same silent-empty-glob symptom as the original /bin/bash failure).
+
+  Verify:
+    launchctl print gui/$(id -u)/com.bks.voicememo-bundler
+
+  Logs:
+    ~/Library/Logs/voicememo-bundler.log
+    ~/Library/Logs/voicememo-bundler.launchd.{out,err}
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bks.voicememo-bundler</string>
+
+    <!-- The compiled launcher binary, NOT /bin/bash directly — see the ROOT
+         CAUSE note above. Takes no arguments (the binary itself hardcodes
+         the path to ~/bin/voicememo-bundler.sh). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>REPLACE_ME_HOME/bin/voicememo-bundler-launcher</string>
+    </array>
+
+    <key>WatchPaths</key>
+    <array>
+        <string>REPLACE_ME_HOME/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings</string>
+    </array>
+
+    <!-- Debounce: throttle to once per 10s even on rapid filesystem events
+         (iCloud sync can write a recording in bursts) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Safety net alongside WatchPaths (2026-08-13, found live twice): the
+         WatchPath fs event can fire before iCloud has actually finished
+         materializing the final *.m4a — the script's glob then sees nothing
+         new and there's no guaranteed second event to retry on. A periodic
+         sweep catches anything a missed/mistimed WatchPath event drops,
+         without giving up the near-instant WatchPath reaction when the race
+         doesn't happen. Both triggers run the exact same idempotent script,
+         so a sweep that finds nothing new is a no-op. -->
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <!-- Deliberately false: do not scan-and-potentially-act on install/login.
+         Wait for the first real filesystem change under WatchPaths (or the
+         first StartInterval tick). -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_ME_HOME/Library/Logs/voicememo-bundler.launchd.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>REPLACE_ME_HOME/Library/Logs/voicememo-bundler.launchd.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>REPLACE_ME_HOME</string>
+    </dict>
+</dict>
+</plist>

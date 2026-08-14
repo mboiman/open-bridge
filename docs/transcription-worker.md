@@ -43,6 +43,8 @@ integrations:
   transcription:
     enabled: true
     sync_script: "skills/meeting-transcription/scripts/debrief_sync.sh"  # repo-relative; swap for your own
+    notify_email: "you@example.com"   # optional, recipient for completion-notify automations
+                                       # (e.g. the voicememo-notify.sh companion script); omit if unused
     default_context: main       # context for audio handed off without an explicit one
     share_capability: false     # publish "a worker exists + how to reach it" to
                                  # ~/.bridge-capabilities/transcription.yaml so a SIBLING
