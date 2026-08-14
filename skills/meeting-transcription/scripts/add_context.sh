@@ -60,6 +60,8 @@ for part in sys.argv[2].split("."):
     node = node[part]
 if isinstance(node, dict):
     print(" ".join(str(k) for k in node))
+elif isinstance(node, bool):
+    print(str(node).lower())   # YAML wants lowercase true/false; the Python bool default prints capitalized
 elif node is not None:
     print(node)
 ' "$1" "$2" 2>/dev/null || true
