@@ -14,10 +14,10 @@ only the output of `html-slides`, `creative-design-stack`, or `bridge-dashboard`
 
 ## Gate 1 — every HTML page has a user-selectable light/dark toggle
 
-A silent `@media (prefers-color-scheme)` is **not enough**. Every HTML
-presentation or page ships a manual override the user can flip, with the OS
-preference as the fallback. Beamers and foreign screens are unpredictably
-bright or dark; control belongs *in the deck*, reachable mid-talk.
+A silent `@media (prefers-color-scheme)` is **not enough**. Every HTML page
+ships a manual override the user can flip (OS preference as fallback):
+beamers and foreign screens are unpredictably bright or dark, and control
+belongs *in the deck*, reachable mid-talk.
 
 Required pattern (same one baked into `html-slides`):
 

@@ -10,11 +10,11 @@ description: Pre-write checklist — schemas, templates, conventions to verify b
 
 ## Why
 
-The Bridge has a strict layout (Default-to-Folder, cluster wrappers, frontmatter
-conventions). Skills, sub-agents, and `/bridge-sync` all rely on those conventions
-to function. A file with the wrong frontmatter, wrong filename pattern, or missing
-companion doc looks fine in isolation but breaks routing, discovery, or validation
-downstream. The fix is always more expensive than the prevention.
+Strict layout conventions (Default-to-Folder, cluster wrappers, frontmatter)
+are what let skills, sub-agents, and `/bridge-sync` function. A file with
+the wrong frontmatter, filename pattern, or missing companion doc looks
+fine in isolation but breaks routing, discovery, or validation downstream.
+The fix is always more expensive than the prevention.
 
 ## Pre-write checklist
 
@@ -84,8 +84,6 @@ Run this every time, in order:
 
 ## Common gotchas (real history)
 
-- **Filename type-prefix.** Old layout had `mandants/mandant.team.yaml`. Current
-  rule: simple slug, type from the folder. `mandants/team.yaml`.
 - **`_`-prefix is reserved.** Templates, schemas, state files start with `_`
   and are excluded by discovery. Never name a real instance with leading `_`.
 - **Companion doc trennzeichen is intentional.** Dash for `-setup.md` (pre-activation),

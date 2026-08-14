@@ -30,10 +30,9 @@ channel, bot, scheduler job, or launchd/systemd unit:
 | `paused` | Deliberately stopped | Deploy intact, runtime disabled by choice |
 | `disabled` | Retired, kept for reference | Units removed from the remote |
 
-**Illegal as resting states** (these are todo markers — clear them or
-downgrade to `pending` before closing the session): `deployed-pending-bootstrap`,
-`wip`, `in-progress`, anything custom. Their presence = unfinished work
-someone else will inherit silently.
+**Illegal as resting states** (todo markers — clear or downgrade to
+`pending` before closing the session): `deployed-pending-bootstrap`, `wip`,
+`in-progress`, anything custom.
 
 ## The deploy cycle (bootstrap → verify → publish status)
 
@@ -90,11 +89,10 @@ incident — the declaration is wrong, fix it or fix the deployment.
 
 ## Anti-patterns
 
-- **"plist deployed" is not deployed.** Files on disk without
-  `launchctl bootstrap` + `launchctl list`-confirmation are staged, not running.
-- **`status:` as a todo marker.** Do not use `status:` to track
-  "in progress" — that's what `work/tasks/<slug>/STATUS.md` is for.
-  `status:` reflects actual runtime state.
+- **"plist deployed" ≠ running.** Needs `launchctl bootstrap` +
+  `launchctl list`-confirmation, not just files on disk.
+- **`status:` = runtime state only.** Track "in progress" in
+  `work/tasks/<slug>/STATUS.md`, not here.
 - **Board ≠ STATUS.md drift.** `work/board.md` summary must track the
   Doing task's `STATUS.md`. When they diverge, `STATUS.md` wins; update
   the board.

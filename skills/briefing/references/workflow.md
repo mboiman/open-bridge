@@ -134,13 +134,23 @@ output — *"what's open / where do I need to act"* — bucket findings by
 2. **Applications / acquisition** — external, pipeline surface (only if you track an application pipeline)
 3. **External blockers** (external blocker reactions, kickoffs, recruiter replies, …)
 4. **Personal infrastructure** (CF-Setup, Drift-Sweeps, Backups)
-   - Backups: if `infra/backups/topology.yaml` exists, compare the last-run
-     timestamps in `infra/backups/_state.yaml` against the pipeline schedules
-     declared in `topology.yaml` (validation + staleness rules:
-     `infra/backups/README.md`). Surface a ⚠ block **only** when a pipeline is
-     stale or its last run failed — a dead/stale pipeline (e.g. launchd job
-     booted out) is push-worthy; all-green stays silent.
-     Per standing-order `backup-health`.
+   - Backups: if `infra/backups/topology.yaml` exists, run the health check the
+     backup executor ships (here: `infra/backups/check-health.sh`) rather than
+     reading `_state.yaml` by hand. Surface a ⚠ block **only** for a dead job, a
+     wedged process, or a pipeline with no successful run inside its schedule
+     window; all-green stays silent. Validation + staleness rules:
+     `infra/backups/README.md`.
+
+     > **Never derive backup health from `exit_code`.** rclone returns `1` when a
+     > *single* file fails and `10` on `--max-duration`, which is the normal
+     > outcome for a running mirror — both come and go without anything being
+     > wrong. Reporting them as failures is alarming on noise, and it once led to
+     > a "replace the drive" recommendation while SMART, mount and free space
+     > were all fine. The three signals that carry meaning, in order: the service
+     > manager says the job is loaded · no sync process is wedged (long-running
+     > with a log that stopped growing) · a *successful* run happened inside the
+     > schedule window (`last_ok`, never `last_run` — a run that fails instantly
+     > still stamps `last_run` and would paint a total outage green).
 5. **Admin debt** (cleanup, stale tasks, issue hygiene)
 
 A customer task with `🟢` + `last_updated ≥ 3d` belongs in bucket 1,

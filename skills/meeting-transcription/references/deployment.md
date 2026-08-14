@@ -204,11 +204,29 @@ re-applying the `REPLACE_ME_HOME` substitution).
 ```bash
 # Validate first
 check-jsonschema --schemafile workflow/contexts/_schema.yaml workflow/contexts/<ctx>.yaml
-# Extract → deploy
+# Extract
 python3 skills/meeting-transcription/scripts/extract_runtime_contexts.py \
    --src workflow/contexts --out /tmp/runtime-contexts
-rsync -av --delete /tmp/runtime-contexts/ worker-host:transcribe-pipeline/contexts/
 ```
+
+**Check `infra/transcriptions/topology.yaml` for a "SHARED WORKER" note before
+deploying.** One worker host commonly serves more than one bridge instance —
+each instance's `workflow/contexts/` only knows its own contexts, so a
+directory-wide delete-sync wipes every other instance's runtime yaml too
+(this happened 2026-08-13: a `--delete` sync from a repo that only knew 2
+contexts erased 2 other instances' contexts off a 4-context shared worker).
+Default to deploying a single file:
+
+```bash
+scp /tmp/runtime-contexts/<ctx>.yaml worker-host:transcribe-pipeline/contexts/<ctx>.yaml
+```
+
+Only use a directory-wide delete-sync (`rsync -av --delete /tmp/runtime-contexts/
+worker-host:transcribe-pipeline/contexts/`) when you have **confirmed** — by
+listing `~/transcribe-pipeline/contexts/` on the worker and checking every
+`.yaml` there traces back to a context this repo owns — that no other
+instance shares the worker. When in doubt, single-file `scp`.
+
 No worker restart needed — the worker re-reads context yamls on every
 WatchPath fire.
 

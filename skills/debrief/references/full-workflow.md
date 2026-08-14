@@ -336,6 +336,17 @@ meeting only *mentions*. Do this in addition to the issue matrix:
 Hard rule: this phase runs **before** Phase 6 protocol generation, so the
 protocol can reference the real issue URLs.
 
+### 5c. Stakeholder-channel check
+
+If an action item is assigned to a stakeholder who, per a prior debrief finding or the
+resolved context's roster, does not track `bridge_only` local tasks, ask whether a matching
+GitHub issue should also be created or commented on. Search for an existing matching issue
+first (assignee + keyword search across the relevant repos) before proposing a new one. A
+`bridge_only` task is invisible to anyone outside this Bridge instance; if the point matters
+to that stakeholder, it needs to land somewhere they actually look. Surface this as its own
+line in Checkpoint 2, same as the unbound-action-items question above — don't infer that the
+stakeholder will see it just because they said it themselves in the call.
+
 ## Phase 6: Generate Protocol
 
 Read `protocol-templates.md` for the 4 depth-based templates (Full, Workshop,
@@ -470,9 +481,18 @@ defines one (then set the summary's `wiki:` frontmatter to `done` + url).
 
 ## Phase 7: Distribution Email (optional)
 
-Read `references/distribution-email.md` for the full flow. Triggered when:
+Read `references/distribution-email.md` for the full flow.
+
+**Auto-draft** (unchanged) — the full recipient-resolution + draft flow below runs
+automatically when:
 - `meeting_types.{type}.distribution.email: true` in classification config, OR
 - user flag `--email`
+
+**Always-offer** (learned 2026-08-12) — even when auto-draft doesn't trigger, ask once at
+the end of the debrief: *"Kurze Zusammenfassung als Mail-Entwurf vorbereiten? [y/N]"*. On
+yes, run the same draft flow but ask for the recipient explicitly rather than
+auto-resolving it; never guess a recipient for confidential/internal topics. Meeting
+participants often want a follow-up summary they didn't think to request explicitly.
 
 Summary:
 1. Resolve recipients from `identity/mandants/{distribution_mandant}.yaml` — only
