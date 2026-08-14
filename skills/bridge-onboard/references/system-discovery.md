@@ -258,6 +258,8 @@ suggestions:
     decline_count: 1   # 3 declines → silenced forever
   remotes:
     status: nothing_found   # scan ran but no mesh-VPN + 0 ssh hosts
+  transcription:
+    status: not_evaluated   # confined default — never scanned, never asked
 ```
 
 Status values:
@@ -269,6 +271,12 @@ Status values:
 | `declined` | user said no | yes, on `--rescan` unless `decline_count ≥ 3` |
 | `silenced` | declined 3×, never surface again | no |
 | `nothing_found` | scan ran but produced no evidence | only if new evidence appears |
+| `not_evaluated` | no scan ran, the feature was never looked for — the `discovery.mode: confined` default's honest starting state for every catalog feature Phase A/C didn't otherwise decide | yes, freely — nothing was decided, so nothing was declined |
+
+`not_evaluated` is distinct from `nothing_found`: the latter asserts a scan ran and
+came up empty (a claim `confined` can't make — no scan ran at all). It is seeded
+unconditionally by Phase D (`workflow.md` § D5) for every catalog feature no
+earlier phase already wrote a decision for — see that section for the writer.
 
 This file lives in `work/` (USER layer), is **not** gitignored — it's
 useful in commits as a record of setup decisions.

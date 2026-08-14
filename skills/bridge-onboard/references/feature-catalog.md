@@ -192,11 +192,11 @@ skills.
 **Activate:** Run `/knowledge-repo-init` directly — it's its own wizard.
 
 ### Meeting Transcription & Debrief
-**What:** `/debrief` (transcript → 7-category insights + protocol generation + task proposals), shipped with open-bridge. A local transcription pipeline (e.g. a Whisper-based `meeting-transcriber` skill) is an example of an org-overlay or user skill that feeds it — not shipped here.
+**What:** `/debrief` (transcript → 7-category insights + protocol generation + task proposals), shipped with open-bridge. Automated transcription is optional and bring-your-own — either your own tool dropping a transcript into imports (no config needed), or the shipped reference pipeline, `skills/meeting-transcription/` (whisper.cpp + pyannote diarization on a worker host or a single local machine), which now ships as CORE.
 
-**When you need it:** You record meetings (own or others) and want them processed into structured notes instead of buried as audio files.
+**When you need it:** You record meetings (own or others) and want them processed into structured notes instead of buried as audio files. The reference pipeline is worth it once transcription volume justifies provisioning a worker; for occasional use, any manual transcription tool + drop-in-imports is simpler.
 
-**Activate:** `/debrief` autoloads on triggers. If you want automated transcription, add your own transcriber skill in your overlay/seed repo and point it at your recording inbox.
+**Activate:** `/debrief` autoloads on triggers with no setup. For automated transcription, add the `integrations.transcription` block to `bridge-config.yaml` per [`docs/transcription-worker.md`](../../../docs/transcription-worker.md) (no interactive `--add` wizard — it's a provisioning step, not a toggle) and follow the reference pipeline's `references/deployment.md`, or point `sync_script` at your own worker.
 
 ### Banking / Finance
 **What:** Read-only finance integration — account balances, transaction lookups, "is invoice X paid?". Never triggers transfers automatically. MoneyMoney is the reference implementation (read via AppleScript, ships a `/moneymoney` skill); other finance apps map to the same capability.
@@ -349,7 +349,8 @@ annotates each entry accordingly:
 | `deferred (remind_after: <date>)` | ⏸ deferred until {date} |
 | `silenced` | hidden (don't surface) |
 | `nothing_found` | (no signal yet) |
-| (no state) | (not yet considered) |
+| `not_evaluated` | (not yet considered) |
+| (no state) | catalog gained this since your onboarding — `--add <name>` to try it |
 
 The `--features` mode lets the user click into any entry and re-decide;
 that re-decision updates `onboarding-state.yaml` and (if accepted) runs
