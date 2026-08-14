@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.bks.voicememo-notify.plist
+  ────────────────────────────────
+  Runs on the configured transcription worker (worker + capture machine, see
+  work/streams/voice-memo-debrief-automation/). Watches
+  ~/Transcripts/voicememo/ for finished transcripts and emails each one to
+  Michael via voicememo-notify.sh — unattended, no interactive session
+  involved. Ordinary bridge-created directory, not an Apple Group Container,
+  so none of the TCC/Full-Disk-Access dance com.bks.voicememo-bundler.plist
+  needed applies here — plain /bin/bash is fine.
+
+  REPLACE_ME_HOME: plists cannot expand ~ — substitute REPLACE_ME_HOME with
+  your home directory at deploy time:
+    sed -i '' "s|REPLACE_ME_HOME|$HOME|g" com.bks.voicememo-notify.plist
+
+  Install:
+    cp com.bks.voicememo-notify.plist ~/Library/LaunchAgents/
+    cp voicememo-notify.sh ~/bin/ && chmod +x ~/bin/voicememo-notify.sh
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.bks.voicememo-notify.plist
+
+  Verify:
+    launchctl print gui/$(id -u)/com.bks.voicememo-notify
+
+  Logs:
+    ~/Library/Logs/voicememo-notify.log
+    ~/Library/Logs/voicememo-notify.launchd.{out,err}
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bks.voicememo-notify</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>REPLACE_ME_HOME/bin/voicememo-notify.sh</string>
+    </array>
+
+    <key>WatchPaths</key>
+    <array>
+        <string>REPLACE_ME_HOME/Transcripts/voicememo</string>
+    </array>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Same safety net as com.bks.voicememo-bundler.plist — a periodic
+         sweep in case a WatchPath event on the transcript write is ever
+         missed/mistimed. Idempotent, so a no-op sweep costs nothing. -->
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_ME_HOME/Library/Logs/voicememo-notify.launchd.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>REPLACE_ME_HOME/Library/Logs/voicememo-notify.launchd.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>REPLACE_ME_HOME</string>
+    </dict>
+</dict>
+</plist>
