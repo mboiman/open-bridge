@@ -71,6 +71,8 @@ for part in sys.argv[2].split("."):
     node = node[part]
 if isinstance(node, dict):
     print(" ".join(str(k) for k in node))
+elif isinstance(node, bool):
+    print(str(node).lower())   # YAML wants lowercase true/false; the Python bool default prints capitalized
 elif node is not None:
     print(node)
 ' "$1" "$2" 2>/dev/null || true
@@ -103,7 +105,22 @@ if [[ "$MODE" == remote && -z "$WORKER" ]]; then
   echo "mode 'remote' but no worker host — set worker.host in infra/transcriptions/topology.yaml or TRANSCRIBE_WORKER"; exit 1
 fi
 
-IMPORTS="${BRIDGE_IMPORTS:-$REPO_ROOT/work/imports}"
+# Imports dir: BRIDGE_IMPORTS env > bridge-config.yaml work.imports_dir > the
+# work/imports fallback. Resolving only against the hardcoded fallback (and
+# ignoring work.imports_dir) let this script silently desync from /debrief,
+# which scans work.imports_dir — see issue #104.
+_imports_cfg="$(cfg_get work.imports_dir)"
+if [[ -n "${BRIDGE_IMPORTS:-}" ]]; then
+  IMPORTS="$BRIDGE_IMPORTS"
+elif [[ -n "$_imports_cfg" ]]; then
+  case "$_imports_cfg" in
+    /*) IMPORTS="$_imports_cfg" ;;
+    ~*) IMPORTS="$(_tilde "$_imports_cfg")" ;;
+    *)  IMPORTS="$REPO_ROOT/$_imports_cfg" ;;
+  esac
+else
+  IMPORTS="$REPO_ROOT/work/imports"
+fi
 CONTEXTS="${TRANSCRIBE_CONTEXTS:-$(cfg_get integrations.transcription.contexts)}"
 if [[ -z "$CONTEXTS" ]]; then
   echo "no contexts configured — set TRANSCRIBE_CONTEXTS or add integrations.transcription.contexts to bridge-config.yaml"; exit 1
@@ -124,6 +141,42 @@ L_LIBRARY="$(_tilde "$(topo_get local.library_dir)")";         L_LIBRARY="${L_LI
 
 cmd="${1:-}"; case "$cmd" in pull|push|voiceprints) ;; *)
   echo "usage: debrief_sync.sh pull | push <audio> [context] | voiceprints pull|push"; exit 2 ;; esac
+
+# --- Capability registry (opt-in, checked on every pull/push) --------------
+# Publishes "a transcription worker exists on this machine and how to reach
+# it" to ~/.bridge-capabilities/transcription.yaml so a SIBLING Bridge
+# instance can discover it without reading this instance's own files (see
+# docs/capability-registry.md). Default OFF: only fires when this instance
+# opted in via integrations.transcription.share_capability: true. Runs
+# EVERY invocation (not a one-off manual step) so the flag stays wired once
+# set, and self-heals when the flag is later turned back off — flipping it
+# to false (or leaving it unset) removes this instance's own prior entry on
+# the very next pull/push, no separate teardown step to remember. Warns,
+# never fails: a registry hiccup must never break the actual sync.
+publish_capability() {
+  local share instance reg
+  share="$(cfg_get integrations.transcription.share_capability)"
+  instance="$(cfg_get identity.name)"
+  reg="$REPO_ROOT/scripts/capability_registry.py"
+  [[ -f "$reg" && -n "$instance" ]] || return 0   # no registry / no instance identity yet — nothing to do
+  if [[ "$share" == "true" ]]; then
+    local ctxdir host_args=()
+    if [[ "$MODE" == remote ]]; then
+      ctxdir="~/transcribe-pipeline/contexts"     # fixed worker-side convention, not locally overridable
+      host_args=(--host "$WORKER")
+    else
+      ctxdir="$(topo_get local.contexts_dir)"; ctxdir="${ctxdir:-~/transcribe-pipeline/contexts}"
+    fi
+    python3 "$reg" publish transcription --provider meeting-transcription \
+      --registered-by "$instance" "${host_args[@]}" --launchd-label "$KICK_LABEL" \
+      --contexts-dir "$ctxdir" >/dev/null 2>&1 \
+      || echo "WARN could not publish to the capability registry (non-fatal)"
+  else
+    python3 "$reg" remove transcription --registered-by "$instance" \
+      --provider meeting-transcription >/dev/null 2>&1 \
+      || echo "WARN could not clean up the capability registry (non-fatal)"
+  fi
+}
 
 # Remote reachability probe — skipped entirely in local mode.
 if [[ "$MODE" == remote ]]; then
@@ -165,6 +218,7 @@ case "$cmd" in
         fi
       done
     done
+    publish_capability
     echo "pull done — $pulled new transcript(s) into $IMPORTS"
     ;;
 
@@ -213,6 +267,7 @@ case "$cmd" in
         && echo "worker kicked" || echo "WARN could not kickstart worker (will rely on WatchPath / next run)"
       echo "pushed → $L_INBOX/$ctx/$ts (context=$ctx)"
     fi
+    publish_capability
     echo "transcription is async — run 'debrief_sync.sh pull' (or /debrief) in a few minutes to collect it"
     ;;
 

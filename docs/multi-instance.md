@@ -5,6 +5,7 @@ last_updated: 2026-06-21
 related:
   - docs/structure.md
   - docs/extension-model.md
+  - docs/capability-registry.md
 ---
 
 # Multi-Instance Setup
@@ -192,6 +193,13 @@ Data isolation answers *"can instance B read instance A's files?"*. Capability
 isolation answers a different question: *"whose skills actually run inside
 instance B's sessions?"* — and the branch split does not answer it, because
 skills are discovered per machine, not per branch.
+
+> **Not to be confused with:** the [Capability Registry](capability-registry.md)
+> uses "capability" in a different sense — whether a piece of **shared
+> infrastructure** (a transcription worker, a backup pipeline) is reachable
+> from this machine, opt-in and declared. This section is about which
+> **skills execute** in a session. Both protect against a different kind of
+> invisible cross-instance effect; neither is the other.
 
 **The one rule that keeps them isolated:**
 

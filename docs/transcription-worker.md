@@ -6,6 +6,7 @@ related:
   - ../skills/debrief/SKILL.md
   - ../infra/transcriptions/README.md
   - work-system.md
+  - capability-registry.md
 ---
 
 # Transcription worker — bring your own
@@ -43,6 +44,11 @@ integrations:
     enabled: true
     sync_script: "skills/meeting-transcription/scripts/debrief_sync.sh"  # repo-relative; swap for your own
     default_context: main       # context for audio handed off without an explicit one
+    share_capability: false     # publish "a worker exists + how to reach it" to
+                                 # ~/.bridge-capabilities/transcription.yaml so a SIBLING
+                                 # Bridge instance on this machine can discover it without
+                                 # reading this instance's own files. Opt-in, default off —
+                                 # see docs/capability-registry.md.
     contexts:
       main:                     # → workflow/contexts/main.yaml
         imports: work/imports   # where this context's finished transcripts land
