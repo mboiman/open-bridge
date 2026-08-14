@@ -23,6 +23,7 @@ instead of a bespoke `_MOC.md` / `index.md` convention.
 - [`org-overlays.md`](org-overlays.md) — the downstream inverse of `/promote`: how a Bridge subscribes to an org's `scope:org` content and materializes it as tracked copies.
 - [`workspaces.md`](workspaces.md) — binding config overlays + member repos into a named workspace (shared cross-tool identity + repo-local materialization).
 - [`workspace-acceptance-test.md`](workspace-acceptance-test.md) — standalone, zero-prior-context acceptance-test playbook for the workspace feature.
+- [`capability-registry.md`](capability-registry.md) — machine-global registry (`~/.bridge-capabilities/`) that lets a Bridge instance declare a shared capability (a transcription worker, a backup pipeline) exists and how to reach it, opt-in, without weakening data isolation.
 - [`knowledge-repo-pattern.md`](knowledge-repo-pattern.md) — pairing a Bridge instance with an optional knowledge/documentation repo.
 - [`skill-distribution-architecture.md`](skill-distribution-architecture.md) — ADR: where skills live across the tier model (framework repo vs org overlay marketplace).
 

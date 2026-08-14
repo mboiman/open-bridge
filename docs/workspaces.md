@@ -7,6 +7,7 @@ related:
   - docs/multi-instance.md
   - docs/structure.md
   - docs/workspace-acceptance-test.md
+  - docs/capability-registry.md
   - docs/schemas/workspace.schema.yaml
   - docs/schemas/workspaces-lock.schema.yaml
   - docs/schemas/workspaces-registry.schema.yaml
