@@ -6,7 +6,8 @@ here into one ``AgentConfig`` — the server/runner/executor stay instance-agnos
 
 Env overrides (so the same files run in dev and on the host) take precedence:
 ``PUBLIC_AGENT_URL``, ``AGENT_HOST``, ``AGENT_PORT``, ``CLAUDE_MODEL``,
-``GROUNDING_DIR``, ``CLAUDE_BINARY``, ``ENVIRONMENT``, ``CORS_ALLOWED_ORIGINS``.
+``GROUNDING_DIR``, ``CLAUDE_BINARY``, ``ENVIRONMENT``, ``CORS_ALLOWED_ORIGINS``,
+``AGENT_TRUST``.
 """
 from __future__ import annotations
 
@@ -24,6 +25,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = PROJECT_ROOT / "agents"
 
 _DEV_ENVIRONMENTS = {"local", "dev", "development", "test"}
+
+# trust: public | private — see § Trust profile below. Anything else (unset,
+# blank, typo) MUST fail closed to "public"; never silently widen an agent.
+_VALID_TRUST = frozenset({"public", "private"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 # Soft ceiling per embedded grounding file — a runaway file must not blow up the
 # system prompt. A ~110 KB CV is fine; this only guards against accidents.
@@ -105,6 +111,7 @@ class AgentConfig:
     messages: dict
     skills: list[dict]
     system_prompt: str
+    trust: str = "public"
     project_root: str = field(default=str(PROJECT_ROOT))
 
 
@@ -117,6 +124,27 @@ def _resolve_path(value: str | None) -> str | None:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return str(path.resolve())
+
+
+def resolve_trust(instance: str, spec_trust: str | None) -> str:
+    """Resolve the ``trust`` profile: ``AGENT_TRUST`` env, then ``agent.yaml``.
+
+    Fail-closed by construction: any value other than exactly ``"public"`` or
+    ``"private"`` (unset, blank, or a typo) resolves to ``"public"`` — a
+    misconfigured trust field must never silently grant a private agent's
+    relaxed settings. A non-blank unrecognized value is logged so the typo is
+    visible instead of silently downgrading forever.
+    """
+    raw = os.getenv("AGENT_TRUST") or spec_trust or "public"
+    value = str(raw).strip().lower()
+    if value in _VALID_TRUST:
+        return value
+    logger.warning(
+        "agent_trust: instance '%s' has unrecognized trust value %r "
+        "(agent.yaml trust: / AGENT_TRUST) — falling back to 'public' (fail-closed)",
+        instance, raw,
+    )
+    return "public"
 
 
 def resolve_cors(cfg_origins: list[str], dev_origins: list[str], environment: str) -> list[str]:
@@ -155,8 +183,23 @@ def load_agent_config(instance: str, *, environment: str | None = None) -> Agent
     port = int(os.getenv("AGENT_PORT", spec.get("port", 8011)))
     public_url = os.getenv("PUBLIC_AGENT_URL", spec.get("public_url") or f"http://{host}:{port}")
 
-    # working_dir = the grounding dir = cwd = read-confinement for the file tools.
-    working_dir = _resolve_path(os.getenv("GROUNDING_DIR", spec.get("grounding_dir"))) or str(PROJECT_ROOT)
+    trust = resolve_trust(instance, spec.get("trust"))
+    if trust == "private" and host not in _LOOPBACK_HOSTS:
+        logger.warning(
+            "agent_trust: instance '%s' has trust: private but binds to non-loopback "
+            "host %r — this exposes its relaxed settings (user+project settings, a "
+            "wider tool set, cwd=repo root, session resume) to the network. Bind to a "
+            "loopback host and put a tunnel/proxy in front, or set trust: public.",
+            instance, host,
+        )
+
+    # working_dir = cwd = read-confinement for the file tools. A public agent is
+    # confined to its grounding dir; a private/trusted agent gets the full instance
+    # repo root (CLAUDE.md, @-imports, .claude/skills) — see § Trust profile.
+    if trust == "private":
+        working_dir = str(PROJECT_ROOT)
+    else:
+        working_dir = _resolve_path(os.getenv("GROUNDING_DIR", spec.get("grounding_dir"))) or str(PROJECT_ROOT)
     extra_read_dirs = [p for p in (_resolve_path(d) for d in spec.get("extra_read_dirs", [])) if p]
 
     # Substitute path placeholders in allowed_tools so instance tools are invoked
@@ -215,5 +258,6 @@ def load_agent_config(instance: str, *, environment: str | None = None) -> Agent
         messages=spec.get("messages") or {},
         skills=spec.get("skills") or [],
         system_prompt=system_prompt,
+        trust=trust,
         project_root=str(PROJECT_ROOT),
     )
