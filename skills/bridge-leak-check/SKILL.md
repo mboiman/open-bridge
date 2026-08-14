@@ -55,7 +55,7 @@ Every hit lands in exactly one bucket:
 |---|---|---|---|
 | **Legitimate — self-reference** | ✅ ✓ | `bks-lab/open-bridge` inside the open-bridge repo, schema `$id` URLs that point at this repo's published schemas | Skip — this is correct |
 | **Legitimate — sister-repo** | ✅ ✓ | `{org}/bridge-deck` cross-link in same OSS family | Skip — this is correct |
-| **Leak — personal PII** | 🔴 | `<your-username>`, `<your-username>`, `~/`, personal hostnames | Always fix — replace with `<your-username>` placeholder |
+| **Leak — personal PII** | 🔴 | `<your-username>`, `/Users/<your-username>/`, personal hostnames | Always fix — replace with `<your-username>` placeholder |
 | **Leak — internal vocabulary** (OSS-strict) | 🟡 | an org-shortname scope value (e.g. `scope: acme`) in shipped skill docs, a hardcoded `org-bridge` overlay slug as the only "internal overlay" example | Generalize — see `vocabulary_renames` in `bridge-audit/data/renames.yaml` |
 
 ## Decision Tree

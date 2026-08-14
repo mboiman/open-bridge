@@ -7,6 +7,7 @@ related:
   - docs/multi-instance.md
   - docs/structure.md
   - docs/workspace-acceptance-test.md
+  - docs/capability-registry.md
   - docs/schemas/workspace.schema.yaml
   - docs/schemas/workspaces-lock.schema.yaml
   - docs/schemas/workspaces-registry.schema.yaml
@@ -38,7 +39,9 @@ scripts/workspace.py                 ← the workspace engine (this layer)
    ├── role: code    ─▶ git clone → .bridge/workspaces/<id>/<member>/   (ignored)
    │                     pin {url, ref, resolved_sha, path} in workspaces.lock.yaml
    └── role: config  ─▶ subprocess → scripts/overlay.py   (UNCHANGED, delegated)
-                         materializes tracked copies, owns overlays.lock.yaml
+                         materializes copies (git-excluded by default; see
+                         org-overlays.md § Git tracking of managed dests),
+                         owns overlays.lock.yaml
 ```
 
 ## Quickstart
@@ -220,7 +223,7 @@ subprocess: scripts/overlay.py --repo-root <root> add <git-url> --ref <ref> …
         │  (overlay.py's own branch gate, leak gate, conflict/precedence
         │   handling, per-file [y] prompts, and exit codes run UNCHANGED)
         ▼
-overlay.py writes the tracked copies + owns overlays.lock.yaml
+overlay.py writes the copies (git-excluded by default) + owns overlays.lock.yaml
         │
         ▼
 workspace.py records only the overlay NAME in the definition overlays[]

@@ -615,6 +615,45 @@ conventions: `identity/agent/README.md`; deck: `identity/agent/_soul-deck.yaml`.
 
 ---
 
+### D5 — Onboarding ledger (unconditional — always runs)
+
+**Why this exists:** every other writer of `work/onboarding-state.yaml`
+is conditional — Phase A steps 9/10 fire only on a signal, Phase C's
+"Record decision" (step 2) fires only under `discovery.mode: broader`.
+On the default `confined` path with no multi-repo/machine signal, NONE
+of them fire, so the file never gets created and `feature_discovery`
+has nothing to count against (see issue #106). Phase D always runs
+regardless of `discovery.mode`, so it is the one place that can close
+this unconditionally.
+
+**What it does:** for every catalog feature — every `### <Title>` entry in
+`feature-catalog.md` with its own independent **Activate:** path (an
+`/bridge-onboard --add <slug>` verb, OR an explicit config block/key the
+user sets by hand, e.g. Meeting Transcription's `integrations.transcription`
+or ADO's `integrations.ado.enabled`) — that does **not already have an
+entry** under `suggestions:` in `work/onboarding-state.yaml` (from Phase A
+steps 9/10, or Phase C when it ran), write one with `status: not_evaluated`
+(see `system-discovery.md § Discovery State` for the enum). Skip only what
+Phase D itself already decided under its own key (Task Management via D1 →
+`work.enabled`, Themes via D2 → `theme:`) and anything the catalog marks as
+not shipped here / org-overlay-only / "not yet public" (that entry has no
+real activation path to evaluate). No `decided_at` — nothing was decided,
+so there is nothing to timestamp. Never overwrite an existing entry — this
+step only fills gaps.
+
+Reading `feature-catalog.md`'s own entries (rather than a hardcoded list
+here) means this step never goes stale as the catalog grows — a hardcoded
+snapshot would silently drift exactly the way `onboarding-state.yaml`
+itself did before this fix.
+
+**Note in the Phase D summary:**
+```
+Onboarding ledger — {N} not yet evaluated (never scanned, never asked).
+/bridge-onboard --features to browse them, --add <name> to turn one on.
+```
+
+---
+
 ## Phase E — Feature Catalog *(read-only, no questions)*
 
 **Modular by design — there is no "full package".** Every feature is à la
@@ -669,7 +708,10 @@ exists" pointer, not a second survey.
 2. **Verify required files exist:**
    - `ecosystem.yaml`, `bridge-config.yaml` (always)
    - `work/{log.md,board.md}` and `work/{tasks,streams}/` etc. if `work.enabled: true`
-   - `work/onboarding-state.yaml` if Phase C ran
+   - `work/onboarding-state.yaml` — **unconditionally**, after ANY completed run (Phase D §
+     D5 seeds it even when Phase C never ran; a missing file here means D5 itself broke, not
+     that Phase C was skipped — see issue #106, this qualifier is exactly what let the bug
+     hide for three and a half weeks)
    - `.gitignore` includes `work/onboarding-scan.json`
 
 3. **Capability check — whose skills will actually run in this instance?**

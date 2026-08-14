@@ -44,7 +44,16 @@ A Bridge-Agent has two faces over the same machinery:
   trust boundary.
 
 The safety model below is written for the outer face, where every request is
-assumed hostile. An inner-face deployment relaxes the caps but keeps the same shape.
+assumed hostile. An inner-face deployment relaxes the caps but keeps the same shape:
+set `trust: private` in `agent.yaml` (default and fail-closed fallback: `public` —
+an unrecognized value never silently widens an agent). `agents/_runtime/config.py`
+resolves it (env override `AGENT_TRUST`) and `agents/_runtime/runner.py`'s
+`_build_cmd` applies the relaxed shape — `--setting-sources user,project`, cwd = the
+instance repo root instead of `grounding_dir`, a narrower denylist that still blocks
+real recon/secret-store/egress binaries, and `--resume` session continuity. The
+loader warns (does not refuse to start) if a `private` agent binds a non-loopback
+host. See the annotated `trust:` field in `agents/_template/agent.yaml` for the
+full comparison table.
 
 ## 2. Instance anatomy
 

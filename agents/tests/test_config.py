@@ -11,9 +11,15 @@ Pure function + ``tmp_path`` → fast and deterministic in CI.
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
+import _runtime.config as config_mod
 from _runtime.config import (
     MAX_INLINE_GROUNDING_BYTES,
     compose_inline_grounding,
+    load_agent_config,
+    resolve_trust,
 )
 
 BASE = "PERSONA PROMPT.\n"
@@ -71,3 +77,131 @@ def test_only_matching_files_embedded(tmp_path):
 
     assert "PUBLIC_CV" in out
     assert "PRIVATE_NOTES" not in out   # a non-matching sibling is never pulled in
+
+
+# ---------------------------------------------------------------------------
+# Trust profile — fail-closed resolution (``trust: public | private``, env
+# override ``AGENT_TRUST``), the cwd switch it drives, and the loader-level
+# non-loopback host warning. Default and every unrecognized value MUST resolve
+# to "public" — a typo must never silently grant the relaxed settings.
+# ---------------------------------------------------------------------------
+
+def _make_instance(tmp_path: Path, name: str, agent_yaml: str) -> None:
+    inst = tmp_path / name
+    inst.mkdir()
+    (inst / "agent.yaml").write_text(agent_yaml, "utf-8")
+    (inst / "system-prompt.md").write_text("PERSONA", "utf-8")
+
+
+def _load(monkeypatch, tmp_path, name, agent_yaml, **kwargs):
+    monkeypatch.delenv("AGENT_TRUST", raising=False)
+    monkeypatch.setattr(config_mod, "AGENTS_DIR", tmp_path)
+    _make_instance(tmp_path, name, agent_yaml)
+    return load_agent_config(name, environment="test", **kwargs)
+
+
+def test_resolve_trust_defaults_to_public_when_unset(monkeypatch):
+    monkeypatch.delenv("AGENT_TRUST", raising=False)
+    assert resolve_trust("x", None) == "public"
+    assert resolve_trust("x", "") == "public"
+
+
+def test_resolve_trust_accepts_private(monkeypatch):
+    monkeypatch.delenv("AGENT_TRUST", raising=False)
+    assert resolve_trust("x", "private") == "private"
+
+
+def test_resolve_trust_unrecognized_value_falls_back_to_public(monkeypatch):
+    monkeypatch.delenv("AGENT_TRUST", raising=False)
+    assert resolve_trust("x", "super-trusted") == "public"
+
+
+def test_resolve_trust_env_override_wins_over_spec(monkeypatch):
+    monkeypatch.setenv("AGENT_TRUST", "private")
+    assert resolve_trust("x", "public") == "private"
+
+
+def test_absent_trust_field_resolves_to_public(tmp_path, monkeypatch):
+    cfg = _load(monkeypatch, tmp_path, "notrust", 'name: "NoTrust"\n')
+    assert cfg.trust == "public"
+
+
+def test_explicit_public_trust_is_a_noop(tmp_path, monkeypatch):
+    cfg = _load(monkeypatch, tmp_path, "expltrust", 'name: "Expl"\ntrust: "public"\n')
+    assert cfg.trust == "public"
+
+
+def test_unrecognized_trust_in_yaml_falls_back_to_public_and_warns(tmp_path, monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger="_runtime.config"):
+        cfg = _load(monkeypatch, tmp_path, "badtrust", 'name: "Bad"\ntrust: "supertrusted"\n')
+    assert cfg.trust == "public"
+    assert any("unrecognized trust value" in r.message for r in caplog.records)
+
+
+def test_blank_trust_in_yaml_falls_back_to_public_without_crash(tmp_path, monkeypatch):
+    cfg = _load(monkeypatch, tmp_path, "blanktrust", 'name: "Blank"\ntrust: ""\n')
+    assert cfg.trust == "public"
+
+
+def test_agent_trust_env_overrides_yaml_field(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "AGENTS_DIR", tmp_path)
+    _make_instance(tmp_path, "envtrust", 'name: "EnvTrust"\ntrust: "public"\n')
+    monkeypatch.setenv("AGENT_TRUST", "private")
+    cfg = load_agent_config("envtrust", environment="test")
+    assert cfg.trust == "private"
+
+
+def test_public_trust_cwd_is_the_grounding_dir(tmp_path, monkeypatch):
+    ground = tmp_path / "ground"
+    ground.mkdir()
+    cfg = _load(
+        monkeypatch, tmp_path, "pubcwd",
+        f'name: "Pub"\ngrounding_dir: "{ground}"\n',
+    )
+    assert cfg.trust == "public"
+    assert cfg.working_dir == str(ground.resolve())
+
+
+def test_private_trust_cwd_is_the_project_root_even_with_grounding_dir_set(tmp_path, monkeypatch):
+    ground = tmp_path / "ground"
+    ground.mkdir()
+    cfg = _load(
+        monkeypatch, tmp_path, "privcwd",
+        f'name: "Priv"\ntrust: "private"\nhost: "127.0.0.1"\ngrounding_dir: "{ground}"\n',
+    )
+    assert cfg.trust == "private"
+    assert cfg.working_dir == str(config_mod.PROJECT_ROOT)
+    assert cfg.working_dir != str(ground.resolve())
+
+
+def test_private_trust_on_non_loopback_host_warns(tmp_path, monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger="_runtime.config"):
+        cfg = _load(
+            monkeypatch, tmp_path, "exposedpriv",
+            'name: "Exposed"\ntrust: "private"\nhost: "0.0.0.0"\n',
+        )
+    assert cfg.trust == "private"
+    assert cfg.host == "0.0.0.0"
+    assert any("non-loopback" in r.message for r in caplog.records)
+
+
+def test_private_trust_on_loopback_host_does_not_warn(tmp_path, monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger="_runtime.config"):
+        cfg = _load(
+            monkeypatch, tmp_path, "safepriv",
+            'name: "Safe"\ntrust: "private"\nhost: "127.0.0.1"\n',
+        )
+    assert cfg.trust == "private"
+    assert not any("non-loopback" in r.message for r in caplog.records)
+
+
+def test_public_trust_on_non_loopback_host_does_not_warn(tmp_path, monkeypatch, caplog):
+    """The warning is specific to trust: private — a public agent is MEANT to be
+    reachable from the network, so the same check must not fire for it."""
+    with caplog.at_level(logging.WARNING, logger="_runtime.config"):
+        cfg = _load(
+            monkeypatch, tmp_path, "pubwide",
+            'name: "PubWide"\nhost: "0.0.0.0"\n',
+        )
+    assert cfg.trust == "public"
+    assert not any("non-loopback" in r.message for r in caplog.records)

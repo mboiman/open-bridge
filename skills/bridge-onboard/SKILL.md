@@ -87,7 +87,11 @@ the same boundary without re-asking.
 
 Decision history lives in `work/onboarding-state.yaml` (NOT gitignored
 — useful as a record of setup choices) with statuses
-`accepted | deferred | declined | silenced | nothing_found`.
+`accepted | deferred | declined | silenced | nothing_found | not_evaluated`.
+Phase D writes it unconditionally (every catalog feature not otherwise
+decided gets `not_evaluated`), so it exists after any completed run —
+see `references/workflow.md` § D5 and `references/system-discovery.md`
+§ Discovery State.
 
 The `feature-discovery` standing-order (active when `work.enabled:
 true`) uses the same state file to avoid double-suggesting.

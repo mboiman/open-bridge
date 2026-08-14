@@ -9,7 +9,13 @@ critical gates.
 **Phase 0 — Transcription pickup (config-gated, runs first):** if
 `bridge-config.yaml` → `integrations.transcription.enabled: true`, fetch
 finished transcripts from the pipeline worker **before** scanning, so they're
-present for the Find below.
+present for the Find below. `enabled: false` skips this silently. When the
+whole `integrations.transcription` block is **absent** (not `false` — just
+never configured), this is not a deliberate no, so before staying silent run
+the two cheap checks in SKILL.md § Transcription pipeline (local
+`infra/transcriptions/topology.yaml` / `sync_script` presence, and the
+cross-instance `~/.bridge-capabilities/transcription.yaml` registry) — see
+that section for the exact one-line note and the staleness wording.
 
 **The destination is declared in the yaml, not guessed.**
 `integrations.transcription.contexts` is a map of `<context> → { imports: <dir> }`
@@ -30,11 +36,13 @@ BRIDGE_IMPORTS="<abs <dest>>" TRANSCRIBE_CONTEXTS="<ctx>" \
 It lands transcripts as `<context>-<name>.md` (idempotent — the worker moves
 each to `_debriefed/` so it's pulled once). The context prefix also drives
 downstream routing (`<customer>-*` → customer repo per your rules; `<org>-*` → internal).
-Skip silently if the integration is disabled, and continue gracefully if the
-worker is unreachable (the script exits non-zero — just proceed with whatever is
-already in imports). The reverse `push` direction (handing un-transcribed audio
-found in the scan to the pipeline) is described in SKILL.md § Transcription
-pipeline; the full worker contract lives in `docs/transcription-worker.md`.
+Skip silently if `enabled: false`; run the two-check surface above if the
+block is absent; continue gracefully if the worker is unreachable (the script
+exits non-zero — just proceed with whatever is already in imports) — none of
+these three ever block the run. The reverse `push` direction (handing
+un-transcribed audio found in the scan to the pipeline) is described in
+SKILL.md § Transcription pipeline; the full worker contract lives in
+`docs/transcription-worker.md`.
 
 If no path argument, scan **all** of these sources (deduplicate by filename):
 

@@ -77,9 +77,41 @@ worker is an optional integration — never a dependency:
   `bridge-config.yaml`): Phase 0 pulls finished transcripts via the
   `sync_script` before scanning (`pull`), and the Find phase may hand
   un-transcribed audio back to the worker (`push`).
-- **Fail-soft (hard rule):** integration disabled → skip silently; worker
-  unreachable (sync script exits non-zero) → proceed with whatever is already
-  in imports. A missing or broken worker must never block a debrief run.
+- **Fail-soft (hard rule):** worker unreachable (sync script exits non-zero) →
+  proceed with whatever is already in imports. A missing or broken worker must
+  never block a debrief run.
+- **Silent vs. surfaced — these are not the same absence, do not conflate them:**
+  - `integrations.transcription.enabled: false` → skip **silently**. A
+    deliberate no stays a no; re-asking is nagging.
+  - The `integrations.transcription` block **absent entirely** → not a no,
+    just no answer yet. Run TWO cheap, read-only checks before choosing
+    silence (neither is a scan — both read something already on disk for
+    exactly this purpose):
+    1. **local** — does [`infra/transcriptions/topology.yaml`](../../infra/transcriptions/README.md)
+       resolve a worker (`mode: remote` + `worker.host`, or `mode: local`),
+       or does a `sync_script` exist at the conventional path
+       (`skills/meeting-transcription/scripts/debrief_sync.sh`)?
+    2. **cross-instance** — does `~/.bridge-capabilities/transcription.yaml`
+       carry an entry (see [`docs/capability-registry.md`](../../docs/capability-registry.md))?
+       This is a **sibling Bridge instance's** opted-in worker on the same
+       machine — the case that motivated this split (see issue #105/#107):
+       a fully working worker, invisible because it was never registered
+       *here*.
+    If EITHER check finds something, say **one line** and continue — never
+    block, never prompt:
+    > Note: a transcription pipeline appears to exist on this machine but
+    > isn't registered for this bridge (`integrations.transcription` missing
+    > from `bridge-config.yaml`). `/debrief` continues without it —
+    > `/bridge-onboard --add transcription` to wire it up.
+
+    When the evidence is a registry entry, name the sibling and be honest
+    about its age — no active liveness probe is run (probing would turn a
+    read into a scan, which the registry is explicitly designed to avoid):
+    an entry with `registered_at` older than ~90 days gets *"last confirmed
+    {date} by {registered_by} — verify it's still running"* rather than
+    being asserted as current fact.
+    If NEITHER check finds anything → stay silent, exactly as today. Most
+    users have no worker; noise is worse than silence.
 
 The full worker contract (config block, sync-script verbs, failure semantics,
 output format) lives in

@@ -33,6 +33,7 @@ SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS="$SKILL_DIR/scripts"
 REAL_DEBRIEF="$SCRIPTS/debrief_sync.sh"
 REAL_ADDCTX="$SCRIPTS/add_context.sh"
+REPO_SCRIPTS="$(cd "$SKILL_DIR/../../scripts" && pwd)"
 
 PASS=0
 FAIL=0
@@ -70,12 +71,17 @@ mk_repo() {
            "$d/workflow/contexts" \
            "$d/work/imports" \
            "$d/identity/voiceprints" \
+           "$d/scripts" \
            "$d/home"
   cp "$SCRIPTS/debrief_sync.sh" "$SCRIPTS/add_context.sh" \
      "$SCRIPTS/extract_runtime_contexts.py" \
      "$d/skills/meeting-transcription/scripts/"
   chmod +x "$d/skills/meeting-transcription/scripts/debrief_sync.sh" \
            "$d/skills/meeting-transcription/scripts/add_context.sh"
+  # scripts/capability_registry.py — copied in so publish_capability's
+  # standalone-guarantee check (`[[ -f "$reg" ]]`) finds it; the tests that
+  # don't touch share_capability never reach that branch (no identity.name).
+  cp -r "$REPO_SCRIPTS/capability_registry.py" "$REPO_SCRIPTS/lib" "$d/scripts/"
   echo "$d"
 }
 
@@ -279,6 +285,125 @@ else
   sed 's/^/    /' /tmp/.tx_snap_diff.$$
 fi
 rm -f /tmp/.tx_snap_diff.$$
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "-- 5. imports dir resolution (issue #104) --"
+
+# 5a. work.imports_dir honored when BRIDGE_IMPORTS is unset.
+r=$(mk_repo)
+H="$r/home"
+CTX=demo
+cat > "$r/bridge-config.yaml" <<'YAML'
+work:
+  imports_dir: custom-imports
+integrations:
+  transcription:
+    contexts:
+      demo: {}
+YAML
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with work.imports_dir set (no BRIDGE_IMPORTS) exits 0"
+assert_file "$r/custom-imports/${CTX}-note.md" "pull lands in work.imports_dir, resolved relative to repo root"
+assert_absent "$r/work/imports/${CTX}-note.md" "pull does NOT fall back to the hardcoded work/imports when config sets a different dir"
+
+# 5b. BRIDGE_IMPORTS still wins over work.imports_dir when both are set.
+r=$(mk_repo)
+H="$r/home"
+cat > "$r/bridge-config.yaml" <<'YAML'
+work:
+  imports_dir: custom-imports
+integrations:
+  transcription:
+    contexts:
+      demo: {}
+YAML
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" BRIDGE_IMPORTS="$r/env-override" \
+    bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with BOTH BRIDGE_IMPORTS and work.imports_dir set exits 0"
+assert_file "$r/env-override/${CTX}-note.md" "BRIDGE_IMPORTS wins over work.imports_dir"
+assert_absent "$r/custom-imports/${CTX}-note.md" "work.imports_dir is NOT used when BRIDGE_IMPORTS is set"
+
+# 5c. No config at all still falls back to work/imports (back-compat).
+r=$(mk_repo)
+H="$r/home"
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with no config at all exits 0"
+assert_file "$r/work/imports/${CTX}-note.md" "no config → falls back to work/imports (back-compat)"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "-- 6. capability registry — opt-in publish/remove (issue #107) --"
+
+CAPDIR="$(mktemp -d)"; TMPS="$TMPS $CAPDIR"
+
+# 6a. share_capability: true publishes an entry after a successful pull.
+r=$(mk_repo)
+H="$r/home"
+CTX=demo
+cat > "$r/bridge-config.yaml" <<'YAML'
+identity:
+  name: test-instance-a
+integrations:
+  transcription:
+    share_capability: true
+    contexts:
+      demo: {}
+YAML
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" BRIDGE_CAPABILITIES_DIR="$CAPDIR" \
+    bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with share_capability: true still exits 0"
+run python3 "$REPO_SCRIPTS/capability_registry.py" --registry-dir "$CAPDIR" list transcription
+assert_contains "$OUT" "test-instance-a" "share_capability: true publishes THIS instance's entry"
+assert_contains "$OUT" "meeting-transcription" "the published entry names the provider"
+
+# 6b. share_capability left unset (default off) never publishes.
+r=$(mk_repo)
+H="$r/home"
+cat > "$r/bridge-config.yaml" <<'YAML'
+identity:
+  name: test-instance-b
+integrations:
+  transcription:
+    contexts:
+      demo: {}
+YAML
+CAPDIR2="$(mktemp -d)"; TMPS="$TMPS $CAPDIR2"
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" BRIDGE_CAPABILITIES_DIR="$CAPDIR2" \
+    bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with share_capability unset (default) still exits 0"
+run python3 "$REPO_SCRIPTS/capability_registry.py" --registry-dir "$CAPDIR2" list transcription
+assert_not_contains "$OUT" "test-instance-b" "default (unset) share_capability never publishes — opt-in, not opt-out"
+
+# 6c. flipping share_capability back to false self-heals: removes the prior entry.
+r=$(mk_repo)
+H="$r/home"
+cat > "$r/bridge-config.yaml" <<'YAML'
+identity:
+  name: test-instance-a
+integrations:
+  transcription:
+    share_capability: false
+    contexts:
+      demo: {}
+YAML
+mkdir -p "$H/Transcripts/$CTX"
+printf 'body\n' > "$H/Transcripts/$CTX/note.md"
+run env HOME="$H" TRANSCRIBE_MODE=local TRANSCRIBE_CONTEXTS="$CTX" BRIDGE_CAPABILITIES_DIR="$CAPDIR" \
+    bash "$(D_SYNC "$r")" pull
+assert_rc_zero "$RC" "pull with share_capability: false exits 0"
+run python3 "$REPO_SCRIPTS/capability_registry.py" --registry-dir "$CAPDIR" list transcription
+assert_not_contains "$OUT" "test-instance-a" "flipping share_capability to false removes THIS instance's prior entry on the next run"
 
 # ---------------------------------------------------------------------------
 echo ""
