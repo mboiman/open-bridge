@@ -306,7 +306,7 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
 # All nine verified byte-identical on 2026-08-01. This is NOT a README shape
 # rule — it is a nine-element literal list that happens to contain four READMEs,
 # each individually checked. identity/voiceprints/README.md and
-# infra/channels/bots/igor-zahnarzt/README.md are absent BY CONSTRUCTION.
+# infra/channels/bots/example-clinic/README.md are absent BY CONSTRUCTION.
 # Position (after PERSONAL/USER/ORG) means a careless addition here degrades to
 # a no-op instead of overriding a denylist.
 VERIFIED_CORE = frozenset({
