@@ -26,7 +26,11 @@ import asyncio
 import json
 import time
 
-from _runtime.runner import SubprocessClaudeRunner
+from _runtime.runner import (
+    _DISALLOWED_TOOLS,
+    _PRIVATE_DISALLOWED_TOOLS,
+    SubprocessClaudeRunner,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -127,13 +131,14 @@ def _patch(monkeypatch, *, reader_factory=None, oserror=False):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
 
 
-def _runner(timeout: float = 30.0) -> SubprocessClaudeRunner:
+def _runner(timeout: float = 30.0, *, trust: str = "public") -> SubprocessClaudeRunner:
     return SubprocessClaudeRunner(
         binary="claude",
         model="test-model",
         system_prompt="system",
         working_dir=".",
         timeout=timeout,
+        trust=trust,
     )
 
 
@@ -398,3 +403,101 @@ async def test_call_injects_agent_context_id_into_subprocess_env(monkeypatch):
     answer = await _runner().__call__("hi", context_id="ctx-buffered-9")
     assert captured["env"].get("AGENT_CONTEXT_ID") == "ctx-buffered-9"
     assert answer == "buffered ok"
+
+
+# ---------------------------------------------------------------------------
+# Trust profile: public (default, byte-identical to pre-feature behavior) vs
+# private (relaxed) argv shape. config.py owns fail-closed RESOLUTION of the
+# `trust:` / AGENT_TRUST value into "public"/"private" (see test_config.py);
+# these lock what the runner does with an already-resolved value, including the
+# runner's OWN independent fail-closed fallback — belt-and-suspenders so a bad
+# value can never widen settings even via a future direct construction.
+# ---------------------------------------------------------------------------
+
+def test_default_trust_is_public_argv_identical_to_explicit_public():
+    """No trust kwarg at all (every caller before this feature) must produce the
+    exact same argv as an explicit trust="public" — the regression this whole
+    feature must not cause."""
+    default_cmd = _runner()._build_cmd("hi", stream=False)
+    explicit_public_cmd = _runner(trust="public")._build_cmd("hi", stream=False)
+    assert default_cmd == explicit_public_cmd
+
+
+def test_public_trust_argv_matches_pre_trust_shape():
+    cmd = _runner(trust="public")._build_cmd("hi", stream=False)
+    assert cmd[cmd.index("--setting-sources") + 1] == "project"
+    assert cmd[cmd.index("--disallowedTools") + 1] == _DISALLOWED_TOOLS
+    assert "--resume" not in cmd
+
+
+def test_unknown_trust_value_falls_back_to_public_argv():
+    cmd = _runner(trust="pivate")._build_cmd("hi", stream=False)  # typo, not "private"
+    assert cmd[cmd.index("--setting-sources") + 1] == "project"
+    assert cmd[cmd.index("--disallowedTools") + 1] == _DISALLOWED_TOOLS
+
+
+def test_blank_trust_value_falls_back_to_public_argv():
+    cmd = _runner(trust="")._build_cmd("hi", stream=False)
+    assert cmd[cmd.index("--setting-sources") + 1] == "project"
+    assert cmd[cmd.index("--disallowedTools") + 1] == _DISALLOWED_TOOLS
+
+
+def test_private_trust_widens_setting_sources():
+    cmd = _runner(trust="private")._build_cmd("hi", stream=False)
+    assert cmd[cmd.index("--setting-sources") + 1] == "user,project"
+
+
+def test_private_trust_uses_a_narrower_but_still_explicit_denylist():
+    cmd = _runner(trust="private")._build_cmd("hi", stream=False)
+    deny = cmd[cmd.index("--disallowedTools") + 1]
+    assert deny == _PRIVATE_DISALLOWED_TOOLS
+    assert deny != _DISALLOWED_TOOLS, "private must not reuse the public denylist verbatim"
+    # local file / search / VCS work within its own repo is relaxed...
+    for binary in ("cat", "grep", "sed", "git", "diff", "tar"):
+        assert f"Bash({binary}:*)" not in deny, f"{binary} should be relaxed for private trust"
+    # ...but real recon/secret-store/egress primitives stay blocked either way
+    for binary in ("curl", "ssh", "security", "sqlite3", "openssl", "wget"):
+        assert f"Bash({binary}:*)" in deny, f"{binary} must stay denied even for private trust"
+
+
+def test_private_trust_appends_resume_flag_with_session_id():
+    cmd = _runner(trust="private")._build_cmd(
+        "hi", stream=False, resume_session_id="sess-123"
+    )
+    assert cmd[cmd.index("--resume") + 1] == "sess-123"
+
+
+def test_private_trust_without_session_id_omits_resume_flag():
+    cmd = _runner(trust="private")._build_cmd("hi", stream=False)
+    assert "--resume" not in cmd
+
+
+def test_public_trust_ignores_resume_session_id():
+    """--resume is a private-trust-only mechanism — a caller passing a session id
+    to a public runner must not get it appended to argv."""
+    cmd = _runner(trust="public")._build_cmd(
+        "hi", stream=False, resume_session_id="sess-123"
+    )
+    assert "--resume" not in cmd
+
+
+async def test_private_trust_stream_yields_session_id_event(monkeypatch):
+    _patch(monkeypatch, reader_factory=lambda limit: _streamreader(
+        [_line({"type": "result", "result": "answer", "session_id": "sess-abc"})],
+        limit=limit,
+    ))
+    events = await _collect(_runner(trust="private"))
+    session_events = [e for e in events if e.get("kind") == "session_id"]
+    assert session_events == [{"kind": "session_id", "id": "sess-abc"}]
+    assert _answers(events)[0]["text"] == "answer"
+
+
+async def test_public_trust_stream_never_yields_session_id_event(monkeypatch):
+    """Even if claude -p happened to emit a session_id, a public agent must not
+    surface it — session resume is a private-trust-only capability."""
+    _patch(monkeypatch, reader_factory=lambda limit: _streamreader(
+        [_line({"type": "result", "result": "answer", "session_id": "sess-abc"})],
+        limit=limit,
+    ))
+    events = await _collect(_runner(trust="public"))
+    assert not [e for e in events if e.get("kind") == "session_id"]

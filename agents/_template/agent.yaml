@@ -29,12 +29,34 @@ model: "sonnet"   # a faster model (e.g. haiku) lowers latency for pure public Q
 # contract for how to make it FAST (keep grounding small / inject it into the prompt).
 timeout: 90
 
-# Grounding = the PUBLIC content the agent may read. This is ALSO the agent's cwd,
-# which confines Read/Glob/Grep to public content — never the bridge's private
-# files. A public agent must never be able to read identity/, work/, or memory.
-# Latency lever: the agent Reads this per turn — a large file = a slow turn + a big
-# NDJSON line. Keep it small, or inject the public content into system-prompt.md to
-# skip the per-turn Read entirely.
+# Trust profile — the two faces described in docs/representative-agent.md § "Two
+# faces, one self". Default AND fail-closed fallback (unknown/blank/typo'd value):
+# "public". An env override AGENT_TRUST takes precedence over this field.
+#
+#   public  (default, every shipped agent) — the outer face. Talks to anonymous
+#     visitors on the internet. cwd = grounding_dir below (read-confined to public
+#     content only), --setting-sources project (never your host ~/.claude), the
+#     full recon/secret-store/egress denylist, no session resume. This is the
+#     hardened shape this file's other comments describe.
+#
+#   private — the inner face. For a genuinely trusted deployment only (e.g. your
+#     own tooling, or a peer bridge you trust, talking to your OWN bridge-agent —
+#     never a public visitor). cwd becomes the instance repo root (full CLAUDE.md /
+#     @-imports / .claude/skills — the same context an interactive `claude` session
+#     has), --setting-sources user,project, a narrower denylist that still blocks
+#     real recon/secret-store/egress binaries (curl, ssh, security, sqlite3, …),
+#     and --resume session continuity. grounding_dir below is ignored for cwd
+#     purposes (still used for allowed_tools substitution). NEVER set this on an
+#     agent whose host (below) is reachable from outside the machine — the loader
+#     warns at startup if it is, but does not refuse to start.
+trust: "public"
+
+# Grounding = the PUBLIC content the agent may read. This is ALSO the agent's cwd
+# for a `public` agent (see trust: above), which confines Read/Glob/Grep to public
+# content — never the bridge's private files. A public agent must never be able to
+# read identity/, work/, or memory. Latency lever: the agent Reads this per turn —
+# a large file = a slow turn + a big NDJSON line. Keep it small, or inject the
+# public content into system-prompt.md to skip the per-turn Read entirely.
 grounding_dir: "<~/path/to/public/content>"
 
 # Read-only file access + ONLY your scoped instance tools, by ABSOLUTE path.

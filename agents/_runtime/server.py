@@ -111,6 +111,7 @@ def build_app(cfg: AgentConfig) -> Starlette:
         extra_read_dirs=cfg.extra_read_dirs,
         timeout=cfg.timeout,
         allowed_tools=cfg.allowed_tools,
+        trust=cfg.trust,
         timeout_message=cfg.messages.get(
             "timeout", "The request could not be processed in time. Please try again."
         ),
@@ -207,8 +208,8 @@ def main(instance: str, host: str | None, port: int | None, model: str | None) -
 
     app = build_app(cfg)
     logger.info(
-        "Starting Bridge-Agent '%s' (%s) on %s:%d — public=%s cwd=%s",
-        cfg.instance, cfg.name, cfg.host, cfg.port, cfg.public_url, cfg.working_dir,
+        "Starting Bridge-Agent '%s' (%s) on %s:%d — public=%s cwd=%s trust=%s",
+        cfg.instance, cfg.name, cfg.host, cfg.port, cfg.public_url, cfg.working_dir, cfg.trust,
     )
     logger.info("CORS origins: %s", cfg.cors_origins)
     print(f"Bridge-Agent '{cfg.instance}' starting at http://{cfg.host}:{cfg.port}")

@@ -88,6 +88,11 @@ class ClaudeAgentExecutor(AgentExecutor):
     ) -> None:
         self._runner = runner
         self._history: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        # claude's own session id per context, for --resume continuity (private
+        # trust only — the runner ignores this for a public agent, so tracking it
+        # unconditionally here is harmless either way). Bounded the same as
+        # ``_history`` via ``_remember``.
+        self._resume_sessions: OrderedDict[str, str] = OrderedDict()
         self._max_turns = max_turns
         self._max_contexts = max(1, max_contexts)
         self._max_input_chars = max_input_chars
@@ -206,7 +211,10 @@ class ClaudeAgentExecutor(AgentExecutor):
         answer_artifact_id = str(uuid.uuid4())
         try:
             if hasattr(self._runner, "stream"):
-                async for evt in self._runner.stream(prompt, context_id=cid):
+                resume_id = self._resume_sessions.get(cid)
+                async for evt in self._runner.stream(
+                    prompt, context_id=cid, resume_session_id=resume_id
+                ):
                     kind = evt.get("kind")
                     if kind == "step":
                         await updater.update_status(
@@ -222,6 +230,13 @@ class ClaudeAgentExecutor(AgentExecutor):
                             artifact_id=answer_artifact_id,
                             name="answer",
                         )
+                    elif kind == "session_id":
+                        # Private trust only (the runner never emits this for a
+                        # public agent) — remember for --resume on the next turn.
+                        session_id = evt.get("id")
+                        if session_id:
+                            self._resume_sessions[cid] = session_id
+                            self._resume_sessions.move_to_end(cid)
                     elif kind == "answer":
                         answer = evt.get("text", "")
             else:
@@ -310,7 +325,8 @@ class ClaudeAgentExecutor(AgentExecutor):
         if excess > 0:
             del turns[:excess]
         while len(self._history) > self._max_contexts:
-            self._history.popitem(last=False)
+            evicted_cid, _ = self._history.popitem(last=False)
+            self._resume_sessions.pop(evicted_cid, None)
 
     @staticmethod
     def _runtime_context_from(message) -> str:
