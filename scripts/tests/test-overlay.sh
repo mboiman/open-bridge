@@ -89,17 +89,19 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 # --- pristine consumer template (tracked tree only, no .git / .bridge) -------
-# bridge-config.yaml is gitignored in open-bridge itself, so `git archive` never
-# includes it there — but a downstream instance may deliberately TRACK its own
-# bridge-config.yaml (a private repo has no reason to gitignore it). Strip it
+# bridge-config.yaml and overlays.lock.yaml are both gitignored in open-bridge
+# itself, so `git archive` never includes them there — but a downstream instance
+# may deliberately TRACK either one (a private repo has no reason to gitignore
+# its own config or its own overlay subscription state; both are documented,
+# intentional exceptions in such an instance's own .gitignore). Strip both
 # unconditionally rather than relying on that being absent: every consumer must
-# start with a clean slate (only the overlay(s) each test explicitly subscribes),
-# never inheriting a real instance's actual upstreams (org overlays, personal
-# overlays, ...) into an "isolated" test fixture.
+# start with a genuinely clean slate (only the overlay(s) each test explicitly
+# subscribes, with no pre-existing lock entries), never inheriting a real
+# instance's actual upstreams or subscriptions into an "isolated" test fixture.
 PRISTINE="$TMP/pristine"
 mkdir -p "$PRISTINE"
 git -C "$ROOT" archive --format=tar HEAD | ( cd "$PRISTINE" && tar -xf - )
-rm -f "$PRISTINE/bridge-config.yaml"
+rm -f "$PRISTINE/bridge-config.yaml" "$PRISTINE/overlays.lock.yaml"
 
 mkcon() {  # echoes a fresh consumer dir on a user/test branch
   # mktemp -d for a UNIQUE dir — a counter incremented inside the $(mkcon)
