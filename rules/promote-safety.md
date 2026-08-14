@@ -160,9 +160,12 @@ promote:
         - "/Users/<your-username>"
         - "personas/<your-username>-"
   fallback_blocklist:                    # used when no explicit upstream target
-    - my-company
-    - first-name
-    - github-username
+    strings:
+      - my-company
+      - first-name
+      - github-username
+    patterns:
+      - "@my-company\\.com"
 ```
 
 **Selecting which list applies:**
@@ -247,7 +250,8 @@ REPO="${PROMOTE_REPO:-fallback_blocklist}"   # or open-bridge / your org-overlay
 # Pull strings + patterns from per-repo blocklist (with fallback)
 STRINGS=$(yq -r ".promote.content_blocklist.\"${REPO}\".strings[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 PATTERNS=$(yq -r ".promote.content_blocklist.\"${REPO}\".patterns[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
-[ -z "$STRINGS" ] && STRINGS=$(yq -r '.promote.fallback_blocklist[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
+[ -z "$STRINGS" ]  && STRINGS=$(yq -r '.promote.fallback_blocklist.strings[]?'  bridge-config.yaml 2>/dev/null | paste -sd'|' -)
+[ -z "$PATTERNS" ] && PATTERNS=$(yq -r '.promote.fallback_blocklist.patterns[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 
 UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|\bsk-[-A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AccountKey=[A-Za-z0-9+/]{20,}|/Users/[a-z0-9._-]+/'
 
@@ -332,7 +336,8 @@ MSG=$(git log -1 --format=%B <commit>)
 
 STRINGS=$(yq -r ".promote.content_blocklist.\"${REPO}\".strings[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 PATTERNS=$(yq -r ".promote.content_blocklist.\"${REPO}\".patterns[]?" bridge-config.yaml 2>/dev/null | paste -sd'|' -)
-[ -z "$STRINGS" ] && STRINGS=$(yq -r '.promote.fallback_blocklist[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
+[ -z "$STRINGS" ]  && STRINGS=$(yq -r '.promote.fallback_blocklist.strings[]?'  bridge-config.yaml 2>/dev/null | paste -sd'|' -)
+[ -z "$PATTERNS" ] && PATTERNS=$(yq -r '.promote.fallback_blocklist.patterns[]?' bridge-config.yaml 2>/dev/null | paste -sd'|' -)
 
 UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|\bsk-[-A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AccountKey=[A-Za-z0-9+/]{20,}|/Users/[a-z0-9._-]+/'
 
