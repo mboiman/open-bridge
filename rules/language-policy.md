@@ -4,7 +4,6 @@ description: CORE content is authored in English (open-bridge is the internation
 ---
 # Language Policy — CORE is English
 
-open-bridge is the canonical English upstream that every fork inherits.
 "English-only CORE" and "the orchestrator speaks German to a German user"
 are not in tension — they live on different axes. This file is the source
 of truth for which axis is which, and how a fork plugs in its own language

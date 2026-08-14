@@ -122,29 +122,18 @@ Cluster bridge-* (6 active). Before opening a 7th sibling:
 
 User decides. No auto-action.
 
-## Class A / B / C (per board-task-criteria.md)
+## Class A / B / C
 
-### Class A — Board task with STATUS.md
-- Cross-session pickup needed (risk / stakeholder / state notes for
-  later)
-- **OR** external recipient (mandant, customer wiki, GitHub issue)
+The three-class model (A = Board task, B = Log-only, C = Silent) and its
+decision tree live in
+[`board-task-criteria.md`](../protocols/standing-orders/board-task-criteria.md) —
+that file is the source of truth, not restated here. Worked examples:
 
-**Class A examples in this instance:** `customer-a-escalation`
-(customer escalation, multi-week), `customer-b-proposal` (customer,
-multi-phase), `external-stack-integration` (external stack,
-multi-session).
-
-### Class B — Log only
-- Otherwise, when state changed but no pickup needed
-- Must follow `document-work.md` format
-
-**Examples:** drift fix completed in one session, skill tweak after
-user feedback, bridge-meta edit without cross-session risk.
-
-### Class C — Silent
-- Pure read-only / routine command
-- `/briefing`, `/bridge-status`, `/archive`, `git status`,
-  `gh issue list`
+| Class | Example |
+|---|---|
+| A | `core-skill-refactor` (multi-session), `schema-migration` (multi-file), `contribute-upstream` (multi-phase) |
+| B | drift fix completed in one session, skill tweak after user feedback, bridge-meta edit without cross-session risk |
+| C | `/briefing`, `/bridge-status`, `/archive`, `git status`, `gh issue list` |
 
 ## Repair Recipes (drift cases)
 

@@ -19,15 +19,17 @@ skip this phase — not even for generic greetings.
 Only runs when Phase 0 returns NORMAL **and** `work.enabled: true` in
 bridge-config.yaml:
 
-1. Read `work/log.md` — last activity, current week
-2. Read `work/board.md` — active tasks (`work/tasks/` finite tasks; `work/streams/` long-running streams)
-3. Create today's day-block if missing (from `work/templates/day.md`; header `## {Weekday} DD.MM`)
-4. Load standing orders from `protocols/standing-orders/` (scope: always)
-5. Check CORE updates: `git log HEAD..main --oneline` — offer merge if new commits
-6. On "continue", "morning", "status": show summary, don't ask questions. When
-   `bridge-config.yaml` `purpose.statement` is non-empty, **lead the summary with**
-   `This Bridge is for {statement}.` so the session opens oriented around the
-   instance's north-star. Empty statement → omit the line (today's behaviour).
+1. Read `work/log.md` (last activity, current week) and `work/board.md`
+   (active tasks — `work/tasks/` finite, `work/streams/` long-running)
+2. Create today's day-block if missing (from `work/templates/day.md`;
+   header `## {Weekday} DD.MM`)
+3. Load standing orders from `protocols/standing-orders/` (scope: always)
+4. Check CORE updates: `git log HEAD..main --oneline` — offer merge if new
+5. On "continue", "morning", "status": show summary, don't ask questions.
+   When `bridge-config.yaml` `purpose.statement` is non-empty, **lead the
+   summary with** `This Bridge is for {statement}.` so the session opens
+   oriented around the instance's north-star. Empty statement → omit the
+   line (today's behaviour).
 
 ## Commit Hygiene
 
@@ -138,11 +140,9 @@ mode that rule exists to block.
 
 ### Offering to Commit
 
-After completing a logical unit of work:
-- Suggest committing: "Ready to commit these changes?"
-- Show what would be committed (files list)
-- On user branch: commit freely
-- On main: validate CORE-only paths first
+After a logical unit of work: suggest committing ("Ready to commit these
+changes?"), show the files list. On a user branch, commit freely; on main,
+validate CORE-only paths first.
 
 ## Context Switching
 
@@ -156,17 +156,19 @@ When switching to another repo:
 
 > When `work.enabled: true`, logging is **MANDATORY and CONTINUOUS — not
 > best-effort.** Every substantive unit of work gets its **own** `work/log.md`
-> row the **moment it lands** — in the same turn it happened, not batched at the
-> end, not once per day. That covers: a code change or commit, a bug fixed, a
-> decision made (+ the *why*), a finding worth keeping, a deploy/restart, an
-> issue/PR/board operation. If you did work this turn and there is no row for it,
-> the turn is **not finished** — append the row before you hand back. The
-> **tool-agnostic** deterministic backstop is the `scripts/hooks/pre-commit` hook
-> (armed via `core.hooksPath=scripts/hooks`): at every productive commit, from any
-> tool, it prints a per-event log reminder + the live active-task list + a WIP
-> re-check — **warn-only**, it never blocks. The `worklog-drift-check.sh` Stop hook
-> is a Claude-only reinforcement on top. Do not wait for either to nag — log as you go. The user should never have to ask "did you log
-> that?". When `work.enabled` is false, no logging is expected.
+> row the **moment it lands** — in the same turn it happened, not batched
+> at the end, not once per day. That covers: a code change or commit, a bug
+> fixed, a decision made (+ the *why*), a finding worth keeping, a
+> deploy/restart, an issue/PR/board operation. If you did work this turn and
+> there is no row for it, the turn is **not finished** — append the row
+> before you hand back. The tool-agnostic backstop is the
+> `scripts/hooks/pre-commit` hook (armed via `core.hooksPath=scripts/hooks`):
+> at every productive commit it prints a log reminder, the active-task list,
+> and a WIP re-check — **warn-only**, never blocking. The
+> `worklog-drift-check.sh` Stop hook is a Claude-only reinforcement on top.
+> Do not wait for either to nag — log as you go. The user should never have
+> to ask "did you log that?". When `work.enabled` is false, no logging is
+> expected.
 
 Mechanics under this gate:
 
@@ -179,13 +181,12 @@ Full work-system semantics — log format, logging levels, and the task lifecycl
 
 ## Completion landing
 
-At completion, do not leave work stranded on orphan feature branches or unmerged
-PRs — drive it to the repo's **default branch**. The finished state should live
-on the default; dangling feature branches and parked PRs are unwanted.
-
-Determine the default **live**, never assume it — `gh api repos/X --jq .default_branch`
-(e.g. `<you>/<your-bridge>` = `user/<name>`, open-bridge = `main`, an org overlay = `development`).
-The landing step then forks on what the default actually is:
+At completion, do not leave work stranded on orphan feature branches or
+unmerged PRs — drive it to the repo's **default branch**, determined
+**live**, never assumed (`gh api repos/X --jq .default_branch`; e.g.
+`<you>/<your-bridge>` = `user/<name>`, open-bridge = `main`, an org
+overlay = `development`). The landing step then forks on what the default
+actually is:
 
 - **Default is a personal user branch** (e.g. your own Bridge instance = `user/<name>`):
   commit + push there directly, no gate. This is the normal Feature-/USER-branch
@@ -200,14 +201,15 @@ The landing step then forks on what the default actually is:
 After an **approved** merge: sync local clones to the default
 (`git checkout <default> && git pull`) and delete stale feature branches.
 
-**Auto-end-of-work cycle** (normal Feature-/UAT-work): when a unit is done and
-verified, run the cycle yourself without being asked — deploy/restart the affected
-service and verify it runs, document (STATUS.md + `work/log.md` + relevant repo
-docs), commit + push the whole `work/` folder plus your own files to the
-Feature-/USER-branch — **but only when `origin` is a private repo you own; never
-push a `user/*` branch to a public/upstream origin** ([`push-guard.md`](push-guard.md)) —
-(atomic — stage only the intended paths, never sweep in unrelated in-flight
-changes), then confirm briefly (commit hashes + service state).
+**Auto-end-of-work cycle** (normal Feature-/UAT-work): when a unit is done
+and verified, run the cycle yourself without being asked — deploy/restart
+the affected service and verify it runs, document (STATUS.md +
+`work/log.md` + relevant repo docs), commit + push the whole `work/` folder
+plus your own files to the Feature-/USER-branch **only when `origin` is a
+private repo you own; never push a `user/*` branch to a public/upstream
+origin** ([`push-guard.md`](push-guard.md)). Stage atomically (intended
+paths only, never sweep in unrelated in-flight changes), then confirm
+briefly (commit hashes + service state).
 
 **Hard gates stay** regardless of the above: no push to `main`/`development`;
 **no push of a `user/*` branch (or USER content) to a PUBLIC/upstream origin** —
@@ -223,10 +225,11 @@ The conductor prepares; the human lands.
 ## Pre-"done" independent review
 
 Before declaring something **done / launch-ready / consistent**, run one
-independent **unframed** review pass — agents that judge fresh, with the brief
-"assume nothing is intentional, report everything" ("nimm nichts als intentional
-an"). Framed audits briefed with your own preloaded "ground truth" only check
-*against your assumptions* and dismiss the exact errors you got wrong; an
-unframed pass checks *the assumptions themselves*. Framed audits are good for
-fixing-against-spec, bad for finding your own thinking errors. This is the
-active-verification complement to SOUL § Verify before claim.
+independent **unframed** review pass: agents that judge fresh, briefed
+"assume nothing is intentional, report everything" ("nimm nichts als
+intentional an"). A framed audit, briefed with your own preloaded "ground
+truth," only checks *against your assumptions* and dismisses the exact
+errors you got wrong; an unframed pass checks *the assumptions themselves*
+— good for finding your own thinking errors, where a framed audit is only
+good for fixing-against-spec. This is the active-verification complement to
+SOUL § Verify before claim.
