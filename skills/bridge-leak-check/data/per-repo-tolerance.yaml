@@ -75,10 +75,14 @@ repos:
       - org-branding
       - internal-vocabulary
 
-# Universal pattern definitions — what each `tolerates`/`blocks` category means.
-# Keep these in sync with bridge-config.yaml.promote.content_blocklist (which is
-# USER-scoped) — this YAML is the OSS-shippable baseline that DOES NOT depend
-# on a local config file.
+# Universal pattern definitions — what each `tolerates`/`blocks` category MEANS
+# and which categories apply per repo. The `strings`/`patterns` below are
+# illustrative placeholders, not a live query source — no code reads this
+# block for matching. Actual personal-PII detection comes from
+# `bridge-config.yaml`'s `promote.always_leak` (category 3, unconditional)
+# and `promote.content_blocklist`/`fallback_blocklist` (categories 2 and 4,
+# per-repo) — both USER-scoped, both empty by default. This file is the
+# OSS-shippable category MAP; it never carries real identifiers.
 
 categories:
 
