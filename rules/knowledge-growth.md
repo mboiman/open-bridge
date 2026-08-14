@@ -5,10 +5,9 @@ description: Meta-rule — where new knowledge belongs (CLAUDE.md vs rules/ vs d
 
 # Knowledge Growth — where does new content go
 
-The Bridge's knowledge base grows by adding to the **right tier**, not by
-piling everything into `CLAUDE.md`. This rule is the decision table for
-that, plus the scope discipline that keeps generic CORE separate from
-instance-specific content.
+The Bridge's knowledge base grows by adding to the **right tier**, not
+piling into `CLAUDE.md`. This table decides where, plus the scope
+discipline that keeps generic CORE separate from instance-specific content.
 
 ## The four tiers
 
@@ -20,11 +19,11 @@ instance-specific content.
 | memory | recall | Hard-won facts, gotchas, decisions-and-why. One fact = one file. | Index line short |
 
 **Decision:**
-- A *gate* or *workflow the agent must follow* → `rules/`.
-- *Explanation a human reads to understand the system* → `docs/`.
-- A *non-obvious fact / workaround / decision* → memory.
-- A *pointer/routing rule the agent needs every session* → a short line in
-  `CLAUDE.md` that links to the `rules/` or `docs/` detail.
+- Gate or workflow the agent must follow → `rules/`.
+- Explanation a human reads to understand the system → `docs/`.
+- Non-obvious fact / workaround / decision → memory.
+- Pointer/routing rule needed every session → a short `CLAUDE.md` line
+  linking to the `rules/` or `docs/` detail.
 
 > **Knowledge-routing reflex:** a "drift" / "audit" / "consistency" /
 > "is X still accurate" request routes to the `bridge-audit` skill (it has the
@@ -136,7 +135,7 @@ turns), document across the five layers — fill the ones that apply:
 2. **Task → `work/tasks/<slug>/STATUS.md`** — plan, phases, data state, limits — for cross-session or multi-step work.
 3. **Cleanup / audit trail → the matching log** (e.g. `work/doc-system/log.md` for file ops); record reorg mappings so "where did X move" stays traceable.
 4. **Code / config → commit** (atomic, scope-split CORE → BKS → USER); push when the tree is clean.
-5. **Cross-session insight → memory, WITH a session-link** — `reference` (gotcha) / `project` (ongoing) / `feedback` (rule), each carrying its `<session-id>.jsonl` path so future sessions can trace back; keep the `MEMORY.md` index line short.
+5. **Cross-session insight → memory, with a session-link** — `reference` (gotcha) / `project` (ongoing) / `feedback` (rule), each carrying its `<session-id>.jsonl` path for traceability; keep the `MEMORY.md` index line short.
 
 ## Live inventory
 

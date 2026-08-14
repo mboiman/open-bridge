@@ -162,7 +162,16 @@ upstreams:
 # `materialize:` sub-block makes the entry overlay-capable: /overlay
 # sparse-clones `url@ref` into `cache`, then materializes the org's
 # scope:org files (skills, agents, contexts, project configs, an ecosystem
-# fragment) into the live tree as tracked copies pinned to immutable hashes.
+# fragment) into the live tree as file copies pinned to immutable hashes.
+# By default those copies are kept OUT of git (written to the local,
+# untracked .git/info/exclude) — a fork of a public repo is itself public,
+# so a `git add -A` must never be able to publish org content. That means
+# the consumer's copy is not backed up anywhere by default; the overlay's
+# own source repo is the authoritative backup. Set
+# materialize.track_managed_dests: true below to opt THIS overlay's dests
+# INTO normal git tracking instead (e.g. on a private instance where you
+# want them backed up in your own history) — off by default, never
+# auto-derived from repo visibility, flip it and re-run `/overlay sync`.
 # Overlay subscriptions are managed by /overlay (skill bridge-overlay) — you
 # opt IN by adding this block via `/overlay add`, never by hand. An entry
 # WITHOUT a materialize block is overlay-incapable (CORE-only no-op).
@@ -179,13 +188,19 @@ upstreams:
 #      cache: .bridge/overlays/my-org/        # own sparse cache (gitignored)
 #      precedence: 10                         # higher wins a dest collision
 #      select: ["**"]                         # glob of overlay paths to pull
+#      track_managed_dests: false             # true = git-track dests instead of excluding (default false)
 
 # ─── Promote Safety ───────────────────────────────────────────────────
 # Content scanned before cherry-pick onto CORE branches.
-# Three layers:
+# Four layers:
 #   1) content_blocklist — hard-block (personal-PII, customer names, secrets)
 #   2) scrub_rules       — auto-rewrite during sync (username/org/hostname placeholders)
 #   3) fallback_blocklist — applies when no upstream-specific list matches
+#   4) always_leak       — personal-PII that is a leak in EVERY destination
+#                          repo, checked regardless of --repo. Read by
+#                          bridge-leak-check (see
+#                          skills/bridge-leak-check/references/classification.md),
+#                          not by the per-destination promote-safety.md scan.
 # See rules/promote-safety.md for the full rule + decision matrix.
 promote:
   content_blocklist:
@@ -213,6 +228,15 @@ promote:
   fallback_blocklist:
     # Used when no upstream-specific list matches. Catches accidental leaks
     # in any direction. Add your org/customer/personal identifiers.
+    strings: []
+    patterns: []
+
+  always_leak:
+    # Personal-PII identifiers that ALWAYS count as a leak, in every
+    # destination repo — even your org overlay. Read by bridge-leak-check,
+    # separately from content_blocklist/fallback_blocklist above, so it
+    # keeps firing even when a per-repo list already matched something else.
+    # Add usernames, personal hostnames, Tailscale IPs, etc.
     strings: []
     patterns: []
 

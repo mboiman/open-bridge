@@ -42,14 +42,27 @@ Override with `--repo <name>`.
 # Strings + patterns from bridge-config.yaml.promote.content_blocklist.<REPO>
 STRINGS=$(yq -r ".promote.content_blocklist.\"$REPO\".strings[]?" bridge-config.yaml | paste -sd'|' -)
 PATTERNS=$(yq -r ".promote.content_blocklist.\"$REPO\".patterns[]?" bridge-config.yaml | paste -sd'|' -)
-[ -z "$STRINGS" ] && STRINGS=$(yq -r '.promote.fallback_blocklist[]?' bridge-config.yaml | paste -sd'|' -)
+[ -z "$STRINGS" ]  && STRINGS=$(yq -r '.promote.fallback_blocklist.strings[]?'  bridge-config.yaml | paste -sd'|' -)
+[ -z "$PATTERNS" ] && PATTERNS=$(yq -r '.promote.fallback_blocklist.patterns[]?' bridge-config.yaml | paste -sd'|' -)
+
+# always_leak — personal-PII that is a leak in EVERY repo, regardless of $REPO.
+# Queried separately (never merged into STRINGS/PATTERNS above) because it
+# must still apply even when a per-repo/fallback list already matched
+# something — see § "3. Leak — personal PII (always)" below.
+ALWAYS_STRINGS=$(yq -r '.promote.always_leak.strings[]?'  bridge-config.yaml | paste -sd'|' -)
+ALWAYS_PATTERNS=$(yq -r '.promote.always_leak.patterns[]?' bridge-config.yaml | paste -sd'|' -)
 
 # Find all hits
 git ls-files | xargs -I{} grep -nHwE "$STRINGS" {} 2>/dev/null > /tmp/hits.tsv
 git ls-files | xargs -I{} grep -nHE "$PATTERNS" {} 2>/dev/null >> /tmp/hits.tsv
+[ -n "$ALWAYS_STRINGS" ]  && git ls-files | xargs -I{} grep -nHwE "$ALWAYS_STRINGS" {} 2>/dev/null >> /tmp/hits.tsv
+[ -n "$ALWAYS_PATTERNS" ] && git ls-files | xargs -I{} grep -nHE  "$ALWAYS_PATTERNS" {} 2>/dev/null >> /tmp/hits.tsv
 ```
 
-Each hit is then run through the categorizer.
+Each hit is then run through the categorizer. A hit that came from the
+`ALWAYS_STRINGS`/`ALWAYS_PATTERNS` query lands in category 3 (personal PII,
+always) unconditionally — it skips the per-repo `tolerates`/`blocks` check
+entirely, because that's the point of `always_leak`.
 
 ## Categorizer rules (in order — first match wins)
 
@@ -101,23 +114,31 @@ These are scoped per-repo: a `<your-org>/<your-bridge>` mention in `open-bridge`
 
 ### 3. Leak — personal PII (always)
 
-Personal PII is always a leak, regardless of which repo it appears in (only the seed repo `your-bridge` legitimately tracks PII per the per-repo `.gitignore` policy, but even there it shouldn't appear in CORE files).
+Personal PII is always a leak, regardless of which repo it appears in (only the seed repo `your-bridge` legitimately tracks PII per the per-repo `.gitignore` policy, but even there it shouldn't appear in CORE files). This category is **unconditional** — it does not consult the per-repo `tolerates`/`blocks` table above; a hit here fires no matter which repo you're scanning.
 
-Detected via the `always_leak` block in `bridge-config.yaml`:
+Detected by pulling `.promote.always_leak.strings[]?` and
+`.promote.always_leak.patterns[]?` from `bridge-config.yaml` in the Standard
+scan step above (`$ALWAYS_STRINGS` / `$ALWAYS_PATTERNS`) — a query separate
+from `content_blocklist`/`fallback_blocklist`, because this list must keep
+firing even when a per-repo list already matched something else first. Empty
+by default; populate it during `/bridge-onboard` or by hand, same as the
+other blocklists:
 
 ```yaml
-always_leak:
-  strings: [<your-username>, <your-username>, <customer-slug-1>, <customer-slug-2>, <customer-slug-3>, <your-homeserver>, <your-desktop>]
-  patterns:
-    - "/Users/[a-z]+/"
-    - "100\\.118\\.[0-9]+\\.[0-9]+"
-    - "@bks-lab\\.com"
+# bridge-config.yaml  (USER layer, gitignored — your real values live here)
+promote:
+  always_leak:
+    strings: [alice, homeserver-prod, customer-slug-1, customer-slug-2]
+    patterns:
+      - "/Users/[a-z]+/"
+      - "100\\.118\\.[0-9]+\\.[0-9]+"
+      - "@my-company\\.com"
 ```
 
 **Suggested fixes:**
-- `<your-username>` → `<your-username>`
-- `~/` → `~/`
-- `<your-homeserver>` → `<your-machine>` or remove example
+- `alice` (a real username hit) → `<your-username>`
+- `/Users/alice/` → `~/` or `${projects_root}/...`
+- `homeserver-prod` (a real hostname hit) → `<your-machine>` or remove example
 - Tailscale IPs → omit
 
 ### 4. Leak — internal vocabulary (OSS-strict only)

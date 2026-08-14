@@ -68,6 +68,28 @@ about volumes has its own place.
 Prerequisite for `encrypted-at-rest`: disk encryption active on the source machine
 AND the target volume encrypted. Otherwise a drift alert surfaces in the briefing.
 
+## Health rules (for the backup skill / health check to enforce)
+
+State fields are evidence, not verdicts. Three rules keep a health check honest:
+
+1. **`exit_code` is not a health signal.** rclone returns `1` when a *single*
+   file fails and `10` on `--max-duration` — the normal outcome for a running
+   mirror. Both appear and disappear without anything being wrong. A non-zero
+   exit may colour a warning; it must never, on its own, declare a backup broken.
+2. **Freshness counts from the last *successful* run** (`last_ok`), never from
+   `last_run`. A run that fails immediately still stamps `last_run`, so a total
+   outage that retries often enough would otherwise read as perfectly fresh.
+3. **A wedged sync process is its own failure mode.** A sync running far longer
+   than its schedule while its log file has stopped growing holds the target
+   volume and makes every later run fail. Detect it (process age + log mtime),
+   report the real PID, and refuse to auto-restart the pipeline — restarting
+   stacks another process onto the stuck one. Telling the two apart at the
+   volume: a wedge lets `stat` succeed on a directory while reading contents or
+   listing it blocks; a permissions problem denies both immediately.
+
+Ordered by how much they mean: dead job → wedged process → no successful run in
+the schedule window → exit-code noise.
+
 ## Schema rules (for the backup skill / validator to enforce)
 
 1. `sensitivity: encrypted-required` + non-encrypting tool (rsync, rclone-sync) → **error**

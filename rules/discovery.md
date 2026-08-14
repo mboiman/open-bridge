@@ -28,20 +28,18 @@ it.
    `formats`, filters live in the skill workflow or namespaced under
    `<skill>.<key>`, never nested inside the provider's section.
 
-**Why** — a `consumers: [briefing, debrief]` field forces every skill author to
-patch all provider configs when their skill starts consuming, and forces every
-provider author to know its consumers in advance: bidirectional coupling, an
-anti-pattern. Capability-based discovery scales O(1) per new skill **and** O(1)
-per new provider — other Bridge instances (open-bridge OSS, org overlays,
-third-party) add a provider without touching skill code, and add a skill
-without patching existing configs.
+**Why** — a `consumers: [briefing, debrief]` field forces every provider
+author to know its consumers in advance and every skill author to patch all
+provider configs on adoption: bidirectional coupling. Capability-based
+discovery scales O(1) both ways — other Bridge instances (open-bridge OSS,
+org overlays, third-party) add a provider without touching skill code, and
+add a skill without patching existing configs.
 
-**Litmus** — for a new shared config section ask: "can a new provider be added
-without changing skill code? Can a new skill consume without patching provider
-configs?" If either answer is no, the schema couples the wrong way — restructure
-it. Reference shape: `integrations.context_sources.{name}.provides: [...]` in
-`bridge-config.yaml`. The same logic governs `trackers/{name}.md` playbooks,
-channel definitions, and any future data-source slot.
+**Litmus:** can a new provider be added without changing skill code, and a
+new skill consume without patching provider configs? If either is no,
+restructure. Reference shape: `integrations.context_sources.{name}.provides: [...]`
+in `bridge-config.yaml` — same logic governs `trackers/{name}.md` playbooks
+and channel definitions.
 
 ## Contract
 
@@ -58,10 +56,7 @@ def discover(type_singular: str, repo_root: Path | None = None) -> list[Path]:
       sorted list of yaml file Paths matching the type. Excludes _-prefixed
       files (templates, schemas, state).
 
-    Caveats:
-      - Plural is hardcoded as `<singular>+s`. Keep type names regular.
-      - Searches identity/, infra/, workflow/ wrappers in that order.
-        First wrapper containing the folder wins.
+    Caveats: see § Plural caveat and § Behavior below.
     """
     root = Path(repo_root or os.environ.get("BRIDGE_ROOT") or Path.cwd())
     for wrapper in ["identity", "infra", "workflow"]:
@@ -95,10 +90,9 @@ discover('project')   # ['workflow/projects/customer-x.yaml', ...]
 
 ## Implementation note
 
-A central reference implementation does **not** live as a shared Python package today.
-Skills inline the code or use `find`/`ls` from Bash. Once multiple skills
-replicate the same logic, an extract to `scripts/discover.py` or
-`skills/_shared/discover.py` becomes worthwhile.
+No shared Python package today — skills inline the code or use `find`/`ls`
+from Bash. Extract to `scripts/discover.py` or `skills/_shared/discover.py`
+once multiple skills replicate the logic.
 
 ## Plural caveat
 

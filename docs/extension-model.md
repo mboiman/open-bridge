@@ -149,10 +149,13 @@ OSS CORE.
 
 The `/overlay` skill (`bridge-overlay`, engine [`scripts/overlay.py`](../scripts/overlay.py))
 subscribes a consumer Bridge to one or more overlay repos and **materializes**
-their files into the live tree as tracked copies, each pinned to an immutable
-git SHA. Subscription state lives in two USER-tier root files — a generated
-`overlays.lock.yaml` (per-file source/materialized hashes, the drift detector)
-and a sparse `.bridge/` cache — both gitignored in a public fork. Each
+their files into the live tree as copies, each pinned to an immutable
+git SHA. By default those copies are excluded from the consumer's own git (see
+[`org-overlays.md`](org-overlays.md) § Git tracking of managed dests for the
+opt-in switch and where the backup actually lives). Subscription state lives
+in two USER-tier root files — a generated `overlays.lock.yaml` (per-file
+source/materialized hashes, the drift detector) and a sparse `.bridge/` cache
+— both gitignored in a public fork. Each
 subscription is a `role: org-overlay` entry in `bridge-config.yaml.upstreams[]`
 carrying its own `materialize:` block; an instance opts in via
 `infra/instances/<slug>.yaml` `subscribes_overlays:`. The same classifier and
