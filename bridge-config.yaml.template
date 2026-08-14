@@ -192,10 +192,15 @@ upstreams:
 
 # ─── Promote Safety ───────────────────────────────────────────────────
 # Content scanned before cherry-pick onto CORE branches.
-# Three layers:
+# Four layers:
 #   1) content_blocklist — hard-block (personal-PII, customer names, secrets)
 #   2) scrub_rules       — auto-rewrite during sync (username/org/hostname placeholders)
 #   3) fallback_blocklist — applies when no upstream-specific list matches
+#   4) always_leak       — personal-PII that is a leak in EVERY destination
+#                          repo, checked regardless of --repo. Read by
+#                          bridge-leak-check (see
+#                          skills/bridge-leak-check/references/classification.md),
+#                          not by the per-destination promote-safety.md scan.
 # See rules/promote-safety.md for the full rule + decision matrix.
 promote:
   content_blocklist:
@@ -223,6 +228,15 @@ promote:
   fallback_blocklist:
     # Used when no upstream-specific list matches. Catches accidental leaks
     # in any direction. Add your org/customer/personal identifiers.
+    strings: []
+    patterns: []
+
+  always_leak:
+    # Personal-PII identifiers that ALWAYS count as a leak, in every
+    # destination repo — even your org overlay. Read by bridge-leak-check,
+    # separately from content_blocklist/fallback_blocklist above, so it
+    # keeps firing even when a per-repo list already matched something else.
+    # Add usernames, personal hostnames, Tailscale IPs, etc.
     strings: []
     patterns: []
 

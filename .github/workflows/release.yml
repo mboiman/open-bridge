@@ -27,7 +27,7 @@ jobs:
     name: Auto Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # full history + tags, to diff since the last tag
 
