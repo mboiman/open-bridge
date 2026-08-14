@@ -86,7 +86,7 @@ jobs:
       # Check out the BASE ref (default for `pull_request`). We read the PR diff
       # via the Action / gh, not by building untrusted head code.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0            # full history so DCO / scope checks can diff
 

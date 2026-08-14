@@ -5,10 +5,9 @@ scope: core
 # Learning Autonomy Boundaries
 
 The Bridge separates "what the agent can change about itself" into four
-discrete layers, and applies an explicit human gate at every one of them.
-This is a deliberate philosophical choice — measured against competing
-designs (e.g. Hermes Agent) that concentrate autonomy at one layer and
-trust the agent there. We do not.
+discrete layers, with an explicit human gate at every one — a deliberate
+choice against competing designs (e.g. Hermes Agent) that concentrate
+autonomy at one layer and trust the agent there.
 
 ## The four layers
 

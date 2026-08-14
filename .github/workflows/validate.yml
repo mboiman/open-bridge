@@ -16,7 +16,7 @@ jobs:
     name: YAML Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install yamllint
         run: pip install yamllint
@@ -28,7 +28,7 @@ jobs:
     name: Ecosystem Cross-Refs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check ecosystem.yaml exists
         id: check
@@ -56,7 +56,7 @@ jobs:
     name: Bridge Config Schemas
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install check-jsonschema
         run: pipx install check-jsonschema
@@ -68,7 +68,7 @@ jobs:
     name: OKF Export
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install PyYAML + pytest
         run: pip install pyyaml pytest
@@ -80,7 +80,7 @@ jobs:
     name: Workspace Engine + Registry + Skill
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install PyYAML
         run: pip install pyyaml
@@ -106,7 +106,7 @@ jobs:
     name: Content Leak Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Full-repo scan (no file args = CI mode). Catches scrub-leak
       # pipe-list scopes plus PII content classes (personal names,
@@ -119,7 +119,7 @@ jobs:
     name: Skill Scope + AGENTS.md
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install PyYAML
         run: pip install pyyaml
@@ -134,7 +134,7 @@ jobs:
     name: Frontmatter Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate agent frontmatter
         run: |
@@ -289,7 +289,7 @@ jobs:
     # published repo. Runs only when the repo is public — a no-op while private.
     if: ${{ !github.event.repository.private }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Block a tracked leak roster
         run: |
@@ -307,7 +307,7 @@ jobs:
     # of private data can never be published to a public upstream. Unit contract
     # + a model-free end-to-end leak simulation (skills/onboard-sim).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install deps for the org-overlay engine contract
         run: |

@@ -28,11 +28,11 @@ written, two things are **mandatory — together, never one without the other**:
 ## Why
 
 Skip either half and recordings rot in the inbox while summaries float
-unanchored — and the inbox reads as full of "new" work that is already done.
+unanchored, and the inbox reads as full of "new" work that is already done.
 Concretely (2026-07-22): three already-processed recordings — two job
-interviews + one cross-instance interview — sat 6–9 days in `imports/` because
-the paths that documented them archived neither the audio nor a back-link. The
-user could not tell processed from new.
+interviews + one cross-instance interview — sat 6–9 days in `imports/`
+because the paths that documented them archived neither the audio nor a
+back-link. The user could not tell processed from new.
 
 ## Where each path stands
 

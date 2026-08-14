@@ -12,37 +12,29 @@ misses billing fields, skips preview gates, violates hard rules, and
 loses institutional knowledge. These rules ensure the right skill is
 loaded before work begins.
 
-> **Worked example:** this rule ships as a template for mandatory-routing
-> rules. CustomerA and `customer-a-coordinator` are placeholders — replace
-> them with your own coordinator skills (org overlay); open-bridge itself
-> ships no coordinator skill.
+open-bridge itself ships no coordinator skill — this file defines the
+**pattern**, not a concrete instance. An org overlay adds its own entries
+under `rules/org/skill-routing.md`, one per coordinator, in the shape below.
 
-## CustomerA → customer-a-coordinator
+## Pattern: keyword triggers → mandatory skill → rationale
 
-**When:** The user's message contains ANY of these signals:
-- Stakeholder names: <your customer contacts>
-- Systems: <your integration systems>, Inbound Operator, Outbound Operator
-- Artifacts: invoice number, correlation ID, document GUID
-- Projects: <your project board>, extra-effort tracking, billing
-- Infrastructure: fn-customer-a-ess-*, kv-customer-a-ess-*
-- Topics: e-invoicing, UBL, weekly report, go-live
+Each entry names a coordinator skill and the signals that mean it must
+load before any analysis, issue creation, email, or log entry:
 
-**Action:** Load `customer-a-coordinator` skill BEFORE doing any analysis,
-creating issues, sending emails, or writing log entries.
-
-**Why:** The coordinator enforces:
-1. **Hard Rule #4** — issues via `github-projects-manager`, never raw `gh issue create`
-2. **English-only fields** on the project board (German variants exist but are unused)
-3. **Preview-before-execute** for all stakeholder-facing actions
-4. **Immediate logging** with correct context tags (`customer-a/inbound`, `customer-a/outbound`)
-5. **Learning loop** — new failure patterns are proposed to `knowledge.md`
-6. **Billing classification** — every support action gets Billing Scope + Root Cause + Approval
-
-**Anti-pattern:** "It's just a quick analysis" or "Let me just check the logs" —
-these are exactly the cases where the coordinator adds the most value, because
-quick analyses are the ones most likely to skip documentation and billing.
-
-## Future routing rules
-
-Add new entries here when a coordinator skill is created for another
-customer or domain. Pattern: keyword triggers → mandatory skill → rationale.
+- **When:** the triggering signals — stakeholder names, system/product
+  names, artifact types (invoice number, correlation ID, ticket ID),
+  project/board names, infrastructure identifiers, topic keywords.
+- **Action:** load `<coordinator-skill>` before doing anything else.
+- **Why:** state what the coordinator enforces — this is what justifies
+  routing over ad-hoc work. A well-formed coordinator typically covers
+  some subset of:
+  1. Structured writes (issues via a project-manager skill, never a raw CLI call)
+  2. Field conventions on the project/board it targets
+  3. Preview-before-execute for stakeholder-facing actions
+  4. Immediate logging with correct context tags
+  5. A learning loop — new failure patterns get proposed back
+  6. Classification fields required for billing or governance
+- **Anti-pattern:** "It's just a quick analysis" or "let me just check
+  the logs" — these are exactly the cases where a coordinator adds the
+  most value, because quick, informal work is the most likely to skip
+  documentation and billing.

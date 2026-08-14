@@ -225,7 +225,10 @@ structure; you populate it during `/bridge-onboard` or by hand.
 
 ## Scan procedure
 
-There are **two scan moments**, both required:
+There are **two scan moments**, both required. Each runs as its own
+standalone script — shell state does not carry over between them — so
+`scan_opaque()` is defined once per script by design, not by accidental
+copy-paste drift. If you fix a bug in it, sync the fix to both copies.
 
 ### A. Pre-commit scan (before running `git commit`)
 
@@ -333,22 +336,10 @@ PATTERNS=$(yq -r ".promote.content_blocklist.\"${REPO}\".patterns[]?" bridge-con
 
 UNIVERSAL='BEGIN [A-Z ]+PRIVATE KEY|\bsk-[-A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AccountKey=[A-Za-z0-9+/]{20,}|/Users/[a-z0-9._-]+/'
 
-# Prefix-less credentials (Elastic Cloud ApiKey and the same shape elsewhere)
-# cannot be matched by a format regex — they are just base64. They ARE
-# recognisable by decoding: the blob yields `<id>:<secret>`. Grep cannot decode,
-# so this check is a one-liner rather than part of $UNIVERSAL.
-#
-# It scans for BOTH forms, and the second one is not theoretical. On 2026-08-01
-# an adversarial pre-publication review found the live key sitting in PLAINTEXT
-# in a code comment — put there by the same commit that removed its base64 form,
-# in a file marked publishable to the PUBLIC repo. A detector that only decodes
-# base64 is blind to its own quarry once someone pastes the decoded pair.
-# The plaintext half has no prefix to anchor on, so precision comes from ENTROPY
-# (both halves must mix upper/lower/digit) and from requiring the pair to stand
-# free — not inside a URL, a path, or a `host:port`. Measured over all 2896
-# tracked text files: zero false positives.
-# `# pragma: allowlist secret` on the line exempts a deliberate synthetic
-# fixture; a real secret never carries it.
+# scan_opaque(): same detector as the pre-commit scan above (full rationale
+# there — base64 id:secret OR free-standing plaintext id:secret, entropy-
+# gated). Redefined here because this scan runs as its own standalone
+# script at a later, separate moment (promote-time, not commit-time).
 scan_opaque() {   # usage: scan_opaque <file>   → prints offending blobs, exit 1 on hit
   python3 -c '
 import base64, re, sys

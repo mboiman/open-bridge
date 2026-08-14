@@ -1,0 +1,85 @@
+# Dependabot configuration for a Bridge instance.
+# Reference: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# SCOPED ON PURPOSE. Dependabot's default is to scan every manifest in the repo,
+# and a Bridge accumulates manifests that must NOT be watched:
+#
+#   work/done/**   closed tasks routinely archive vendored third-party research
+#                  code with its own requirements.txt. Those pins are a historical
+#                  record, not a dependency set. Watching them yields alerts that
+#                  can never be actioned, and permanent un-fixable alerts are how
+#                  a repo's real alerts stop being read.
+#   imports/**     the same, for anything dropped in for processing.
+#
+# Listing directories explicitly is what excludes them: Dependabot only scans the
+# directories named here. Add an entry when a Bridge grows a live manifest
+# somewhere else; do not switch to a repo-wide scan.
+#
+# `agents/` is CORE and exists in every Bridge, so this file is generic and
+# promote-eligible as-is.
+
+version: 2
+
+updates:
+  # Bridge-Agent runtime (PEP 621 pyproject, installed via `uv sync`)
+  - package-ecosystem: "pip"
+    directory: "/agents"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "fix"
+      include: "scope"
+    groups:
+      agents-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # MCP to A2A gateway
+  - package-ecosystem: "pip"
+    directory: "/agents/_gateway"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "fix"
+      include: "scope"
+    groups:
+      gateway-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by this repo's own workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

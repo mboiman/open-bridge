@@ -19,10 +19,10 @@ jobs:
     name: Hermetic pytest suite (agents/)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       # Test deps are injected ephemerally so they stay out of the runtime
       # dependency set — exactly as agents/README.md documents.
@@ -34,10 +34,10 @@ jobs:
     name: Hermetic pytest suite (agents/_gateway/)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       # agents/pyproject.toml pins testpaths to agents/tests, so the gateway
       # suite needs its own job — without it these tests silently never run.

@@ -18,26 +18,22 @@ end-of-work cycle. Do not wait to be asked.
 gh run list --branch <branch> --limit 3
 ```
 
-`gh run list` caches and sometimes does not surface a fresh run. The SHA
-query is the source of truth (verify-before-claim — declared state is not
-truth):
+SHA query is the source of truth — `gh run list` caches and can lag behind
+a fresh run:
 
 ```bash
 gh api 'repos/<owner>/<repo>/actions/runs?head_sha=<sha>' \
   --jq '.workflow_runs[] | "\(.name) | \(.status) | \(.conclusion)"'
 ```
 
-A push without CI verification is an unfinished push. Note: trigger
-branches live in `.github/workflows/*.yml` under `on.push.branches` — DCO
-often runs only on PRs, not on direct pushes, so a missing DCO run on a
-direct push is expected, not a failure.
+Trigger branches live in `.github/workflows/*.yml` under `on.push.branches`
+— DCO often runs only on PRs, not on direct pushes, so a missing DCO run on
+a direct push is expected, not a failure.
 
 ## Gate 2 — Read the failure log before fixing
 
 On a red run, **get the job log first, then fix**. The workflow YAML shows
-*what* the check does — not *why* it failed. An assumption read off the YAML
-is not evidence (this is verify-before-claim applied to CI: declared
-workflow logic is not the failure cause; the live log is).
+*what* the check does, not *why* it failed — read the log before diagnosing.
 
 ```bash
 # 1. Find the failing check's run ID
