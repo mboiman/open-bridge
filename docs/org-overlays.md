@@ -1,5 +1,5 @@
 ---
-summary: "Org overlays — the downstream inverse of /promote: how a consumer Bridge subscribes to an org's scope:org content and materializes it as tracked copies, with a manifest, a lockfile, and per-file conflict + leak gates."
+summary: "Org overlays — the downstream inverse of /promote: how a consumer Bridge subscribes to an org's scope:org content and materializes it as git-excluded copies (opt-in tracked), with a manifest, a lockfile, and per-file conflict + leak gates."
 type: guide
 last_updated: 2026-06-27
 related:
@@ -18,7 +18,9 @@ skills, sub-agents, routing contexts, project configs, an ecosystem fragment —
 without that content ever touching the public OSS upstream. The `/overlay`
 skill (engine: [`scripts/overlay.py`](../scripts/overlay.py)) subscribes a
 consumer Bridge to one or more overlay repos and **materializes** their files
-into the live tree as tracked copies, pinned to immutable hashes.
+into the live tree as copies, pinned to immutable hashes. By default those
+copies are kept **out of git** — see § Git tracking of managed dests below for
+what that means for backup, and the opt-in switch that changes it.
 
 ## The downstream inverse of `/promote`
 
@@ -98,10 +100,11 @@ has two fatal failure modes:
 
 ### What the engine does instead
 
-It writes **real tracked copies** into the consumer tree, records each in a
-lockfile keyed to the upstream's resolved SHA plus per-file source and
-materialized hashes, and re-derives them on demand from a sparse cache under
-`.bridge/overlays/<name>/`:
+It writes **real copies** into the consumer tree (git-tracked only if you
+opt in — see § Git tracking of managed dests below; excluded from git by
+default), records each in a lockfile keyed to the upstream's resolved SHA
+plus per-file source and materialized hashes, and re-derives them on demand
+from a sparse cache under `.bridge/overlays/<name>/`:
 
 | Piece | Buys you |
 |---|---|
@@ -174,6 +177,40 @@ prompted, **never** the supplied values (a value may be PII). The lock is
 `scope: user`: gitignored in a public fork, tracked only in a private instance
 (same policy as `ecosystem.local.yaml`). The sparse cache under `.bridge/` is
 always gitignored.
+
+## Git tracking of managed dests
+
+Materialized dests can land in **tracked** paths (`skills/`, `.claude/agents/`)
+that no `.gitignore` pattern covers. By **default**, the engine keeps every
+managed dest **out of git**: at materialize it writes a marked, idempotent
+block into the consumer's LOCAL, untracked `.git/info/exclude` (never the
+tracked `.gitignore`) listing every dest the overlay owns. That guard exists
+because a fork of a public repo is itself public — without it, a plain
+`git add -A` in the consumer could publish org-internal content (and even the
+managed filenames) to a public upstream. Org content is consumed, not
+re-committed, unless you opt in (below).
+
+**Consequence: with the default off, the consumer's copy is not backed up
+anywhere.** It never enters the consumer's git history, so a fresh clone of
+the consumer doesn't get it, and losing the one working copy that carries a
+local prompt-field override or a manual edit loses it for good. The
+**authoritative backup of consumed org content is the overlay's own source
+repo** — nowhere else, unless this switch is on.
+
+For a consumer where that's the wrong tradeoff (typically a **private**
+instance, where a public leak isn't a concern and the user wants consumed org
+content backed up in their own git history), set the overlay's own
+`materialize.track_managed_dests: true` in `bridge-config.yaml` — an explicit,
+per-overlay, off-by-default switch (`/overlay add --track-managed-dests`, or
+hand-edit the config and re-run `/overlay sync` / `/overlay apply`). The
+engine never derives this from the consumer repo's visibility automatically —
+it is always a deliberate, user-set choice. When set, the next materialize
+drops any exclude block it had previously written for that overlay (so
+flipping the switch takes effect without a manual edit to
+`.git/info/exclude`) and the dests become normal, `git add`-able tracked
+files like any other USER content. Flipping it back off re-excludes them on
+the next sync/apply — it does not retroactively un-stage or un-commit files
+you already added while it was on.
 
 ## The conflict + precedence model
 
@@ -287,14 +324,18 @@ The `/overlay` skill (`skills/bridge-overlay/`, `metadata.scope: core`) wraps
 the engine. All seven verbs operate on the consumer's `user/*` branch; off a
 user branch every verb is a CORE-only no-op (Gate 0).
 
-### `add <git-url> [--ref main] [--name N] [--select GLOB...] [--precedence N] [--dry-run]`
+### `add <git-url> [--ref main] [--name N] [--select GLOB...] [--precedence N] [--track-managed-dests] [--dry-run]`
 
 Subscribe to an overlay. Writes the `role: org-overlay` `upstreams[]` entry and
 its `materialize` sub-block, sparse-clones the repo into
 `.bridge/overlays/<name>/`, validates the manifest against the schema, previews
 the materialize plan with per-kind risk flags and an explicit per-file `[y]` for
 every behavioural file, does the first materialize, and writes
-`overlays.lock.yaml`. `--dry-run` stops after the plan.
+`overlays.lock.yaml`. `--dry-run` stops after the plan. `--track-managed-dests`
+opts this overlay's dests into normal git tracking instead of the default
+`.git/info/exclude` guard (see § Git tracking of managed dests) — off by
+default; can also be set later by hand-editing `materialize.track_managed_dests`
+in `bridge-config.yaml` and re-running `sync`/`apply`.
 
 ### `sync [name] [--dry-run] [--yes]`
 
