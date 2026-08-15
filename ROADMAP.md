@@ -46,15 +46,12 @@ Nothing below is a commitment to a date, and "Later / exploring" means exactly t
   lets MCP-only frontends (Claude connectors, ChatGPT developer mode, Gemini)
   talk to a bridge's A2A agent; anonymous access is standard, a bearer token
   unlocks more
-  ([#125](https://github.com/bks-lab/open-bridge/pull/125); further work
-  tracked in [#124](https://github.com/bks-lab/open-bridge/issues/124)).
-
-## Now — building
-
+  ([#125](https://github.com/bks-lab/open-bridge/pull/125), discovery closed
+  in [#124](https://github.com/bks-lab/open-bridge/issues/124)).
 - **Data-model guardrails — which data lives where**
-  ([#53](https://github.com/bks-lab/open-bridge/issues/53)) — make the
-  CORE/org/user data boundaries explicit and enforceable, so instances stay
-  clean by construction.
+  ([#53](https://github.com/bks-lab/open-bridge/issues/53)) — CORE/org/user
+  data boundaries explicit and enforceable, so instances stay clean by
+  construction.
 
 ## Next
 
