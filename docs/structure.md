@@ -69,6 +69,9 @@ Every config type lives in **`<wrapper>/<types>/`** — a plural folder with tem
 | `identity/contracts/_template.yaml` | CORE | Contract template |
 | `identity/contracts/_schema.yaml` | CORE | Contract schema |
 | `identity/contracts/<id>.yaml` | USER | One recurring financial obligation (utility, telco, insurance, SaaS) |
+| `identity/vehicles/_template.yaml` | CORE | Vehicle template |
+| `identity/vehicles/_schema.yaml` | CORE | Vehicle schema |
+| `identity/vehicles/<id>.yaml` | USER | One owned/leased vehicle — tax classification plus pointers to its telemetry, receipts, logbook and contracts |
 | `identity/agent/_template.SOUL.md` | CORE | Orchestrator voice template |
 | `identity/agent/_template.IDENTITY.md` | CORE | Orchestrator identity template |
 | `identity/agent/_soul-deck.yaml` | CORE | Pickable principle library (onboarding) |
@@ -121,7 +124,7 @@ Every config type lives in **`<wrapper>/<types>/`** — a plural folder with tem
 | `rules/` | **Tiered by folder** | Always-on rules. `rules/*.md` = core (ship to all) · `rules/org/**` = org (ship to org overlay) · `rules/user/**` = user (local only). The folder *is* the promote tier. `validate-bridge.py` checks each rule declares a valid `scope:` (presence + allowed value); folder↔scope consistency itself is an advisory `bridge-audit` check, not a hard gate. Each bridge layers its own under `rules/org/`+`rules/user/`. See [`rules/knowledge-growth.md`](../rules/knowledge-growth.md). |
 | `themes/` | CORE | Vocabulary themes (`professional`, `professional-de`) |
 | `trackers/` | CORE | Tracker-provider playbooks (`github.md`, `ado.md`) |
-| `skills/` | CORE · `metadata.scope: core` (USER skills: `scope: user`; ORG: `scope: org`) | Skills with SKILL.md + references/. **Scope lives under `metadata:` (`metadata.scope`)** — skill-creator's validator only allows standard top-level keys; sub-agents keep top-level `scope:`. Hard-gated by `scripts/validate-skill-scope.py` (CI + pre-commit; regenerates the SKILL-SCOPE table in `AGENTS.md`). |
+| `skills/` | CORE · `metadata.scope: core` (USER skills: `scope: user`; ORG: `scope: org`) | Skills with SKILL.md + references/. **Scope lives under `metadata:` (`metadata.scope`)** — skill-creator's validator only allows standard top-level keys; sub-agents keep top-level `scope:`. Hard-gated by `scripts/validate-skill-scope.py` (CI + pre-commit). It writes the per-instance tier map to `.bridge/skill-scope.md`, never into `AGENTS.md`: a table generated from the local skill tree cannot converge across instances. |
 | `scripts/` | CORE (`scope: user/private` for USER tools) | Validators + build/state tools (`validate-bridge.py`, `validate-skill-scope.py`, `scaffold-user.sh`, …). |
 | `bin/` | CORE | Post-clone bootstrap: `setup` (bash · macOS/Linux/WSL) + `setup.ps1` (Windows) — repair the skills discovery symlinks. |
 | `imports/` | USER (scratch) | Generic drop-zone for external files (ephemeral, `/imports/*` gitignored except `.gitkeep`). The work-system-specific inbox is `work/imports/`. |

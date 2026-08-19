@@ -110,7 +110,7 @@ jobs:
 
       # Full-repo scan (no file args = CI mode). Catches scrub-leak
       # pipe-list scopes plus PII content classes (personal names,
-      # /Users/ paths, @bks-lab.com addresses, customer names) with
+      # /Users/ paths, @your-org.com addresses, customer names) with
       # per-class allowlists for governance files — see the script header.
       - name: Scan for content leaks
         run: python3 scripts/no-scrub-leak.py
@@ -125,7 +125,7 @@ jobs:
         run: pip install pyyaml
 
       - name: Validate skill scope + AGENTS.md SKILL-SCOPE block
-        run: python3 scripts/validate-skill-scope.py
+        run: python3 scripts/validate-skill-scope.py --check
 
       - name: Validate STATUS.md status enum
         run: python3 scripts/validate-status.py

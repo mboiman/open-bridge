@@ -29,7 +29,7 @@ Weekly archive workflow. Read the referenced file ONLY when triggered.
 ```
 User wants to...
 ├── Archive the week                 → Read references/workflow.md
-├── Check for upstream CORE updates  → Read skills/briefing/references/upstream-summary.md
+├── Are we behind on anything?       → Read skills/briefing/references/upstream-summary.md
 └── Questions about archiving        → Answer from this file
 ```
 

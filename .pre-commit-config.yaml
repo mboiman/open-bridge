@@ -67,21 +67,21 @@ repos:
           )$
 
   # Skill-scope guard — every skills/*/SKILL.md must declare a valid
-  # metadata.scope (core|org|user), and the auto-generated SKILL-SCOPE
-  # table in AGENTS.md must match. Skills are flat (open standard), so scope
-  # lives in frontmatter — this hook makes it load-bearing, not drift-prone.
+  # metadata.scope (core|org|personal|user). Skills are flat (open standard),
+  # so scope lives in frontmatter and this hook is what makes it load-bearing
+  # instead of drift-prone. The tier map it writes is per-instance and lands in
+  # .bridge/skill-scope.md, so AGENTS.md is no longer a trigger for this hook.
   - repo: local
     hooks:
       - id: validate-skill-scope
-        name: Validate skill scope + AGENTS.md SKILL-SCOPE block
+        name: Validate skill scope (frontmatter gate)
         entry: python3 scripts/validate-skill-scope.py
         language: system
         pass_filenames: false
         files: |
           (?x)^(
             skills/.*/SKILL\.md |
-            scripts/validate-skill-scope\.py |
-            AGENTS\.md
+            scripts/validate-skill-scope\.py
           )$
 
   # YAML lint — catches indentation, trailing whitespace, syntax issues

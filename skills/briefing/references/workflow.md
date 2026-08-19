@@ -52,9 +52,9 @@ Two **independent** signals about CORE/upstream code state — don't conflate:
 | Signal | What it means | Where checked |
 |--------|--------------|---------------|
 | **Origin-CORE drift** | Local user branch is behind `origin/development` (the CORE source for this fork) — usually because someone else merged a CORE PR | Phase 0 row "git log HEAD..origin/development" below |
-| **Upstream-fork drift** | The configured `upstream` remote (a different repo, e.g. `bks-lab/open-bridge` for OSS forks or `<your-org>/<your-bridge>` for org-overlay forks) has new commits | Phase 6 — runs only if `upstream:` block exists in `bridge-config.yaml` AND a `git remote` named `upstream` exists |
+| **Inbound drift** | An upstream declared in `bridge-config.yaml` `upstreams[]` has moved ahead: the `role: oss-core` entry (CORE, e.g. `bks-lab/open-bridge`) or any `role: org-overlay` entry carrying a `materialize:` block (an org overlay). | Phase 6, which runs whenever an `upstreams[]` list exists. The git remote is resolved by matching its URL against `upstreams[].repo`, never by a remote NAMED `upstream`: that name is arbitrary and usually absent. |
 
-For Saat-Repo instances (`bridge-config.yaml` has no `upstream:` block) only Origin-CORE drift is in scope; Phase 6 is a no-op.
+An instance with no `upstreams:` list (the OSS seed repo itself, or a fresh clone) has only Origin-CORE drift in scope; Phase 6 is a no-op there.
 
 ### Detection table
 
@@ -66,7 +66,7 @@ For Saat-Repo instances (`bridge-config.yaml` has no `upstream:` block) only Ori
 | Weekend (Sat/Sun) | Warning: "Weekend. Check in anyway?" — proceed if user confirms |
 | 2+ weeks without archive | Warning: "log.md spans {N} weeks. Archiving recommended." |
 | `git log HEAD..origin/development --oneline` has results | **Origin-CORE drift.** Show count + first commit subject. Ask if `git merge development` desired (CORE/USER paths shouldn't conflict; CLAUDE.md edits sometimes do). |
-| Upstream check due (7+ days since last) AND `upstream:` configured | Run semantic upstream analysis — see `references/upstream-summary.md`. Update `bridge-config.yaml` → `upstream.last_check` with current timestamp. |
+| `upstreams:` configured AND any channel past its `pull_interval_days` | Run the inbound status check, see `references/upstream-summary.md`. It covers CORE and overlays and is read-only; staleness is derived from git and `overlays.lock.yaml`, so there is no timestamp to write back. |
 | All current | Proceed to data collection |
 
 **New day block format (append to end of log.md):**
@@ -215,20 +215,20 @@ If `zombie` or `orphan` count > 0 → emit Phase 4 warning
    `{work.meetings.home_dir}/*/{summary_file}` read its frontmatter and surface:
    - **`tasks.status: pending`** AND no `triage.md` yet → *"Tasks noch nicht gezogen"*
      (the meeting was captured but its action items were never extracted/triaged).
-   - **`wiki.status: pending`** (set whenever the meeting's `context.scope == bks`
-     per `tracked_obligations.wiki_protocol.required_for_scopes`) → *"BKS-Protokoll
-     fehlt"* — the relevant parts owe a wiki protocol (with source-pointer to the
-     PARA original). Group/count them; writing is gated (`/debrief` Phase 6, on
+   - **`wiki.status: pending`** (set whenever the meeting's `context.scope` appears
+     in `tracked_obligations.wiki_protocol.required_for_scopes`) → *"Wiki-Protokoll
+     fehlt"*. Those meetings owe a wiki protocol, with a source-pointer back to the
+     filed original. Group and count them; writing is gated (`/debrief` Phase 6, on
      demand), the briefing only **surfaces the backlog**:
    ```
    Offene Meeting-Pflichten:
-     • BKS-Protokoll fehlt (N): <slug>, <slug>, …  → /debrief <slug> Phase 6 (gated push)
+     • Wiki-Protokoll fehlt (N): <slug>, <slug>, … → /debrief <slug> Phase 6 (gated push)
      • Tasks offen (M):         <slug>, …          → /debrief <slug> Phase 5
    ```
    Drop a meeting once `wiki.status: done`/`n/a` resp. `tasks.status: done`. Don't
    re-render every meeting — cluster by obligation type (Phase 3.5 cluster rules apply
-   when N≥threshold). This is how BKS topics reliably reach the wiki even when the
-   debrief was capture-only.
+   when N≥threshold). This is how a scope that owes documentation reliably reaches the
+   wiki even when the debrief was capture-only.
 
 5. **Git Activity (7 days)** for all repos in ecosystem.yaml:
 
