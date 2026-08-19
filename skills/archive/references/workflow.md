@@ -63,17 +63,22 @@ Create `work/archive/weeks/{YYYY}-W{CW}.md` from `work/templates/week-summary.md
 ## Phase 6: Upstream Check (conditional)
 
 Skip entirely unless ALL three hold:
-1. `bridge-config.yaml` has an `upstream:` block.
-2. A git remote named `upstream` exists.
-3. `(now - upstream.last_check) ≥ upstream.check_interval_days`.
+1. `bridge-config.yaml` has an `upstreams:` list.
+2. At least one entry is either `role: oss-core`, or `role: org-overlay` with a
+   `materialize:` block. An org-overlay without that block is authored here, not
+   consumed, and is not a subscription.
+3. That channel is past its `pull_interval_days` (default 7), measured against the
+   last merge from the remote (CORE) or `last_synced` in `overlays.lock.yaml`
+   (overlays).
 
-For Seed-repo instances (no `upstream:` block) this phase is a no-op —
-don't load `references/upstream-summary.md`.
+A Bridge with no `upstreams:` list skips this phase; do not load
+`references/upstream-summary.md`.
 
-If all three hold:
-1. Run semantic diff analysis from `references/upstream-summary.md`
-   (briefing skill ships this reference; archive borrows it).
-2. Update `bridge-config.yaml` → `upstream.last_check` with current timestamp.
+If the prerequisites hold, run the inbound status check from
+`references/upstream-summary.md` (the briefing skill ships this reference, archive
+borrows it). It is read-only and hands off rather than merging. Nothing is written
+back to config: staleness comes from git and the lockfile, never from a
+hand-maintained timestamp that can drift from what actually happened.
 
 ## Phase 7: Confirmation
 

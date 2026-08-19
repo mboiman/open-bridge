@@ -48,11 +48,12 @@ User wants to...
 ├── Full daily briefing              → Read references/workflow.md
 ├── Quick local-only briefing        → Read references/workflow.md (--quick path)
 ├── Detailed commit analysis         → Read references/commit-analysis.md
-├── Check for upstream CORE updates  → Read references/upstream-summary.md
-│                                       (only if `upstream:` block exists in
-│                                       bridge-config.yaml AND a git remote
-│                                       named `upstream` is configured;
-│                                       Seed-repo instances skip)
+├── Are we behind on anything?       → Read references/upstream-summary.md
+│                                       (covers BOTH inbound channels: CORE from
+│                                       the `role: oss-core` upstream, and every
+│                                       subscribed org overlay. Needs an
+│                                       `upstreams:` list in bridge-config.yaml;
+│                                       a Bridge with none skips)
 └── Questions about briefing         → Answer from this file
 ```
 

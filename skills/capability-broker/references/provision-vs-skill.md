@@ -63,8 +63,9 @@ it to the `skill-creator` skill:
 - **progressive-disclosure plan** — what goes in SKILL.md vs `references/`
 
 `skill-creator` owns authoring, structure, and the
-`scripts/validate-skill-scope.py` check. After it lands, regenerate the
-`AGENTS.md` SKILL-SCOPE table with `validate-skill-scope.py --write`.
+`scripts/validate-skill-scope.py` check. After it lands, run
+`validate-skill-scope.py` once: it validates the new frontmatter and refreshes the
+per-instance tier map at `.bridge/skill-scope.md`.
 
 ## BOTH (tool + skill)
 
