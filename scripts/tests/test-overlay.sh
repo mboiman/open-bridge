@@ -37,6 +37,13 @@
 #     (skills/agents land in tracked paths) so a public fork can't `git add -A`-
 #     publish org content OR its filenames; .gitignore is untouched; dropped on
 #     remove (§20)
+#   - the LARGE PRUNE GUARD — a `select:` narrowed by mistake (dropping many
+#     already-materialized files out of scope at once) never silently mass-
+#     deletes: --dry-run surfaces an aggregate warning, non-interactive/--yes
+#     refuses the whole batch outright (lock keeps every entry, nothing on
+#     disk touched), interactive gates it behind one explicit confirmation
+#     that can decline (kept) or confirm (deletes) — a lone real orphan below
+#     the threshold is unaffected either way (§24)
 #
 # Run:  bash scripts/tests/test-overlay.sh        (exits non-zero on any failure)
 set -u
@@ -827,6 +834,67 @@ if ( cd "$CON3" && git check-ignore -q skills/demo-skill/scripts/run.py ); then
 else
   pass "flip-test: dest is trackable after flipping the switch on + sync"
 fi
+
+# ───────────────────────────────────────────────────────────────────
+echo
+echo "── 24. large-prune guard — narrowed select never silently mass-deletes ─"
+# Incident this codifies: narrowing bridge-config.yaml's materialize.select to
+# isolate one new glob dropped every OTHER already-materialized file out of
+# scope in the same edit — every one of them then reads as a clean orphan and
+# (pre-fix) was unconditionally os.remove()'d, in BOTH interactive and --yes
+# runs, with zero confirmation. Caught live only because a human read the
+# config diff before the write landed. EX_DESTS has 7 files across 6 globs;
+# narrowing select to just "skills/**" leaves 1 in scope and orphans the
+# other 6 — one more than LARGE_PRUNE_THRESHOLD (5), so every path below must
+# route through the guard, not the old unconditional-delete branch.
+narrow_select() {  # <consumer-dir> <overlay-name> <glob>
+  python3 -c "
+import yaml
+p = '$1/bridge-config.yaml'
+d = yaml.safe_load(open(p))
+for u in d['upstreams']:
+    if u.get('name') == '$2':
+        u['materialize']['select'] = ['$3']
+yaml.safe_dump(d, open(p, 'w'), sort_keys=False, allow_unicode=True)
+"
+}
+
+CON="$(mkcon)"; OV="$(mk_clean_overlay)"
+run_overlay "$CON" add "file://$OV" --name example-org
+assert_rc "24 setup: add (full select) succeeds" 0
+for d in $EX_DESTS; do assert_file "24 setup: $d materialized before narrowing" "$CON/$d"; done
+narrow_select "$CON" example-org "skills/**"
+
+# 24a. --dry-run surfaces the aggregate warning (no writes either way).
+OUT="$(python3 "$OVERLAY" --repo-root "$CON" sync example-org --dry-run 2>&1)"; RC=$?
+assert_rc "24a: dry-run with narrowed select succeeds" 0
+assert_out "24a: dry-run warns about the large prune batch" "would be pruned as orphans"
+for d in $EX_DESTS; do assert_file "24a: dry-run wrote nothing — $d still present" "$CON/$d"; done
+
+# 24b. non-interactive (--yes) REFUSES the batch outright — nothing deleted.
+run_overlay "$CON" sync example-org --yes
+assert_rc "24b: non-interactive sync (narrowed select) still succeeds" 0
+assert_out "24b: engine reports the batch as blocked" "BLOCKED"
+for d in $EX_DESTS; do assert_file "24b: non-interactive sync kept $d (not deleted)" "$CON/$d"; done
+lockcount="$(python3 -c 'import yaml,sys;d=yaml.safe_load(open(sys.argv[1]));print(len((d.get("overlays") or {}).get("example-org",{}).get("files") or []))' "$CON/overlays.lock.yaml")"
+assert_eq "24b: lock still carries all 7 file entries (identity preserved)" "$lockcount" 7
+
+# 24c. interactive + decline ("n") — same as 24b, nothing deleted.
+OUT="$(printf 'n\n' | python3 "$OVERLAY" --repo-root "$CON" sync example-org 2>&1)"; RC=$?
+assert_rc "24c: interactive sync (declined) succeeds" 0
+assert_out "24c: engine reports the batch kept" "KEPT"
+for d in $EX_DESTS; do assert_file "24c: declined confirmation kept $d" "$CON/$d"; done
+
+# 24d. interactive + confirm ("y") — the batch, and ONLY the batch, deletes.
+OUT="$(printf 'y\n' | python3 "$OVERLAY" --repo-root "$CON" sync example-org 2>&1)"; RC=$?
+assert_rc "24d: interactive sync (confirmed) succeeds" 0
+assert_file "24d: in-scope file survives (still selected)" "$CON/skills/example-org-coordinator/SKILL.md"
+for d in $EX_DESTS; do
+  case "$d" in
+    skills/example-org-coordinator/SKILL.md) ;;
+    *) assert_absent "24d: confirmed prune removed $d" "$CON/$d" ;;
+  esac
+done
 
 # ───────────────────────────────────────────────────────────────────
 echo

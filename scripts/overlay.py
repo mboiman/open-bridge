@@ -99,6 +99,11 @@ NO_SCRUB_LEAK = os.path.join(SCRIPT_DIR, "no-scrub-leak.py")
 BEHAVIOURAL_KINDS = {"skill", "agent", "standing-order"}
 ALL_KINDS = {"config", "skill", "agent", "standing-order", "rule",
              "ecosystem-fragment"}
+# A prune batch of clean orphans larger than this is treated as a likely
+# `select:` misconfiguration (e.g. a glob narrowed instead of extended) rather
+# than a genuine handful of upstream deletions, and gets an extra gate before
+# any file is removed — see LARGE PRUNE GUARD below.
+LARGE_PRUNE_THRESHOLD = 5
 CACHE_BASE = ".bridge/overlays"
 LOCK_FILE = "overlays.lock.yaml"
 MANIFEST_FILE = "overlay.manifest.yaml"
@@ -1154,12 +1159,27 @@ def expand_selection(cache: str, source_root: str, manifest: dict,
                 prompt_fields=exc.get("prompt_fields") or [],
                 on_conflict=exc.get("on_conflict"),
             ))
-    # files[] exceptions whose dest was not produced by the walk (explicit add)
+    # files[] exceptions whose dest was not produced by the walk (explicit add
+    # for a file the walk's include/exclude legitimately missed) — this must
+    # NOT be a backdoor around materialize_select: a dest the walk saw but
+    # explicitly excluded because the CONSUMER's own select doesn't cover it
+    # (line 1147 above) still has a `files_exc` metadata entry (kind/
+    # prompt_fields overrides are declared for most/all dests in a small
+    # overlay), stays out of `seen`, and would slip back in here unfiltered —
+    # silently ignoring a narrowed `select:` for exactly the files it was
+    # narrowed to exclude. Apply the same three gates as the walk.
     for dest, exc in files_exc.items():
         if dest in seen:
             continue
         abs_src = os.path.join(src_dir, dest)
         if not os.path.exists(abs_src):
+            continue
+        full = sroot + dest
+        if not any_match(include, dest, full):
+            continue
+        if any_match(exclude, dest, full):
+            continue
+        if materialize_select and not any_match(materialize_select, dest, full):
             continue
         seen.add(dest)
         items.append(PlanItem(
@@ -1335,8 +1355,8 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
                 dry: bool, assume_yes: bool, interactive: bool,
                 track_managed_dests: bool = False) -> dict:
     counts = {k: 0 for k in ("clean", "locally-modified", "upstream-ahead",
-                             "conflict", "orphan", "core-refused",
-                             "leak-refused", "skipped")}
+                             "conflict", "orphan", "orphan-blocked",
+                             "core-refused", "leak-refused", "skipped")}
     file_locks: list[dict] = []
     # Carry forward prompted_fields PATHS from the prior lock for skipped files.
     prev_files = {f["dest"]: f for f in
@@ -1439,11 +1459,59 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
                if it.prompted_fields else {}),
         })
 
-    # Prune (step 14).
+    # Prune (step 14). LARGE PRUNE GUARD: a batch of clean orphans bigger than
+    # LARGE_PRUNE_THRESHOLD is far more often a `select:` misconfiguration
+    # (narrowed instead of extended, dropping dozens of previously-materialized
+    # files out of scope in one edit) than a genuine round of upstream
+    # deletions — those tend to remove one or two files at a time. Gate the
+    # WHOLE batch behind one explicit confirmation (interactive) or refuse it
+    # outright (non-interactive/--yes) instead of silently `os.remove`-ing
+    # every one, which is what let a bad `select:` edit come within one
+    # keystroke of deleting ~75 unrelated files in a live incident — see
+    # feedback_overlay_select_narrowing_orphans_everything_else.
+    clean_orphans = [pr for pr in prune if pr["present"] and pr["clean"]]
+    large_batch = len(clean_orphans) > LARGE_PRUNE_THRESHOLD
+    allow_large_prune = False
+    if large_batch:
+        sample = ", ".join(pr["dest"] for pr in clean_orphans[:5])
+        more = f" (+{len(clean_orphans) - 5} more)" if len(clean_orphans) > 5 else ""
+        if not interactive:
+            sys.stderr.write(
+                f"  BLOCKED {len(clean_orphans)} files would be pruned as "
+                f"orphans (e.g. {sample}{more}) — this usually means `select:` "
+                f"was narrowed rather than an intentional upstream removal. "
+                f"Non-interactive run: kept all, nothing deleted. Re-run "
+                f"interactively to review, or fix `select:` if it was "
+                f"narrowed by mistake.\n")
+        else:
+            print(f"\n  {len(clean_orphans)} files no longer match this "
+                  f"overlay's `select:` and would be deleted as orphans:")
+            print(f"    {sample}{more}")
+            print("  This is usually a `select:` misconfiguration (narrowed "
+                  "instead of extended), not an intentional bulk removal "
+                  "upstream.")
+            allow_large_prune = prompt_yes(
+                f"  Really delete all {len(clean_orphans)} files?")
+            if not allow_large_prune:
+                sys.stderr.write(
+                    f"  KEPT   {len(clean_orphans)} files: large-prune batch "
+                    f"declined\n")
+    if large_batch and not allow_large_prune:
+        counts["orphan-blocked"] += len(clean_orphans)
+        # Keep the original lock entries for the blocked files exactly as they
+        # were — the physical files are untouched, so the lock must still
+        # match them, or the NEXT sync (even with `select:` fixed) would see
+        # them as unknown-on-disk ("user-owned") instead of recognizing them.
+        for pr in clean_orphans:
+            prev = prev_files.get(pr["dest"])
+            if prev:
+                file_locks.append(dict(prev))
     for pr in prune:
         if not pr["present"]:
             continue
         if pr["clean"]:
+            if large_batch and not allow_large_prune:
+                continue  # already counted + reported above
             counts["orphan"] += 1
             if not dry:
                 os.remove(os.path.join(consumer.root, pr["dest"]))
@@ -1963,6 +2031,13 @@ def render_plan(items: list[PlanItem], prune: list[dict],
     for pr in prune:
         tag = "orphan(clean)" if pr["clean"] else "orphan(modified)"
         print(f"  ⌫ {tag:14} {'-':13} {pr['dest']}")
+    clean_orphan_count = sum(1 for pr in prune if pr["present"] and pr["clean"])
+    if clean_orphan_count > LARGE_PRUNE_THRESHOLD:
+        print(f"\n  ⚠ {clean_orphan_count} files above would be pruned as "
+              f"orphans — more than usual for a genuine upstream removal. "
+              f"Check `select:` in bridge-config.yaml wasn't narrowed by "
+              f"mistake before running this for real; `sync` will gate this "
+              f"batch behind an extra confirmation either way.")
 
 
 def report_counts(verb: str, name: str, counts: dict) -> None:
