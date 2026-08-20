@@ -77,7 +77,12 @@ properties:
     additionalProperties: true
 
 # Notes (advisory):
-# - Never store raw secrets — only azure-keyvault:// / keychain:// /
-#   1password:// URIs (see CLAUDE.md § Cloud Accounts & Secrets).
+# - Never store raw secrets — only reference URIs. Supported schemes:
+#     azure-keyvault://<vault>/<secret>          (Azure Key Vault)
+#     keychain://<service>[/<account>]           (macOS Keychain)
+#     1password://<vault>/<item>/<field>         (1Password)
+#     keepass://<db>/<group-path>/<entry>/<field> (KeePass .kdbx)
+#   Format + folder/group conventions: rules/secret-placement.md.
+#   (See also CLAUDE.md § Cloud Accounts & Secrets.)
 # - Complex accounts get a companion `<id>.README.md` (decision matrix,
 #   rotation howto, bootstrap recipes).
