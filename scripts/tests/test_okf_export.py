@@ -52,22 +52,67 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         quote may close one: with nothing behind it, or an inline comment
         (`"a"# tight` resolves to `a`, since the value has already ended at
         the quote). Anything else means that quote was a character inside the
-        value, and the scalar then degrades to the plain path WHOLE rather
-        than being cut there: `'Michael's bridge'` and `"He said "stop" once"`
-        keep every character. PyYAML rejects both of those lines outright, so
-        there is no conformant answer to defer to; the choice is between
-        keeping a malformed value whole and silently dropping its tail, and
-        for a deliberately tolerant parser the second is the worse failure.
+        value, and the scalar then degrades to the plain path rather than
+        being cut there: `'Michael's bridge'` and `"He said "stop" once"` keep
+        every character between their outer quotes, and only that outer pair
+        goes. PyYAML rejects both of those lines outright, so there is no
+        conformant answer to defer to; the choice is between keeping a
+        malformed value whole and silently dropping its tail, and for a
+        deliberately tolerant parser the second is the worse failure.
 
-        FENCE COLUMN. A `---` fence counts only at column 0, opening and
-        closing alike (trailing whitespace, and a trailing CR on a CRLF
-        source, are tolerated). A block-scalar continuation line is indented
-        by definition, so an indented `---` is content and never ends the
-        block. A file whose first non-blank line is an INDENTED `---`
-        therefore has no frontmatter.
+        The orphaned-pair strip is CONDITIONAL on the value opening with a
+        quote, because a YAML plain scalar cannot: `monitor is 12"`,
+        `The so-called "bridge"` and `it is 'fine'` are well-formed YAML that
+        PyYAML round-trips, and an unconditional strip of both ends ate the
+        last character of each (issue #151's symptom through a spelling the
+        first fix did not close).
+
+        WHITESPACE IS SPACE AND TAB. Trimming, the `key:` separator and the
+        ` #` that opens an inline comment all use `[ \\t]`, never `\\s`, which
+        also matches U+00A0. A non-breaking space in a pasted value is content
+        to YAML, and `\\s` variously trimmed it, ate it before the value was
+        resolved, or read it as the whitespace in front of a comment and
+        truncated there.
+
+        FENCE COLUMN. The OPENING `---` counts only at column 0 (trailing
+        whitespace, and a trailing CR on a CRLF source, are tolerated), so a
+        file whose first non-blank line is an INDENTED `---` has no
+        frontmatter. The CLOSING `---` is judged by BLOCK-SCALAR STATE rather
+        than by column: inside an open block scalar an indented `---` is
+        content (that is exactly what a continuation line looks like), and
+        outside one an indented `---` still closes. A column-0-only closer is
+        lossy in its own right, and in #151's own shape: a file that merely
+        indents its closing fence has the body below it read as frontmatter
+        up to the next column-0 `---`, or no frontmatter recognised at all.
+
+        LINE SPLITTING is on `\\r\\n`, `\\r` and `\\n` only. `str.splitlines`
+        breaks on five more characters plus U+2028/U+2029, which cut a scalar
+        in half at a character PyYAML accepts inside a double-quoted value and
+        returns verbatim.
+
+        A leading UTF-8 BOM is dropped before detection. `str.rstrip` does not
+        remove U+FEFF, so a BOM-prefixed file was read as having no
+        frontmatter at all: every key gone, the title fallen back to the body
+        H1, the raw frontmatter emitted into the concept body.
 
         Returns (frontmatter_dict, body_text). A file with NO frontmatter
-        block returns ({}, text): the body is the untouched original text.
+        block returns ({}, text): the body is the untouched original text
+        (minus a BOM, where it carried one).
+
+        MEASURED, not asserted: over 21,144 well-formed frontmatter lines
+        (each probe value spelled plain, double quoted and single quoted, and
+        every line accepted by PyYAML), parse_frontmatter agrees with PyYAML
+        on all of them. origin/main disagreed on 9,169 of the same lines.
+
+    _split_lines(text: str) -> list[str]
+        The line splitter above. `"".join` over the result reconstructs the
+        input exactly, which is what lets the body be sliced out untouched.
+
+    _block_scalar_indicator(raw_value: str) -> str | None
+        The ONE definition of "this line opens a block scalar", read by both
+        the fence scan and the key parser, so a scan and a parse cannot drift
+        apart over the same file. A QUOTED value is never an indicator:
+        `title: "|"` is the one-character string.
 
     concept_slug(path: Path) -> str
         `STATUS.md` -> parent directory name (task/stream slug, same
@@ -118,16 +163,35 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         never a string prefix, so `docs-bundle` is not inside `docs`. A
         pattern whose first segment is already globbed yields "".
 
+    _pattern_parent(pattern: str) -> str
+        The glob for the DIRECTORIES a pattern reads its files out of:
+        `docs/**/*.md` -> `docs/**`, `work/**/deliverables/*.md` ->
+        `work/**/deliverables`, `*.md` -> "".
+
     scanned_dirs(root: Path, scope: str) -> list[Path]
         The sorted, deduplicated, RESOLVED directories discover_sources
-        reads under, derived from patterns_for(scope) via _pattern_prefix. An
-        empty prefix maps to root itself rather than being dropped, so a
-        future whole-tree pattern cannot silently under-guard. A directory
-        that does not exist yet is still returned: it is scanned the moment
-        it appears. The JOINED path is what resolves, not just root:
-        resolving the root alone and appending the prefix compares a
-        symlinked `docs/` on its LINK path while --out is compared on its
-        real one, and the two then never match.
+        reads under, derived from patterns_for(scope) in TWO layers.
+
+        The fixed prefix (_pattern_prefix) covers a directory that does not
+        exist yet: it is scanned the moment it appears. An empty prefix maps
+        to root itself rather than being dropped, so a future whole-tree
+        pattern cannot silently under-guard. The JOINED path is what
+        resolves, not just root: resolving the root alone and appending the
+        prefix compares a symlinked `docs/` on its LINK path while --out is
+        compared on its real one, and the two then never match.
+
+        The prefix alone is NOT the read set. Path.glob follows a symlink at
+        every LITERAL segment after the globbed part, so
+        `work/**/deliverables/*.md` reads through a link named `deliverables`
+        wherever it really points, while that pattern's fixed prefix is only
+        `work`. So the walk's own glob is run over _pattern_parent(pattern)
+        and each match resolved, which puts those targets in front of the
+        guard: the read set is defined by the glob engine, so the guard asks
+        the glob engine. A dangling link counts too (resolve is non-strict),
+        so the FIRST run is refused rather than the second.
+
+        Set-built and sorted, every element resolved, so filesystem
+        enumeration order cannot reach the exporter's output.
 
     all_scanned_dirs(root: Path) -> list[tuple[Path, tuple[str, ...]]]
         The union over every scope of scanned_dirs(root, scope), each
@@ -228,24 +292,40 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         INDEX ENTRIES. Every index file lists exactly as many entries as it
         has things to list (a type index one per concept of that type, the
         root index one per populated type directory), each on ONE line, and
-        every entry's link points inside the bundle. A type index is the only
-        generated file that interpolates source text into markdown, and both
-        fields it interpolates go through _md_inline: control characters
-        (every line break included, plus U+2028/U+2029) become spaces, and
-        `[`, `]` and `\\` are backslash-escaped. Without that, a newline in a
-        title or description splits its bullet and the overflow reads as an
-        entry the header does not count, and an unescaped `]` hands the
-        `(...)` behind it to the source as a link destination. The concept
-        FILES need none of this: every source-derived value there is written
-        through _yaml_quote.
+        every entry's link points at that entry's own file inside the bundle.
+        A type index is the only generated file that interpolates source text
+        into markdown, and THREE of its values are source-derived: the title,
+        the description and the SLUG, which is a source filename.
+          * the two text fields go through _md_inline: control characters
+            (every line break included, plus U+2028/U+2029) become spaces,
+            and `[`, `]`, `\\` and `<` are backslash-escaped. Without that a
+            newline splits its bullet and the overflow reads as an entry the
+            header does not count; an unescaped `]` hands the `(...)` behind
+            it to the source as a link destination; and raw inline HTML,
+            which CommonMark passes straight through, opens list items of its
+            own carrying an href the source chose.
+          * the slug goes through _md_destination, which percent-encodes what
+            a link destination cannot carry raw (space, parentheses, `<`,
+            `>`, `#`, `?`, `%` and the RFC 3986 exclusions). A filename with
+            a space produced something CommonMark does not read as a link at
+            all; one with a `)` pointed the link at a file the bundle does
+            not contain; one with U+2028 split its own bullet.
+        Measured with a real CommonMark parser, not by inspection: every
+        index renders as exactly N list items with N hrefs, each resolving
+        (after URL-decoding) to one of that type's own concept files.
+        The concept FILES need none of this: every source-derived value there
+        is written through _yaml_quote.
 
-        DESTINATION GUARDS, all three raising BundleDestinationError (exit 1
-        via main) and all three running BEFORE discover_sources walks
-        anything and BEFORE the output directory is cleared, so a refused
-        run costs an error message and leaves both the sources and any
-        previous bundle untouched:
+        DESTINATION GUARDS, every one raising BundleDestinationError (exit 1
+        via main). The five below run BEFORE discover_sources walks anything
+        and BEFORE the output directory is cleared, so a refused run costs an
+        error message and leaves both the sources and any previous bundle
+        untouched:
+          * out_dir exists and is not a directory. Checked first, because
+            Path.iterdir raises NotADirectoryError on a regular file and the
+            operator got a traceback where the contract promises a message.
           * out_dir is --root or an ancestor of it (clearing would delete
-            the source tree). Checked FIRST, so its wording is stable.
+            the source tree).
           * out_dir lies inside ANY directory ANY scope walks, or contains
             one. `--out` must be outside every all_scanned_dirs(root) entry,
             NOT merely outside this run's own read set: `dist/okf-bundle`
@@ -268,14 +348,53 @@ repo already uses). scripts/okf-export.py implements this exact surface:
             both fail-closed against silent corruption: it covers scopes
             this run is not in, and _pattern_prefix collapses
             `work/**/deliverables/*.md` to `work`, so all of `work/` is
-            refused even where nothing there could be globbed back in. The
-            message names `dist/okf-bundle`, a destination that works.
-          * under user scope with a memory_dir, out_dir overlaps that memory
-            dir in either direction. Gated on `scope == "user" and
-            memory_dir is not None` so it mirrors the run's actual read set:
-            core scope never walks the memory dir, so it never refuses one.
-            The exporter is strictly a READER of that (usually out-of-repo)
-            store and must never rmtree into it.
+            refused even where nothing there could be globbed back in. On a
+            case-SENSITIVE filesystem the fold makes it wider still, refusing
+            a `Docs/` that really is a separate directory; the message names
+            the comparison for that reason, so the containment it states is
+            not a claim the operator can see is false.
+            The message names `dist/okf-bundle`, a destination that works.
+          * out_dir overlaps memory_dir in either direction, IN EVERY SCOPE.
+            Not gated on the run's read set: core scope never walks the store
+            but a bundle written there outlives the run, and the next run of
+            either scope rmtrees it, fact files included, because it now
+            carries an okf_version index. Same argument all_scanned_dirs
+            makes for scopes. main() therefore resolves the memory dir under
+            every scope and reads it under one.
+          * two concepts of one type name the same file (dedupe_slugs'
+            backstop), or a slug is longer than the filesystem's 255-byte
+            filename limit. Neither is about WHERE --out points, so neither
+            names a working destination; both are checked with the previous
+            bundle still on disk.
+        One guard runs LATE, after the walk and immediately before the
+        rmtree it gates: out_dir exists, is non-empty, and does not look like
+        a prior bundle (no index.md carrying okf_version). It is the one that
+        decides whether the destination may be cleared, so it cannot run
+        earlier.
+        The root index.md is written FIRST, before any concept file, because
+        _is_bundle_dir keys off it: a run that dies mid-write (a full disk, a
+        permission error) then leaves a destination the next run can still
+        clear, instead of one the exporter refuses for good.
+
+    default_memory_dir(root: Path) -> Path
+        `~/.claude/projects/<encoded-root>/memory`, the auto-memory store's
+        conventional location. Pure: no environment read.
+
+    discover_memory(memory_dir: Path) -> list[Path]
+        The `*.md` fact files under memory_dir, sorted by filename, skipping
+        the housekeeping files in _MEMORY_SKIP (MEMORY.md, MEMORY-ARCHIVE.md,
+        PROVENANCE.md), `_`-prefixed files, and any file without a non-empty
+        `name:` frontmatter key. A missing directory yields [].
+
+    build_memory_concept(path: Path) -> dict
+        The same concept dict shape as build_concept, with okf_type "memory",
+        resource `memory/<filename>` and generated_at None (a fact carries no
+        top-level date, so the key is omitted rather than guessed). The slug
+        is the fact's `name:` where that satisfies _SAFE_SLUG_RE, else the
+        filename stem with its `<type>_` prefix stripped and underscores
+        dashed. "memory" is set here and never passes through
+        concept_type_for, which is why _render_root_index's closed set is
+        that function's returns PLUS this one.
 
     Emitted concept frontmatter, in order, empty fields OMITTED:
         type, title, description?, resource, generated { by, at? },
@@ -323,6 +442,7 @@ import sys
 import tokenize
 import types
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -1998,18 +2118,10 @@ def test_a_case_only_spelling_of_the_memory_dir_is_refused(okf_export, bridge_ro
     assert list(memory_dir.glob("*.md")), "guard raised but the fact files are gone"
 
 
-def test_core_scope_does_not_refuse_a_memory_dir_it_never_reads(okf_export, bridge_root, memory_dir):
-    """The memory clause mirrors the run's read set rather than exceeding it.
-
-    Core scope never walks the memory dir (write_bundle gates the memory
-    read on `scope == "user"`), so refusing an --out there would assert a
-    read that does not happen. Pinned as a decision, not an oversight.
-    """
-    manifest = okf_export.write_bundle(
-        bridge_root, memory_dir / "core-bundle", "core", memory_dir=memory_dir
-    )
-    assert manifest["scope"] == "core"
-    assert "memory" not in {p.parent.name for p in (memory_dir / "core-bundle").rglob("*.md")}
+# The memory clause used to be gated on `scope == "user"`, pinned here by
+# test_core_scope_does_not_refuse_a_memory_dir_it_never_reads. That gate is
+# gone: see test_the_memory_dir_is_refused_as_a_destination_in_every_scope
+# further down for the replacement and the measurement that forced it.
 
 
 def test_scanned_dirs_derives_the_core_set_from_the_patterns(okf_export, tmp_path):
@@ -2082,7 +2194,9 @@ def test_type_index_entries_match_spec_bullet_form(okf_export, bridge_root, tmp_
     ]
     assert entries, "no spec-form bullets found"
     assert "* [Sample Doc](sample-doc.md) - Doc about acme" in entries
-    assert "—" not in (out / "doc" / "index.md").read_text(encoding="utf-8")
+    # U+2014 spelled as an escape, not as itself: the assertion is about the
+    # generated bundle, and this file is not a place for a stray em dash.
+    assert "\u2014" not in (out / "doc" / "index.md").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------
@@ -2864,7 +2978,7 @@ def test_contract_docstring_and_guide_declare_v0_2():
 
 
 # --------------------------------------------------------------------------
-# YAML safety — every emitted frontmatter block must survive a REAL parser
+# YAML safety: every emitted frontmatter block must survive a REAL parser
 # --------------------------------------------------------------------------
 
 @pytest.fixture
@@ -3045,6 +3159,445 @@ def test_every_emitted_concept_frontmatter_parses_with_pyyaml(okf_export, hostil
         fm = _pyyaml_frontmatter(path)
         assert isinstance(fm, dict), path
         assert fm.get("type"), f"{path} has no non-empty type"  # clause 2
+
+
+# --------------------------------------------------------------------------
+# Silent source losses the first two fixes left standing (issue #151's shape)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # A plain scalar whose last character is a quote. Legal YAML, everyday
+        # prose, and the historic `value.strip('"').strip("'")` ate the quote.
+        'title: The so-called "bridge"',
+        "title: it is 'fine'",
+        'title: monitor is 12"',
+        "description: a take on the \"hand-rolled parser\"",
+        # Both ends, still never a quoted scalar: a plain scalar cannot OPEN
+        # with a quote, so nothing here was ever delimited.
+        "title: ask \"who\"",
+    ],
+)
+def test_a_plain_scalar_keeps_a_quote_it_ends_on(okf_export, line):
+    """REGRESSION: an unquoted value must not lose a trailing quote character.
+
+    PyYAML round-trips every line here, so this is not a malformed source
+    degrading: it is a well-formed one being shortened. The historic strip
+    ran on BOTH ends of every fallen-through value, and a plain scalar never
+    had an opening quote for the closing one to pair with. Measured against a
+    real parser rather than against a hand-written expectation, because the
+    claim being made is agreement with YAML.
+    """
+    key = line.split(":", 1)[0]
+    fm, _ = okf_export.parse_frontmatter(f"---\n{line}\n---\n\nBody.\n")
+    assert fm[key] == yaml.safe_load(line)[key]
+
+
+def test_a_plain_scalar_keeps_unicode_whitespace_yaml_counts_as_content(okf_export):
+    """`str.strip()` is Unicode-aware; a YAML plain scalar is trimmed of
+    spaces and tabs only.
+
+    A description pasted out of a browser or a word processor routinely ends
+    in U+00A0, and the exporter dropped it. Nothing marks the loss.
+    """
+    for line in [
+        # Trailing: `str.strip()` is Unicode-aware; a YAML plain scalar is
+        # trimmed of spaces and tabs only.
+        "description: a NBSP tail ",
+        # Leading: the `key:` separator is spaces and tabs, so a value that
+        # STARTS with U+00A0 starts with content. `\\s*` ate it, and the
+        # `'quoted'` left behind then went down the fallen-through quote
+        # path and came out empty.
+        "description:  'a NBSP head'",
+        # In the middle: YAML opens an inline comment on a `#` after a
+        # space or a tab, not after any Unicode space. `\\s` in the comment
+        # pattern read U+00A0 as one and truncated the value there.
+        "description: before #after",
+    ]:
+        fm, _ = okf_export.parse_frontmatter(f"---\n{line}\n---\n\nBody.\n")
+        assert fm["description"] == yaml.safe_load(line)["description"], repr(line)
+
+
+def test_a_byte_order_mark_does_not_hide_the_frontmatter_block(okf_export):
+    """A UTF-8 BOM made the whole block invisible, keys and all.
+
+    `str.rstrip()` does not remove U+FEFF, so `\\ufeff---` never equalled
+    `---` and the file was read as having no frontmatter: title fell back to
+    the body H1, description and last_updated were dropped, and the raw
+    frontmatter text was emitted into the concept body.
+    """
+    body = "---\ntitle: \"Real Title\"\ndescription: \"Load bearing\"\nlast_updated: 2026-01-02\n---\n\n# Body H1\n\ntext\n"
+    fm, rest = okf_export.parse_frontmatter("﻿" + body)
+    assert fm["title"] == "Real Title"
+    assert fm["description"] == "Load bearing"
+    assert fm["last_updated"] == "2026-01-02"
+    assert rest == "\n# Body H1\n\ntext\n"
+    assert okf_export.parse_frontmatter("﻿" + body) == okf_export.parse_frontmatter(body)
+
+
+def test_a_bom_source_reaches_the_bundle_with_its_own_title_and_date(okf_export, tmp_path):
+    """The same defect end to end, where it is visible: the concept."""
+    root = tmp_path / "bom-instance"
+    _write(
+        root / "docs" / "bom.md",
+        "﻿---\ntitle: \"Real Title\"\ndescription: \"Load bearing\"\n"
+        "last_updated: 2026-01-02\n---\n\n# Body H1\n\ntext\n",
+    )
+    out = tmp_path / "bom-bundle"
+    okf_export.write_bundle(root, out, "core")
+    emitted = (out / "doc" / "bom.md").read_text(encoding="utf-8")
+    fm = _pyyaml_frontmatter(out / "doc" / "bom.md")
+    assert fm["title"] == "Real Title"
+    assert fm["description"] == "Load bearing"
+    assert "at: 2026-01-02T00:00:00Z" in emitted
+    assert "title:" not in emitted.split("---\n", 2)[2], (
+        "the source frontmatter leaked into the concept body"
+    )
+
+
+@pytest.mark.parametrize("separator", [" ", " "])
+def test_a_unicode_line_separator_inside_a_scalar_does_not_truncate_it(okf_export, separator):
+    """`str.splitlines` breaks on U+2028/U+2029; YAML does not.
+
+    The value was cut at the separator: the quoted scalar never closed on its
+    own pseudo-line, so it fell through to the plain path and lost its tail.
+    PyYAML accepts both characters inside a double-quoted scalar and returns
+    them verbatim, which makes this a disagreement on well-formed input.
+    """
+    block = f'title: "Alpha{separator}Beta"\ndescription: "before{separator}after"\n'
+    fm, rest = okf_export.parse_frontmatter(f"---\n{block}---\n\nBody.\n")
+    assert fm == yaml.safe_load(block)
+    assert rest == "\nBody.\n"
+
+
+def test_an_emitted_concept_round_trips_through_both_parsers(okf_export, tmp_path):
+    """What the exporter writes, the exporter (and a real parser) can read back.
+
+    A separator character in a source title reached the concept file raw, and
+    the exporter's own parser then truncated it there: the bundle it produced
+    was not a bundle it could read.
+    """
+    root = tmp_path / "sep-instance"
+    _write(root / "docs" / "sep.md", '---\ntitle: "Alpha Beta"\n---\n\n# H1\n\nbody\n')
+    out = tmp_path / "sep-bundle"
+    okf_export.write_bundle(root, out, "core")
+
+    emitted = (out / "doc" / "sep.md").read_text(encoding="utf-8")
+    assert okf_export.parse_frontmatter(emitted)[0]["title"] == "Alpha Beta"
+    assert _pyyaml_frontmatter(out / "doc" / "sep.md")["title"] == "Alpha Beta"
+    # The INDEX still flattens it: _is_control covers U+2028 so an entry
+    # cannot split across two lines for a consumer using str.splitlines.
+    entries = _index_entry_lines(out / "doc" / "index.md")
+    assert entries == ["* [Alpha Beta](sep.md)"]
+
+
+def test_an_indented_closing_fence_outside_a_block_scalar_still_closes(okf_export):
+    """REGRESSION introduced by the column-0 rule, and the reason it needs
+    block-scalar state rather than a column test alone.
+
+    #151's block-scalar case needs an indented `---` to stay content INSIDE a
+    block scalar. Making every indented `---` content costs the body of any
+    file that merely indents its closing fence: the scan reads on to the next
+    column-0 `---` and swallows everything in between as frontmatter, or,
+    where no later fence exists, gives up and reports no frontmatter at all.
+    origin/main parsed both of these.
+    """
+    with_later_fence = (
+        '---\ntitle: "T"\n  ---\n\nThe entire body that must reach the bundle.\n\n---\ntrailer\n'
+    )
+    fm, body = okf_export.parse_frontmatter(with_later_fence)
+    assert fm == {"title": "T"}
+    assert body == "\nThe entire body that must reach the bundle.\n\n---\ntrailer\n"
+
+    without_later_fence = "---\ntitle: A\nstatus: doing\n  ---\nBody one.\n"
+    fm, body = okf_export.parse_frontmatter(without_later_fence)
+    assert fm == {"title": "A", "status": "doing"}
+    assert body == "Body one.\n"
+
+
+def test_the_block_scalar_fence_rule_survives_the_indented_closer(okf_export):
+    """GUARD: the #151 case must not come back when the closer loosens again.
+
+    An indented `---` inside a `title: |` block is content; the same line
+    outside one closes the frontmatter. Both in one file, so a fix that
+    reaches for either rule alone fails here.
+    """
+    text = (
+        "---\n"
+        "title: |\n"
+        "  Heading\n"
+        "  ---\n"
+        "  Trailer\n"
+        "status: doing\n"
+        "  ---\n"
+        "Body.\n"
+    )
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {"title": "Heading\n---\nTrailer", "status": "doing"}
+    assert body == "Body.\n"
+
+
+# --------------------------------------------------------------------------
+# A refused or failed run must leave the previous bundle usable
+# --------------------------------------------------------------------------
+
+def test_a_slug_too_long_for_the_filesystem_is_refused_before_the_rmtree(okf_export, tmp_path):
+    """_SAFE_SLUG_RE bounds a memory `name:` in shape but not in LENGTH.
+
+    A 300-character name passed every gate and then raised a bare OSError
+    from `write_text`, AFTER the rmtree and BEFORE the root index.md: the
+    previous bundle was gone and the destination no longer looked like a
+    bundle, so every later run refused it and the operator had to delete the
+    directory by hand. The exporter's own stated invariant is that a failure
+    fails with the previous bundle intact, not after it.
+    """
+    root = tmp_path / "long-instance"
+    _write(root / "docs" / "a.md", '---\ntitle: "A"\n---\n\n# A\n\nbody\n')
+    mem = tmp_path / "long-memory"
+    _write(mem / "reference_ok.md", "---\nname: ok-fact\n---\n\nbody\n")
+    out = tmp_path / "long-bundle"
+
+    first = okf_export.write_bundle(root, out, "user", memory_dir=mem)
+    assert first["concept_count"] == 2
+
+    _write(mem / "reference_long.md", f"---\nname: {'a' * 300}\n---\n\nbody\n")
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(root, out, "user", memory_dir=mem)
+    assert "too long" in str(excinfo.value)
+    assert okf_export._is_bundle_dir(out), "the previous bundle must survive a refused run"
+
+    (mem / "reference_long.md").unlink()
+    assert okf_export.write_bundle(root, out, "user", memory_dir=mem)["concept_count"] == 2
+
+
+def test_a_write_that_dies_mid_bundle_leaves_a_destination_the_next_run_can_clear(
+    okf_export, tmp_path, monkeypatch
+):
+    """The root index.md goes down FIRST, so a crash is recoverable.
+
+    _is_bundle_dir keys off that file. Written last, ANY mid-write failure (a
+    full disk, a permission error, a name the filesystem rejects) left a
+    non-empty directory that no longer looked like a bundle, and the exporter
+    then refused its own destination forever.
+    """
+    root = tmp_path / "crash-instance"
+    _write(root / "docs" / "a.md", '---\ntitle: "A"\n---\n\n# A\n\nbody\n')
+    out = tmp_path / "crash-bundle"
+
+    def _boom(concept, generated_by=None):  # pragma: no cover - raises by design
+        raise OSError(63, "File name too long")
+
+    monkeypatch.setattr(okf_export, "_render_concept", _boom)
+    with pytest.raises(OSError):
+        okf_export.write_bundle(root, out, "core")
+    monkeypatch.undo()
+
+    assert okf_export._is_bundle_dir(out), (
+        "a half-written destination the exporter can never clear again"
+    )
+    assert okf_export.write_bundle(root, out, "core")["concept_count"] == 1
+
+
+def test_an_out_dir_that_is_an_existing_file_is_refused_cleanly(okf_export, bridge_root, tmp_path):
+    """`Path.iterdir` raises NotADirectoryError on a regular file.
+
+    The documented exit-code contract promises a stderr line for a refused
+    --out; what the operator got was a Python traceback.
+    """
+    target = tmp_path / "not-a-dir"
+    target.write_text("hi", encoding="utf-8")
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, target, "core")
+    assert target.read_text(encoding="utf-8") == "hi"
+
+
+def test_main_cli_refuses_a_file_out_with_a_message_not_a_traceback(
+    okf_export, bridge_root, tmp_path, capsys
+):
+    target = tmp_path / "cli-not-a-dir"
+    target.write_text("hi", encoding="utf-8")
+    rc = okf_export.main(["--root", str(bridge_root), "--out", str(target), "--scope", "core"])
+    assert rc == 1
+    assert capsys.readouterr().err.startswith("ERROR: ")
+
+
+# --------------------------------------------------------------------------
+# The destination guard: a symlinked LITERAL segment, and the memory store
+# --------------------------------------------------------------------------
+
+def test_scanned_dirs_sees_a_directory_reached_through_a_globbed_segment(okf_export, tmp_path):
+    """The fixed prefix is not the whole read set.
+
+    `Path.glob` follows a symlink at every LITERAL segment after the globbed
+    part, so `work/**/deliverables/*.md` reads through a link named
+    `deliverables`. Resolving only `_pattern_prefix` ("work") leaves that
+    target invisible to the guard.
+    """
+    root = tmp_path / "instance"
+    (root / "work" / "loop").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _symlink_or_skip(root / "work" / "loop" / "deliverables", elsewhere)
+
+    assert elsewhere.resolve() in okf_export.scanned_dirs(root, "user")
+
+
+def test_a_symlinked_segment_after_a_glob_cannot_hide_the_destination(okf_export, tmp_path):
+    """Issue #153's signature through a spelling the prefix guard cannot see.
+
+    Measured before this fix: `work/loop/deliverables -> <out>/deliverable`
+    and the count went 2, 4, 6, 8, 10 across five runs, exit 0 every time,
+    with the bundle filling up with `d1-2.md`, `d1-3.md`, `index-2.md`. The
+    guard has to read the same glob engine the walk does.
+    """
+    root = tmp_path / "instance"
+    _write(root / "docs" / "a.md", '---\ntitle: "A"\n---\n\n# A\n\nbody a\n')
+    _write(
+        root / "work" / "real" / "deliverables" / "d1.md",
+        '---\ntitle: "D1"\n---\n\n# D1\n\ndeliv one\n',
+    )
+    (root / "work" / "loop").mkdir(parents=True, exist_ok=True)
+    out = tmp_path / "bundle"
+    _symlink_or_skip(root / "work" / "loop" / "deliverables", out / "deliverable")
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, out, "user", memory_dir=None)
+    assert not (out / "index.md").exists(), "guard raised but the bundle was written anyway"
+
+
+@pytest.mark.parametrize("scope", ["core", "user"])
+def test_the_memory_dir_is_refused_as_a_destination_in_every_scope(
+    okf_export, bridge_root, memory_dir, scope
+):
+    """The union rule the scanned-directory clause already follows.
+
+    A bundle outlives the run that wrote it. A core-scope run gated out of
+    this clause wrote its bundle INTO the memory store, and the next run of
+    either scope then rmtree'd that store, fact files and all, because the
+    directory now carried an okf_version index and passed the late
+    non-bundle check. Measured: three fact files written after a first core
+    run were gone after the second, exit 0 both times.
+
+    This replaces test_core_scope_does_not_refuse_a_memory_dir_it_never_reads,
+    which pinned the gate as deliberate. The gate mirrored this run's READ
+    set, but the destination outlives this run, which is the same argument
+    all_scanned_dirs makes for scopes and the same one the module docstring,
+    the exit-code contract and the guide's own boldfaced rule already state
+    unconditionally.
+    """
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(bridge_root, memory_dir / "okfbundle", scope, memory_dir=memory_dir)
+    assert "memory dir" in str(excinfo.value)
+    assert list(memory_dir.glob("*.md")), "guard raised but the fact files are gone"
+
+
+def test_main_guards_the_memory_dir_under_core_scope_too(
+    okf_export, bridge_root, memory_dir, capsys
+):
+    """The CLI half: main resolved the memory dir under user scope only, so
+    write_bundle could not guard what it was never told about.
+
+    Reading it stays user-only; knowing where it is has to be unconditional.
+    """
+    rc = okf_export.main(
+        [
+            "--root", str(bridge_root),
+            "--out", str(memory_dir / "core-bundle"),
+            "--scope", "core",
+            "--memory-dir", str(memory_dir),
+        ]
+    )
+    assert rc == 1
+    assert "memory" in capsys.readouterr().err
+    assert list(memory_dir.glob("*.md")), "the fact store must be untouched"
+    assert not (memory_dir / "core-bundle").exists()
+
+
+def test_core_scope_still_exports_no_memory_concepts(okf_export, bridge_root, memory_dir, tmp_path):
+    """GUARD on the clause above: guarding the memory dir is not reading it."""
+    out = tmp_path / "core-no-memory"
+    manifest = okf_export.write_bundle(bridge_root, out, "core", memory_dir=memory_dir)
+    assert manifest["scope"] == "core"
+    assert not (out / "memory").exists()
+
+
+# --------------------------------------------------------------------------
+# Index entries: the SLUG is source-derived too
+# --------------------------------------------------------------------------
+
+def _hostile_named_docs(root: Path) -> list[str]:
+    """Write one doc per hostile FILENAME, skipping names this FS rejects."""
+    frontmatter = '---\ntitle: "Plain title"\ndescription: "Plain description"\n---\n\n# H1\n\nbody\n'
+    written: list[str] = []
+    for name in ["Getting Started.md", "weird).md", "hash#tag.md", "sep line.md", "plain.md"]:
+        try:
+            _write(root / "docs" / name, frontmatter)
+        except OSError:  # pragma: no cover - filesystem-dependent
+            continue
+        written.append(name)
+    return written
+
+
+def test_a_hostile_source_filename_cannot_break_its_own_index_entry(okf_export, tmp_path):
+    """The slug is the source FILENAME, and it was interpolated raw.
+
+    _md_inline escaped the title and the description; the link destination
+    between them took whatever the file was called. A space makes the entry
+    something CommonMark cannot read as a link at all; a `)` closes the
+    destination early and points it at a file the bundle does not contain; a
+    `#` turns the rest into a fragment; U+2028 splits the entry across two
+    lines for any consumer using str.splitlines, which is the exact
+    fabricated-entry failure _is_control exists to prevent.
+    """
+    root = tmp_path / "slug-hostile"
+    names = _hostile_named_docs(root)
+    if len(names) < 2:  # pragma: no cover - filesystem-dependent
+        pytest.skip("this filesystem accepts none of the hostile filenames")
+    out = tmp_path / "slug-hostile-bundle"
+    okf_export.write_bundle(root, out, "core")
+
+    concepts = sorted(p.name for p in (out / "doc").glob("*.md") if p.name != "index.md")
+    entries = _index_entry_lines(out / "doc" / "index.md")
+    assert len(entries) == len(concepts)
+    for entry in entries:
+        match = _INDEX_ENTRY_RE.match(entry)
+        assert match, f"entry is not one clean bullet: {entry!r}"
+        target = match.group("target")
+        assert not set(target) & set(" <>"), f"destination is not a URL: {target!r}"
+        assert not any(okf_export._is_control(ch) for ch in target)
+        assert urllib.parse.unquote(target) in concepts, (
+            f"index links {target!r}, which is not one of {concepts}"
+        )
+
+
+def test_raw_html_in_a_title_cannot_fabricate_a_list_item(okf_export, tmp_path):
+    """`<` was the one markup character _md_inline left alone.
+
+    CommonMark passes inline raw HTML straight through, so a title of
+    `a</li><li><a href='...'>evil</a>` rendered as FOUR list items under a
+    header claiming three, with an attacker-chosen href: the same outcome the
+    escape set exists to prevent, reached without a line break or a bracket.
+    An autolink `<https://evil.example>` puts a foreign href inside an entry
+    the same way.
+    """
+    root = tmp_path / "html-title"
+    _write(
+        root / "docs" / "evil.md",
+        "---\ntitle: \"a</li><li><a href='https://evil.example'>evil</a>\"\n"
+        'description: "<https://evil.example>"\n---\n\n# H1\n\nbody\n',
+    )
+    out = tmp_path / "html-title-bundle"
+    okf_export.write_bundle(root, out, "core")
+
+    entries = _index_entry_lines(out / "doc" / "index.md")
+    assert len(entries) == 1
+    entry = entries[0]
+    for pos, ch in enumerate(entry):
+        if ch == "<":
+            assert pos and entry[pos - 1] == "\\", f"unescaped `<` at {pos} in {entry!r}"
+    # Escaped, never dropped: a reader still sees what the source said.
+    assert "evil" in entry
 
 
 # --------------------------------------------------------------------------
