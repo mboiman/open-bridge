@@ -96,8 +96,11 @@ false) claim from "not recorded".
 not the author of the underlying knowledge. It defaults to
 `okf-export/<EXPORTER_VERSION>`; `--generated-by` overrides it with any OKF
 actor (`<producer>/<version>`, `human:<id>`, `process:<id>`), and an invalid
-value is rejected with exit code 1 rather than written — consumers classify
-trust by the literal `human:` prefix, so a typo would mis-tier a whole bundle.
+value is rejected with exit code 1 rather than written — the value is written
+verbatim into every concept, so an unconstrained string would be an unreadable
+provenance claim, and one containing a newline or quote would be malformed
+YAML. (Trust *tiers* derive from `verified`, which this exporter never emits,
+so a wrong actor here misattributes provenance but cannot inflate a tier.)
 The actor is **never** derived from `git config`, `git log` or `$USER`: a
 committer is not a knowledge author, it would inject a real identity into a
 `--scope core` bundle, and it would make the output depend on clone state.
@@ -204,7 +207,7 @@ frontmatter-less strays are never exported.
 
 ```
 <out>/
-├── index.md              # okf_version, scope, concept_count
+├── index.md              # okf_version (the only key OKF permits here)
 ├── task/
 │   ├── index.md
 │   └── <slug>.md
@@ -284,8 +287,14 @@ as the `work/` tree it was exported from. Never commit an export.
 ## Tests
 
 `scripts/tests/test_okf_export.py` (`bash scripts/tests/test-okf-export.sh`)
-is a hermetic pytest suite — every test builds its own synthetic mini-instance
-under `tmp_path` and never touches the real repo tree beyond importing the
-module under test. It is the authoritative contract for every function's
-signature and behaviour; this document describes intent and usage, the test
-file describes the exact surface.
+is a pytest suite in which every test builds its own synthetic mini-instance
+under `tmp_path`, so no test reads or writes real instance content. Two tests
+deliberately read repo files rather than fixtures: the exporter source (to
+assert no wall-clock, git or environment call appears in the render path) and
+this guide plus the suite's own docstring (to assert the documentation was
+migrated alongside the code). Both read only; neither touches `work/` or a
+memory directory.
+
+The suite is the authoritative contract for every function's signature and
+behaviour; this document describes intent and usage, the test file describes
+the exact surface.

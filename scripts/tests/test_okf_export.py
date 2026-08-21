@@ -141,7 +141,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import sys
+import tokenize
 import types
 from pathlib import Path
 
@@ -613,9 +615,21 @@ def test_module_source_has_no_wall_clock_call():
     above. Asserted against the module source so the regression is caught at
     the exact line someone would write it.
     """
-    source = MODULE_PATH.read_text(encoding="utf-8")
-    for forbidden in ("datetime.now", "utcnow", "date.today", "time.time", "st_mtime", "getmtime"):
-        assert forbidden not in source, f"wall-clock/mtime call {forbidden!r} in the exporter"
+    # Comments and string literals are stripped first: a substring scan over
+    # raw text would fire on the module's own comment explaining why git is
+    # refused, which is documentation, not a call.
+    tokens = tokenize.generate_tokens(io.StringIO(MODULE_PATH.read_text(encoding="utf-8")).readline)
+    code = "".join(
+        tok.string for tok in tokens if tok.type in (tokenize.NAME, tokenize.OP, tokenize.NUMBER)
+    )
+    for forbidden in (
+        "datetime.now", "utcnow", "date.today", "time.time", "st_mtime", "getmtime",
+        # Not just the clock: git state and the environment are equally
+        # non-reproducible, and a git-derived generated.by/at is exactly the
+        # convenience a future contributor would reach for.
+        "subprocess", "os.environ", "getenv", "popen", "check_output",
+    ):
+        assert forbidden not in code, f"non-reproducible call {forbidden!r} in the exporter"
 
 
 def test_exporter_imports_without_pyyaml(bridge_root, tmp_path, monkeypatch):
@@ -677,6 +691,39 @@ def test_normalize_timestamp_returns_none_for_unprovable_values(okf_export, valu
     assert okf_export.normalize_timestamp(value) is None
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-02-30T00:00:00Z",       # calendar-impossible, offset-bearing
+        "2026-06-31T09:00:00Z",       # June has 30 days
+        "2026-13-45T99:99:99Z",       # every component out of range
+        "2026-07-02T25:00:00Z",       # hour 25
+        "2026-07-02T14:00:00+99:99",  # impossible offset
+        "2026-07-02 14:00:00Z",       # space separator is not the ISO form
+    ],
+)
+def test_normalize_timestamp_rejects_impossible_offset_instants(okf_export, value):
+    """The offset branch must PROVE the value, not merely shape-match it.
+
+    The regex is all `\\d{2}` groups, so month 13 and day-31-in-June match the
+    pattern. Passing such a value through emits an unquoted scalar that no
+    YAML parser can load, which breaks conformance for the entire bundle
+    while the exporter still exits 0 and reports every date as proven.
+    """
+    assert okf_export.normalize_timestamp(value) is None
+
+
+def test_impossible_source_instant_never_reaches_the_bundle(okf_export, tmp_path):
+    """End-to-end companion to the unit test above."""
+    root = tmp_path / "impossible-instant"
+    _write(root / "docs/bad.md", "---\nlast_updated: 2026-06-31T09:00:00Z\n---\n\n# Bad\n\nBody.\n")
+    out = tmp_path / "bundle-impossible"
+    manifest = okf_export.write_bundle(root, out, "core")
+    fm = _pyyaml_frontmatter(out / "doc" / "bad.md")   # must not raise
+    assert "at" not in fm["generated"]
+    assert manifest["concepts_without_generated_at"] == 1
+
+
 @pytest.mark.parametrize("value", ["20260702", "2026-W27-1"])
 def test_normalize_timestamp_rejects_compact_and_week_forms(okf_export, value):
     """The strict regex gate must run BEFORE date.fromisoformat.
@@ -710,10 +757,10 @@ def _trust_tier(fm: dict) -> str:
     return "human-reviewed" if any(a.startswith("human:") for a in actors) else "machine-confirmed"
 
 
-def test_concept_emits_generated_flow_mapping_with_by(okf_export, bridge_root, tmp_path):
+def test_concept_emits_generated_flow_mapping_with_by(okf_export, bridge_root, memory_dir, tmp_path):
     """`by` is the only REQUIRED key inside `generated` (spec 5.2)."""
     out = tmp_path / "bundle-generated"
-    okf_export.write_bundle(bridge_root, out, "user")
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
     for path in _concept_files(out):
         generated = _pyyaml_frontmatter(path).get("generated")
         assert isinstance(generated, dict), path
@@ -742,15 +789,15 @@ def test_generated_at_omitted_when_source_date_unparseable(okf_export, tmp_path)
     assert "2026-03" not in (out / "doc" / "partial.md").read_text(encoding="utf-8").split("---")[1]
 
 
-def test_no_timestamp_key_emitted_for_any_concept(okf_export, bridge_root, tmp_path):
+def test_no_timestamp_key_emitted_for_any_concept(okf_export, bridge_root, memory_dir, tmp_path):
     """v0.2 clean break: `timestamp` is superseded by `generated.at`."""
     out = tmp_path / "bundle-no-timestamp"
-    okf_export.write_bundle(bridge_root, out, "user")
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
     for path in _concept_files(out):
         assert "timestamp" not in _pyyaml_frontmatter(path), path
 
 
-def test_no_concept_emits_okf_status_key(okf_export, bridge_root, tmp_path):
+def test_no_concept_emits_okf_status_key(okf_export, bridge_root, memory_dir, tmp_path):
     """The homograph guard.
 
     OKF `status` is document readiness (draft|stable|deprecated); a Bridge
@@ -761,7 +808,7 @@ def test_no_concept_emits_okf_status_key(okf_export, bridge_root, tmp_path):
     claim about an exported write-up.
     """
     out = tmp_path / "bundle-no-status"
-    okf_export.write_bundle(bridge_root, out, "user")
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
     for path in _concept_files(out):
         assert "status" not in _pyyaml_frontmatter(path), path
 
@@ -781,7 +828,7 @@ def test_bridge_status_value_still_appears_in_tags(okf_export, bridge_root, tmp_
 
 
 @pytest.mark.parametrize("field", ["verified", "sources", "stale_after", "usage_window"])
-def test_no_concept_emits_a_fabricated_provenance_or_trust_field(okf_export, bridge_root, tmp_path, field):
+def test_no_concept_emits_a_fabricated_provenance_or_trust_field(okf_export, bridge_root, memory_dir, tmp_path, field):
     """Nothing in a Bridge instance honestly supplies any of these.
 
     `verified` is the costliest to fake: spec 5.3 derives trust tiers purely
@@ -790,7 +837,7 @@ def test_no_concept_emits_a_fabricated_provenance_or_trust_field(okf_export, bri
     a fabricated horizon suppresses content that is perfectly current.
     """
     out = tmp_path / f"bundle-no-{field}"
-    okf_export.write_bundle(bridge_root, out, "user")
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
     for path in _concept_files(out):
         assert field not in _pyyaml_frontmatter(path), path
 
@@ -854,7 +901,17 @@ def test_generated_by_cli_override_used_verbatim(okf_export, bridge_root, tmp_pa
     assert _pyyaml_frontmatter(out / "doc" / "sample-doc.md")["generated"]["by"] == actor
 
 
-@pytest.mark.parametrize("actor", ["Some Person", "human:", "no-slash-no-prefix", "a/b/c"])
+@pytest.mark.parametrize(
+    "actor",
+    [
+        "Some Person", "human:", "no-slash-no-prefix", "a/b/c",
+        # Python's `$` also matches BEFORE a trailing newline, so a `$`-anchored
+        # gate would pass these and then split the rendered flow mapping across
+        # two physical lines. The regex uses \Z for exactly this reason.
+        "human:alice\n", "okf-export/1.0\n", "process:ci\n",
+        'okf-export/1.0"', "okf-export/1.0 }",
+    ],
+)
 def test_generated_by_rejects_non_actor_string_with_nonzero_exit(okf_export, bridge_root, tmp_path, actor):
     """A typo'd actor would silently mis-tier a whole bundle (spec 5.3/7)."""
     out = tmp_path / "bundle-bad-actor"
@@ -918,15 +975,46 @@ def test_root_index_frontmatter_carries_only_okf_version(okf_export, bridge_root
 
 
 def test_is_bundle_dir_still_recognizes_a_v01_bundle(okf_export, tmp_path):
-    """REGRESSION on the destructive --out guard.
+    """Trimming the root index must not make a v0.1 bundle unrecognisable.
 
-    Trimming the root index must not make a previously written v0.1 bundle
-    unrecognisable, or a mistyped --out becomes an unguarded rmtree.
+    This asserts the predicate only. The guard it feeds is covered by the two
+    BundleDestinationError tests below, which exercise the actual rmtree path.
     """
     old = tmp_path / "v01-bundle"
     old.mkdir()
     (old / "index.md").write_text('---\nokf_version: "0.1"\nscope: user\n---\n\n# OKF Bundle\n', encoding="utf-8")
     assert okf_export._is_bundle_dir(old) is True
+    plain = tmp_path / "not-a-bundle"
+    plain.mkdir()
+    (plain / "index.md").write_text("# Just a readme, no frontmatter\n", encoding="utf-8")
+    assert okf_export._is_bundle_dir(plain) is False
+
+
+def test_write_bundle_refuses_to_clear_a_non_bundle_directory(okf_export, bridge_root, tmp_path):
+    """The rmtree guard, exercised rather than assumed.
+
+    `write_bundle` calls shutil.rmtree on --out. A non-empty directory that is
+    not a prior bundle must raise BEFORE anything is deleted, or a mistyped
+    --out silently destroys unrelated data.
+    """
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    keeper = precious / "important.txt"
+    keeper.write_text("do not delete me", encoding="utf-8")
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, precious, "user")
+    assert keeper.exists(), "guard raised but the directory was cleared anyway"
+    assert keeper.read_text(encoding="utf-8") == "do not delete me"
+
+
+def test_write_bundle_refuses_an_out_dir_that_would_delete_the_source(okf_export, bridge_root, tmp_path):
+    """--out == --root, or an ancestor of it, would clear the source tree."""
+    del tmp_path
+    for destination in (bridge_root, bridge_root.parent):
+        with pytest.raises(okf_export.BundleDestinationError):
+            okf_export.write_bundle(bridge_root, destination, "user")
+    assert (bridge_root / "docs" / "sample-doc.md").exists()
 
 
 @pytest.mark.parametrize("concept_type", ["task", "stream", "deliverable", "doc", "rule", "example", "memory"])
@@ -1024,7 +1112,36 @@ def hostile_root(tmp_path: Path) -> Path:
         "---\n\n"
         "# Bracket Tag\n\nBody.\n",
     )
+    # A colon-space is the block-context indicator, so unlike a comma or a
+    # bracket it breaks `description:` and `bridge_status:` rather than the
+    # flow sequence. Without it the quoting of those two positions is untested.
+    _write(
+        root / "docs/colon-desc.md",
+        "---\n"
+        'summary: "Note: this description carries a colon"\n'
+        "---\n\n"
+        "# Colon Desc\n\nBody.\n",
+    )
+    _write(
+        root / "work/tasks/colon-status/STATUS.md",
+        "---\n"
+        'status: "blocked: waiting on review"\n'
+        "---\n\n"
+        "# Colon Status\n\nBody.\n",
+    )
     return root
+
+
+def test_colon_bearing_description_and_status_survive_a_real_parser(okf_export, hostile_root, tmp_path):
+    """A colon-space would otherwise turn one scalar into a nested mapping."""
+    out = tmp_path / "bundle-hostile-colon"
+    okf_export.write_bundle(hostile_root, out, "user")
+    assert _pyyaml_frontmatter(out / "doc" / "colon-desc.md")["description"] == (
+        "Note: this description carries a colon"
+    )
+    assert _pyyaml_frontmatter(out / "task" / "colon-status.md")["bridge_status"] == (
+        "blocked: waiting on review"
+    )
 
 
 def test_render_escapes_newlines_in_quoted_scalars(okf_export):
@@ -1040,8 +1157,17 @@ def test_render_escapes_newlines_in_quoted_scalars(okf_export):
     assert yaml.safe_load(f"title: {quoted}")["title"] == "Line one\nLine two"
 
 
-def test_yaml_quote_escapes_tabs_and_control_characters(okf_export):
-    value = "Head\tTabbed\x01ctrl\rreturn"
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Head\tTabbed\x01ctrl\rreturn",
+        r"C:\path\to\thing",          # backslash: without escaping, YAML reads \t as a tab
+        'He said "stop"',             # embedded quote closes the scalar
+        r'mixed \ and " together',
+        "trailing backslash \\",
+    ],
+)
+def test_yaml_quote_roundtrips_through_a_real_parser(okf_export, value):
     quoted = okf_export._yaml_quote(value)
     assert yaml.safe_load(f"title: {quoted}")["title"] == value
 

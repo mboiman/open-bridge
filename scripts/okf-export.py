@@ -90,7 +90,7 @@ import argparse
 import re
 import shutil
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 OKF_VERSION = "0.2"
@@ -101,16 +101,23 @@ OKF_VERSION = "0.2"
 EXPORTER_VERSION = "1.0"
 
 # OKF section 7 actor convention: `<producer>/<version>` for an agent or tool,
-# `human:<id>` for a person, `process:<id>` for an automated process. Consumers
-# classify trust by the literal `human:` prefix (section 5.3), so a malformed
-# actor silently mis-tiers an entire bundle. Validated rather than trusted.
-_ACTOR_RE = re.compile(r"^(?:human|process):[A-Za-z0-9._-]+$|^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+# `human:<id>` for a person, `process:<id>` for an automated process. The value
+# is written verbatim into every concept's `generated.by`, so it is validated
+# rather than trusted: an unconstrained string is an unreadable provenance
+# claim, and one containing a newline or a quote is malformed YAML. (Trust
+# TIERS derive from `verified`, not from this field, so a wrong actor here
+# misattributes provenance but cannot inflate a tier.)
+# `\A`/`\Z`, never `^`/`$`: in Python `$` also matches before a trailing
+# newline, so `--generated-by $'human:alice\n'` would pass a `$`-anchored gate
+# and then split the rendered `generated:` flow mapping across two lines.
+_ACTOR_RE = re.compile(r"\A(?:human|process):[A-Za-z0-9._-]+\Z|\A[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\Z")
 # Only a full calendar date. `date.fromisoformat` also accepts `20260702` and
 # `2026-W27-1` on Python 3.11+, which must NOT be silently widened.
-_BARE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# An instant that already carries an explicit UTC offset, as OKF section 5 requires.
+_BARE_DATE_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
+# An instant that already carries an explicit UTC offset, as OKF section 5
+# requires. `T` only: a space separator is not the ISO 8601 form the spec names.
 _OFFSET_DATETIME_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$"
+    r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})\Z"
 )
 
 # Kebab-case identifiers only: bash `[[ -f file ]]` conditionals inside code
@@ -328,6 +335,11 @@ def normalize_timestamp(value: str) -> str | None:
     ``work/templates/STATUS.md`` seeds new tasks with the literal
     ``YYYY-MM-DD`` placeholder, and section 5.2 does not mark ``at``
     required. Pure: reads only its argument, never the clock.
+
+    Both branches PROVE the value rather than merely shape-matching it: the
+    regexes are all ``\\d{2}`` groups, so month 13, day-31-in-June and hour 25
+    match the pattern. An impossible instant, emitted unquoted, is frontmatter
+    no YAML parser can load, which breaks conformance for the whole bundle.
     """
     value = (value or "").strip()
     if _BARE_DATE_RE.match(value):
@@ -337,6 +349,13 @@ def normalize_timestamp(value: str) -> str | None:
             return None  # calendar-impossible, e.g. 2026-02-30
         return f"{value}T00:00:00Z"
     if _OFFSET_DATETIME_RE.match(value):
+        # `Z` is only accepted by fromisoformat from 3.11; normalize for the
+        # probe so the check does not depend on the interpreter version.
+        probe = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            datetime.fromisoformat(probe)
+        except ValueError:
+            return None  # e.g. 2026-06-31T09:00:00Z, 2026-07-02T25:00:00Z
         return value
     return None
 
@@ -709,9 +728,10 @@ def main(argv: list[str] | None = None) -> int:
     if not _ACTOR_RE.match(generated_by):
         sys.stderr.write(
             f"ERROR: --generated-by {generated_by!r} is not an OKF actor. Use "
-            "'<producer>/<version>', 'human:<id>' or 'process:<id>' — consumers "
-            "classify trust by the literal 'human:' prefix, so a malformed "
-            "actor mis-tiers the whole bundle.\n"
+            "'<producer>/<version>', 'human:<id>' or 'process:<id>'. The value "
+            "is written verbatim into every concept, so an unconstrained string "
+            "would be an unreadable provenance claim at best and malformed YAML "
+            "at worst.\n"
         )
         return 1
     if generated_by.startswith("human:") and args.scope == "core":
