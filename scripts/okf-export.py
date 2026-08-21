@@ -127,6 +127,12 @@ _FRONTMATTER_KV_RE = re.compile(r"^([A-Za-z_][\w]*):\s*(.*)$")
 _YAML_LS_PROLOG_RE = re.compile(r"^#\s*yaml-language-server:")
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
 _RESERVED_SLUGS = frozenset({"index", "log"})
+# A slug becomes a FILENAME, so it must be one path segment and nothing else.
+# Repo-derived slugs come from the filesystem and are safe by construction, but
+# a memory fact's `name:` is arbitrary frontmatter: `../../x` or `sub/dir` would
+# make the exporter write outside --out, and it is supposed to only ever read
+# the source tree. Leading dot excluded, which also rules out `.` and `..`.
+_SAFE_SLUG_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 # Memory-dir housekeeping files that are never concepts (index + provenance).
 _MEMORY_SKIP = frozenset({"MEMORY.md", "MEMORY-ARCHIVE.md", "PROVENANCE.md"})
 
@@ -425,7 +431,12 @@ def build_memory_concept(path: Path) -> dict:
     """
     text = Path(path).read_text(encoding="utf-8")
     fm, body = parse_frontmatter(text)
-    slug = fm.get("name") or path.stem.split("_", 1)[-1].replace("_", "-")
+    # The filename-derived slug is safe by construction (a directory entry can
+    # hold no separator), so it doubles as the fallback when `name:` is absent
+    # OR is not a usable single path segment.
+    fallback = path.stem.split("_", 1)[-1].replace("_", "-")
+    candidate = fm.get("name") or fallback
+    slug = candidate if _SAFE_SLUG_RE.match(candidate) else fallback
     return {
         "slug": slug,
         "okf_type": "memory",
@@ -663,9 +674,17 @@ def write_bundle(
         type_dir = out_dir / okf_type
         type_dir.mkdir(parents=True, exist_ok=True)
         for concept in sorted(type_concepts, key=lambda c: c["slug"]):
-            (type_dir / f"{concept['slug']}.md").write_text(
-                _render_concept(concept, generated_by), encoding="utf-8"
-            )
+            # Belt and braces behind _SAFE_SLUG_RE: whatever a future slug
+            # source is, a concept must never be written outside its own type
+            # directory. The exporter is read-only against the source tree, and
+            # an escaping filename is precisely how that guarantee would break.
+            target = type_dir / f"{concept['slug']}.md"
+            if target.parent.resolve() != type_dir.resolve():
+                raise BundleDestinationError(
+                    f"refusing to write concept {concept['slug']!r}: it resolves "
+                    f"outside {type_dir}"
+                )
+            target.write_text(_render_concept(concept, generated_by), encoding="utf-8")
         (type_dir / "index.md").write_text(
             _render_type_index(okf_type, type_concepts), encoding="utf-8"
         )

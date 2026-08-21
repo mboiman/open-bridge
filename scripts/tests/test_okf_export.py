@@ -575,6 +575,44 @@ def test_write_bundle_core_scope_never_exports_memory(okf_export, bridge_root, m
     assert not (out / "memory").exists()
 
 
+@pytest.mark.parametrize(
+    "hostile_name,expected_slug",
+    [
+        ("../../escaped", "escape-probe"),      # climbs out of the bundle entirely
+        ("sub/dir/nested", "escape-probe"),     # silently creates a subdirectory
+        ("/absolute", "escape-probe"),          # anchors at the filesystem root
+        (".hidden", "escape-probe"),            # leading dot is not a slug
+        ("fine-name", "fine-name"),             # the ordinary case still wins
+    ],
+)
+def test_memory_name_cannot_escape_the_output_directory(
+    okf_export, bridge_root, tmp_path, hostile_name, expected_slug
+):
+    """A memory fact's `name:` is arbitrary frontmatter, not a safe path.
+
+    It was previously used verbatim as the output filename, so a name
+    containing `..` or `/` made the exporter write outside `--out` — up to and
+    including over a file in the source tree it is supposed to only read.
+    """
+    mem = tmp_path / "hostile-memory"
+    # Real memory files are named `<type>_<slug>.md`, and the fallback strips
+    # that type prefix — so this filename yields the slug "escape-probe".
+    _write(
+        mem / "reference_escape_probe.md",
+        f"---\nname: {hostile_name}\ndescription: Probe\n---\n\nBody.\n",
+    )
+    out = tmp_path / "nested" / "bundle-escape"
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=mem)
+
+    assert (out / "memory" / f"{expected_slug}.md").is_file()
+    written = [p for p in out.rglob("*.md")]
+    for path in written:
+        assert out in path.resolve().parents, f"{path} escaped {out}"
+    # nothing landed beside or above the bundle
+    assert not list((tmp_path / "nested").glob("*.md"))
+    assert not list(tmp_path.glob("*.md"))
+
+
 def test_default_memory_dir_derives_encoded_path_under_home(okf_export, tmp_path):
     derived = okf_export.default_memory_dir(tmp_path / "acme-instance")
     encoded = str((tmp_path / "acme-instance").resolve()).replace("/", "-")
