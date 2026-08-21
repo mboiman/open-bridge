@@ -124,7 +124,18 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         empty prefix maps to root itself rather than being dropped, so a
         future whole-tree pattern cannot silently under-guard. A directory
         that does not exist yet is still returned: it is scanned the moment
-        it appears.
+        it appears. The JOINED path is what resolves, not just root:
+        resolving the root alone and appending the prefix compares a
+        symlinked `docs/` on its LINK path while --out is compared on its
+        real one, and the two then never match.
+
+    all_scanned_dirs(root: Path) -> list[tuple[Path, tuple[str, ...]]]
+        The union over every scope of scanned_dirs(root, scope), each
+        directory paired with the sorted scope names that walk it. This, not
+        scanned_dirs alone, is what write_bundle's destination guard reads:
+        the bundle outlives the run that wrote it, so a destination only the
+        OTHER scope walks is still re-ingested. Sorted by path, so a given
+        tree always produces the same refusal.
 
     concept_type_for(path: Path, root: Path) -> str
         .../work/tasks/<slug>/STATUS.md      -> "task"
@@ -235,16 +246,30 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         previous bundle untouched:
           * out_dir is --root or an ancestor of it (clearing would delete
             the source tree). Checked FIRST, so its wording is stable.
-          * out_dir lies inside ANY directory this scope walks, or contains
-            one. `--out` must be outside every scanned_dirs(root, scope)
-            entry: `dist/okf-bundle` qualifies in both scopes, `docs/`,
-            `examples/`, `work/`, `rules/` and anything under them do not.
-            Without this the walk re-ingests the previous run's own output
-            as source material, the concept count climbs on every run, and
-            the byte-identical guarantee above is false (issue #153).
+          * out_dir lies inside ANY directory ANY scope walks, or contains
+            one. `--out` must be outside every all_scanned_dirs(root) entry,
+            NOT merely outside this run's own read set: `dist/okf-bundle`
+            qualifies, `docs/`, `examples/`, `work/`, `rules/` and anything
+            under them do not, in either scope. Without this the walk
+            re-ingests the previous run's own output as source material, the
+            concept count climbs on every run, and the byte-identical
+            guarantee above is false (issue #153).
             Containment is segment-wise, so the sibling `docs-bundle` is
-            legal; comparison is on resolved paths, so a symlinked or
-            dot-segmented `--out` is judged on where it really lands.
+            legal. Comparison is on RESOLVED paths, so a symlinked or
+            dot-segmented `--out` is judged on where it really lands and a
+            symlinked `docs/` on where it really reads. The segments are
+            compared in the same folded namespace dedupe_slugs uses
+            (_fs_path_identity applies _fs_identity per segment), so `DOCS/`
+            and `docs/`, one directory on the macOS default filesystem, are
+            one directory to the guard too. Folded rather than compared by
+            inode because the guard must judge directories that do not exist
+            yet, which is exactly a fresh instance.
+            The refusal is deliberately WIDER than the glob in two ways,
+            both fail-closed against silent corruption: it covers scopes
+            this run is not in, and _pattern_prefix collapses
+            `work/**/deliverables/*.md` to `work`, so all of `work/` is
+            refused even where nothing there could be globbed back in. The
+            message names `dist/okf-bundle`, a destination that works.
           * under user scope with a memory_dir, out_dir overlaps that memory
             dir in either direction. Gated on `scope == "user" and
             memory_dir is not None` so it mirrors the run's actual read set:
@@ -1752,6 +1777,186 @@ def test_an_unscanned_directory_inside_root_is_still_a_legal_out(okf_export, bri
         assert (out / "index.md").exists()
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    """Create a directory symlink, skipping the test where the platform cannot."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):  # pragma: no cover - platform without symlinks
+        pytest.skip("this platform does not permit creating symlinks")
+
+
+def test_a_case_only_spelling_of_a_scanned_directory_is_refused(okf_export, tmp_path):
+    """`DOCS/` and `docs/` are ONE directory on the macOS default filesystem.
+
+    Measured before this fix, straight from the filed reproduction and with
+    the filed signature: `--out d/DOCS/okfbundle --scope core` ran clean and
+    the concept count went 2 -> 6 -> 10 across three runs of an unchanged
+    two-file tree. The walk read one directory while the guard compared two
+    byte-distinct strings, so the bundle landed exactly where the next glob
+    would read it back in.
+
+    Refused on a case-SENSITIVE filesystem too, where the two spellings
+    really are two directories. That is the same trade dedupe_slugs already
+    takes for slugs: ONE notion of filesystem identity, so one tree behaves
+    the same way on every platform, and the cost is a refusal the operator
+    answers by naming another destination.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, root / "DOCS" / "okfbundle", "core")
+    assert not (root / "docs" / "okfbundle").exists(), (
+        "guard raised but the bundle landed in docs/ anyway"
+    )
+
+
+def test_a_case_only_spelling_of_root_is_refused(okf_export, tmp_path):
+    """The --root guard folds too, and it is the one that protects the tree.
+
+    `--out INSTANCE` against `--root instance` is the same directory on a
+    case-insensitive filesystem, and the refusal there is not about a growing
+    concept count: it is the guard between a typo and an rmtree of the whole
+    source tree.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(root, tmp_path / "INSTANCE", "core")
+    assert "--root" in str(excinfo.value), "the --root clause must be what fired"
+    assert (root / "docs" / "alpha.md").exists(), "guard raised but the sources were cleared"
+
+
+def test_scanned_dirs_resolves_a_symlinked_prefix(okf_export, tmp_path):
+    """The unit behind the next test, and what the docstring already claims.
+
+    `(root / prefix)` left unresolved compares the scanned directory on its
+    LINK path while --out is compared on its real one, so the two can never
+    match however the destination is spelled.
+    """
+    root = tmp_path / "instance"
+    real = tmp_path / "realdocs"
+    real.mkdir(parents=True)
+    _symlink_or_skip(root / "docs", real)
+
+    assert real.resolve() in okf_export.scanned_dirs(root, "core")
+
+
+def test_a_scanned_directory_that_is_itself_a_symlink_is_refused(okf_export, tmp_path):
+    """The walk follows `root/docs -> /elsewhere/realdocs`; the guard must too.
+
+    Measured before this fix, the filed signature again:
+    `--out root/docs/okfbundle --scope core` against a repo whose `docs/` is
+    a symlink ran 2 -> 6 -> 10. The existing symlink test covers the mirror
+    image (a symlinked --out reaching a real scanned directory); this is the
+    side where the SOURCE directory is the link.
+    """
+    root = tmp_path / "instance"
+    real = tmp_path / "realdocs"
+    real.mkdir(parents=True)
+    _symlink_or_skip(root / "docs", real)
+    _core_docs_tree(root)  # writes through the link, into realdocs/
+    assert (real / "alpha.md").exists(), "fixture must place the sources behind the link"
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, root / "docs" / "okfbundle", "core")
+    assert not (real / "okfbundle").exists(), (
+        "guard raised but the bundle landed behind the link anyway"
+    )
+
+
+def test_out_dir_containing_a_scanned_directory_is_refused(okf_export, tmp_path):
+    """The converse clause, which only resolving the prefixes makes reachable.
+
+    Before the prefixes resolved, this branch had no case at all: for --out
+    to contain a scanned directory it had to be --root or an ancestor of it,
+    and the FIRST guard refuses both, so the clause was unreachable and
+    untested. A `docs/` symlink pointing INTO the destination reaches it
+    without going through --root, and clearing --out would then delete the
+    source tree rather than a previous bundle.
+    """
+    root = tmp_path / "instance"
+    root.mkdir(parents=True)
+    out = tmp_path / "bundle-out"
+    real = out / "inner-docs"
+    real.mkdir(parents=True)
+    _symlink_or_skip(root / "docs", real)
+    _core_docs_tree(root)
+
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(root, out, "core")
+    assert "contains" in str(excinfo.value), (
+        "the containment clause must be what fired, not the late non-bundle check"
+    )
+    assert (real / "alpha.md").exists(), "guard raised but the sources were cleared"
+
+
+def test_the_destination_guard_covers_every_scope_not_only_the_running_one(okf_export, tmp_path):
+    """A bundle outlives the run that wrote it, so the guard cannot be per-run.
+
+    Measured before this fix: `--out h/rules/okfbundle --scope core` was
+    accepted and wrote 1 concept, because core walks only `docs/` and
+    `examples/`. The next `--scope user` run globbed `rules/**/*.md`, ate
+    that bundle, and reported 5 concepts from a two-file tree. Guarding only
+    the scope in front of you makes the corruption a function of which scope
+    ran last, which is not a property an operator can reason about.
+    """
+    root = tmp_path / "instance"
+    _write(root / "docs/alpha.md", '---\ntitle: "Alpha"\n---\n\n# Alpha\n\nBody.\n')
+    _write(root / "rules/sample-rule.md", '---\ntitle: "Sample Rule"\n---\n\n# Rule\n\nBody.\n')
+
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(root, root / "rules" / "okfbundle", "core")
+    message = str(excinfo.value)
+    assert str((root / "rules").resolve()) in message
+    assert "user" in message, "the message must name the scope whose walk would eat it"
+    assert not (root / "rules" / "okfbundle").exists()
+
+    counts = [
+        okf_export.write_bundle(root, tmp_path / "dist", "user")["concept_count"]
+        for _ in range(3)
+    ]
+    assert counts == [2, 2, 2], f"count grew across runs: {counts}"
+
+
+@pytest.mark.parametrize("scope", ["core", "user"])
+@pytest.mark.parametrize("scanned", ["docs", "examples", "work", "rules"])
+def test_every_scanned_directory_is_refused_in_every_scope(okf_export, bridge_root, scope, scanned):
+    """THE RULE the previous test states once, pinned over the whole matrix.
+
+    `work/` and `rules/` are walked by user scope only, `docs/` and
+    `examples/` by both, and none of that matters to the destination: the
+    guard reads the union of every scope's scanned directories.
+    """
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, bridge_root / scanned / "okfbundle", scope)
+    assert not (bridge_root / scanned / "okfbundle").exists()
+
+
+def test_the_prefix_widening_refuses_a_destination_it_could_never_reingest(okf_export, bridge_root):
+    """A deliberate over-refusal, pinned as a decision rather than left as a bug.
+
+    _pattern_prefix("work/**/deliverables/*.md") collapses to "work", so the
+    guard refuses everything under `work/`. `work/exports/okfbundle` is such
+    a destination: the pattern needs a literal `deliverables` segment, the
+    bundle's type directory is named `deliverable`, so nothing written there
+    could ever be globbed back in. It is refused anyway.
+
+    Fail-closed is the right bias for a guard whose failure mode is silent
+    data corruption, and the operator's answer is one word of the path. The
+    message therefore has to name a destination that works, which
+    test_an_unscanned_directory_inside_root_is_still_a_legal_out proves it
+    does.
+    """
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(bridge_root, bridge_root / "work" / "exports" / "okfbundle", "user")
+    assert "dist/okf-bundle" in str(excinfo.value), (
+        "a refusal that names no working destination leaves the operator guessing"
+    )
+
+
 def test_write_bundle_refuses_an_out_dir_inside_the_memory_dir(okf_export, bridge_root, memory_dir):
     """The exporter is strictly a READER of the memory dir. It never writes there.
 
@@ -1777,6 +1982,20 @@ def test_write_bundle_refuses_an_out_dir_equal_to_an_empty_memory_dir(okf_export
         okf_export.write_bundle(bridge_root, empty_memory, "user", memory_dir=empty_memory)
     assert empty_memory.is_dir()
     assert not (empty_memory / "index.md").exists(), "the memory dir was overwritten with a bundle"
+
+
+def test_a_case_only_spelling_of_the_memory_dir_is_refused(okf_export, bridge_root, memory_dir):
+    """The memory clause compares in the same folded namespace as the rest.
+
+    One notion of filesystem identity across all three destination guards,
+    or the weakest of them decides what gets through. Here the weakest one
+    would rmtree the user's fact store.
+    """
+    shouting = memory_dir.parent / memory_dir.name.upper()
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(bridge_root, shouting, "user", memory_dir=memory_dir)
+    assert "memory dir" in str(excinfo.value), "the memory clause must be what fired"
+    assert list(memory_dir.glob("*.md")), "guard raised but the fact files are gone"
 
 
 def test_core_scope_does_not_refuse_a_memory_dir_it_never_reads(okf_export, bridge_root, memory_dir):

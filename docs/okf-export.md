@@ -327,12 +327,11 @@ Writes are **deterministic and idempotent**: re-running against unchanged
 input produces a byte-identical file set, in a fresh interpreter too (concepts
 are sorted by `(type, slug)`, the output directory is cleared and rebuilt on
 every run, and nothing in the render depends on wall-clock time). The largest
-way to lose that property is now refused rather than merely documented: an
-`--out` inside a directory the chosen scope walks exits `1`, because the walk
-would otherwise read the previous run's own output back in as source material
-and the concept count would climb on every run. That guard is a strong default
-and not a proof: see [the `--out` rules](#cli) for the destinations it does and
-does not recognise.
+way to lose that property is refused rather than merely documented: an `--out`
+inside a directory any scope walks exits `1`, because the walk would otherwise
+read the previous run's own output back in as source material and the concept
+count would climb on every run. See [the `--out` rules](#cli) for what counts
+as inside.
 
 ## CLI
 
@@ -353,50 +352,58 @@ python3 scripts/okf-export.py --out dist/okf-bundle --generated-by human:alice
 Exit codes: `0` on success; `1` if `--root` does not exist or is not a
 directory, if `--out` is `--root` or an ancestor of it, if `--out` points at
 an existing non-bundle directory (the exporter refuses to clear anything that
-does not look like a previous export), if `--out` sits inside a directory the
-chosen scope walks (see below), if `--out` overlaps the memory dir a
+does not look like a previous export), if `--out` sits inside a directory any
+scope walks or contains one (see below), if `--out` overlaps the memory dir a
 `user`-scope run reads, or if `--generated-by` is not a valid OKF actor; an
 unknown `--scope` value is rejected by `argparse` itself (`SystemExit`, exit
 code `2`) before the exporter runs.
 
-**`--out` must lie outside every scanned directory.** Under `core` scope that
-means outside `docs/` and `examples/`; under `user` scope also outside `work/`
-and `rules/`, and outside the memory dir. The refusal is raised before the walk
-and before the destination is cleared, so a mistaken `--out` costs an error
-message and nothing else, and it is derived from the same per-scope pattern
-list the walk itself globs, so adding a source pattern extends the guard
-automatically. That derivation takes each pattern's fixed leading path, which
-makes the refusal slightly wider than the glob:
-`work/**/deliverables/*.md` yields the prefix `work`, so a `user`-scope run
-refuses all of `work/`, including subdirectories that hold no sources at all.
+**`--out` must lie outside what *every* scope walks, not just the current
+one.** That means outside `docs/`, `examples/`, `work/` and `rules/`, in both
+scopes, and outside the memory dir. The guard reads the union rather than the
+running scope because the bundle outlives the run that wrote it: `core` walks
+only `docs/` and `examples/`, so `--out rules/bundle --scope core` would land
+happily, and the next `--scope user` run would glob `rules/**/*.md` and ingest
+that bundle as `rule` concepts. `dist/okf-bundle` is outside every scope and
+outside the memory dir, which is what makes it the documented default.
 
-**Point `--out` outside what *every* scope walks, not just the current one.**
-The guard knows only the scope of the run in front of it, so
-`--out rules/bundle --scope core` is accepted (core walks `docs/` and
-`examples/` only) and the next `--scope user` run then globs `rules/**/*.md`
-and ingests that bundle as `rule` concepts. `dist/okf-bundle` is outside both
-scopes and outside the memory dir, which is what makes it the documented
-default.
+The refusal is raised before the walk and before the destination is cleared, so
+a mistaken `--out` costs an error message and nothing else. It is derived from
+the same pattern list the walk itself globs, so adding a source pattern extends
+the guard automatically.
 
-The guard resolves the destination first, so `dist/../docs/bundle` is refused
-exactly like `docs/bundle`. It compares that resolved path against the scanned
-directories as spelled under `--root`, which leaves two spellings that reach a
-scanned directory without matching it:
+Containment is judged segment-wise on **resolved** paths, in the same
+case-folded namespace the exporter uses for filenames:
 
-- a different letter case on a case-insensitive filesystem, e.g.
-  `--out DOCS/okfbundle` under `core` scope on macOS;
-- a scanned directory that is itself a symlink, e.g. a repo whose `docs/`
-  points elsewhere.
+- `dist/../docs/bundle` is refused exactly like `docs/bundle`;
+- `DOCS/okfbundle` is refused like `docs/okfbundle`, because on the macOS
+  default filesystem those are one directory;
+- a repo whose `docs/` is itself a symlink is compared on where that link
+  really reads, not on the link path;
+- the sibling `docs-bundle` stays **legal**: segments are compared whole, so a
+  shared name prefix is not containment.
 
-Both are accepted and both then reproduce the self-ingestion in full: on a
-small fixture the concept count runs 2, then 7, then 12 across three runs with
-the sources unchanged. Neither spelling is reachable from the documented
-`dist/okf-bundle`.
+The converse also fires: an `--out` that *contains* a scanned directory is
+refused, because clearing it would delete source data rather than a previous
+bundle. A `docs/` symlink pointing into the destination is how that is reached.
 
-This is a **behaviour change** for every spelling the guard does recognise: a
-command that pointed `--out` into a directory its own scope walks used to exit
-`0` and quietly produce a corrupted bundle, each run re-ingesting the last.
-It now exits `1`. Move `--out` to a directory outside the scanned tree.
+**The guard refuses more than it strictly has to, on purpose.** Two widenings
+are deliberate, because the failure being guarded against is silent data
+corruption and the answer to a refusal is simply another destination:
+
+- it covers scopes the current run is not in, as above;
+- prefix derivation takes each pattern's fixed leading path, and
+  `work/**/deliverables/*.md` collapses to `work`. So **all** of `work/` is
+  refused, `work/exports/okfbundle` included, even though that pattern needs a
+  literal `deliverables` segment and the bundle's type directory is named
+  `deliverable`, so nothing written there could ever be globbed back in.
+
+Every refusal names `dist/okf-bundle`, which is a destination that works.
+
+This is a **behaviour change**: a command that pointed `--out` into a directory
+any scope walks used to exit `0` and quietly produce a corrupted bundle, each
+run re-ingesting the last. It now exits `1`. Move `--out` to a directory
+outside the scanned tree.
 
 ## Migrating from v0.1
 

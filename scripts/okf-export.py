@@ -95,14 +95,18 @@ Scope controls which sources are walked:
                  scripts/no-scrub-leak.py over the output before publishing
                  a core-scope bundle.
 
---out must lie OUTSIDE every directory the chosen scope walks, and outside
-the memory dir. A bundle written inside a scanned directory is read back in
-as source material on the next run, so the concept count climbs on every run
-and the byte-identical re-run guarantee is false; the destination is
-therefore refused before the walk and before anything is cleared. The scanned
-set is derived from the same per-scope pattern list discover_sources globs
-(_SCOPE_PATTERNS), so it can never drift out of step with what is actually
-read. dist/okf-bundle is outside the scanned set in both scopes.
+--out must lie OUTSIDE every directory ANY scope walks, and outside the memory
+dir. A bundle written inside a scanned directory is read back in as source
+material on the next run, so the concept count climbs on every run and the
+byte-identical re-run guarantee is false; the destination is therefore refused
+before the walk and before anything is cleared. The scanned set is derived
+from the same per-scope pattern list discover_sources globs (_SCOPE_PATTERNS),
+so it can never drift out of step with what is actually read, and the guard
+takes the UNION over the scopes rather than the running one, because the
+bundle stays on disk for the next run whichever scope that is. Comparison is
+segment-wise on resolved paths in the filesystem's own case-folded namespace,
+so a symlink, a `..` segment or a different letter case cannot slip past it.
+dist/okf-bundle is outside the scanned set in every scope.
 
 Usage:
   python3 scripts/okf-export.py --out dist/okf-bundle
@@ -114,8 +118,8 @@ Exit codes:
   1 — --root does not exist / is not a directory, unsafe --out refused, or
       --generated-by is not a valid OKF actor. An --out is unsafe when it is
       --root or an ancestor of it, when it sits inside a scanned directory or
-      the memory dir, or when it is a non-empty directory that does not look
-      like a prior bundle.
+      contains one, when it overlaps the memory dir, or when it is a non-empty
+      directory that does not look like a prior bundle.
   2 — argparse usage error (e.g. unknown --scope; raised as SystemExit)
 """
 from __future__ import annotations
@@ -510,14 +514,79 @@ def scanned_dirs(root: Path, scope: str) -> list[Path]:
     """The resolved directories ``discover_sources(root, scope)`` reads under.
 
     Derived from ``patterns_for(scope)``, never from a hand-kept second list.
-    Resolved, so a symlinked or dot-segmented path is compared on its real
-    location. A directory that does not exist yet is still returned: it is
-    scanned as soon as it appears, and a bundle sitting there would be read
-    back in on the next run.
+    A directory that does not exist yet is still returned: it is scanned as
+    soon as it appears, and a bundle sitting there would be read back in on
+    the next run.
+
+    The JOINED path is resolved, not just ``root``. Resolving only the root
+    and appending the prefix compares the scanned directory on its LINK path
+    while the destination is compared on its real one, so a repo whose
+    ``docs/`` points elsewhere could never match however ``--out`` was
+    spelled, and the walk went straight back to eating its own output.
     """
     root = Path(root).resolve()
     prefixes = {_pattern_prefix(pattern) for pattern in patterns_for(scope)}
-    return sorted({(root / prefix) if prefix else root for prefix in prefixes})
+    return sorted({((root / prefix) if prefix else root).resolve() for prefix in prefixes})
+
+
+def all_scanned_dirs(root: Path) -> list[tuple[Path, tuple[str, ...]]]:
+    """Every directory ANY scope walks, each with the scopes that walk it.
+
+    This, and not ``scanned_dirs(root, scope)`` alone, is what the
+    destination guard reads. The scope is chosen per invocation, but the
+    bundle it leaves behind stays on disk for every later run: core scope
+    does not walk ``rules/``, so a core bundle lands there happily, and the
+    next user-scope run globs ``rules/**/*.md`` and ingests it. Guarding only
+    the scope in front of you makes the corruption a function of which scope
+    ran last, which is not a property anyone can reason about.
+
+    Sorted by path, with the scope names in sorted order, so the refusal a
+    given tree produces is always the same one.
+    """
+    by_dir: dict[Path, list[str]] = {}
+    for scope in sorted(_SCOPE_PATTERNS):
+        for scanned in scanned_dirs(root, scope):
+            by_dir.setdefault(scanned, []).append(scope)
+    return [(scanned, tuple(by_dir[scanned])) for scanned in sorted(by_dir)]
+
+
+def _fs_path_identity(path: Path) -> tuple[str, ...]:
+    """The form in which two RESOLVED paths name the same directory.
+
+    Segment-wise, and each segment folded exactly as ``_fs_identity`` folds a
+    slug, for the same reason: the filesystems this runs on compare path
+    segments case-insensitively (the macOS default and NTFS), and APFS reads
+    the NFC and NFD spellings of one character as one name. ``d/DOCS`` and
+    ``d/docs`` are ONE directory there, so a byte-equal comparison of the two
+    spellings sees two unrelated paths and waves the bundle into the very
+    directory the walk reads.
+
+    Segment-wise rather than over the whole string, so the sibling
+    ``docs-bundle`` stays outside ``docs``. Folding rather than comparing
+    inodes, because the guard has to judge directories that DO NOT EXIST YET
+    (``scanned_dirs`` returns those on purpose, and a fresh instance is
+    exactly the tree where ``docs/`` has not been created), which no
+    stat-based identity can do. Pure, like ``_fs_identity``: nothing here
+    moves the exporter's determinism.
+
+    On a case-SENSITIVE filesystem this refuses a pair that really is two
+    directories. That is the deliberate trade, the same one ``_fs_identity``
+    takes for slugs: one notion of filesystem identity, so one tree behaves
+    the same way everywhere, and the cost of the extra refusal is that the
+    operator names another destination.
+    """
+    return tuple(_fs_identity(part) for part in Path(path).parts)
+
+
+def _contains(ancestor: Path, descendant: Path) -> bool:
+    """True when resolved ``descendant`` IS ``ancestor`` or lies beneath it.
+
+    The filesystem-identity replacement for ``Path.is_relative_to``, which
+    compares path segments byte for byte.
+    """
+    outer = _fs_path_identity(ancestor)
+    inner = _fs_path_identity(descendant)
+    return inner[: len(outer)] == outer
 
 
 def discover_sources(root: Path, scope: str) -> list[Path]:
@@ -1031,7 +1100,7 @@ def write_bundle(
     root = Path(root).resolve()
     out_dir = Path(out_dir).resolve()
 
-    if out_dir == root or root.is_relative_to(out_dir):
+    if _contains(out_dir, root):
         raise BundleDestinationError(
             f"refusing to write the bundle to {out_dir}: it is --root or an "
             "ancestor of --root, so clearing it would delete source data, "
@@ -1039,26 +1108,36 @@ def write_bundle(
         )
 
     # The converse guard, and the reason it runs HERE: a destination inside a
-    # directory this scope walks would be read back in as source material on
-    # the very next run, so the bundle would grow a concept per generated file
-    # every time and the byte-identical re-run guarantee would be false. It
-    # has to fire before discover_sources below (or the previous run's output
-    # is already in memory) and before the rmtree further down (or the
-    # evidence is deleted by the same run that consumed it).
-    for scanned in scanned_dirs(root, scope):
-        if out_dir.is_relative_to(scanned):
+    # directory a scope walks would be read back in as source material on the
+    # very next run of that scope, so the bundle would grow a concept per
+    # generated file every time and the byte-identical re-run guarantee would
+    # be false. It has to fire before discover_sources below (or the previous
+    # run's output is already in memory) and before the rmtree further down
+    # (or the evidence is deleted by the same run that consumed it).
+    #
+    # Against the UNION of every scope, not this run's scope: the bundle stays
+    # on disk after the run that wrote it, so a destination only the other
+    # scope walks is still eaten (see all_scanned_dirs). That makes the
+    # refusal wider than this run's read set on purpose. Fail-closed is the
+    # right bias when the failure being guarded is silent data corruption, and
+    # the answer to a refusal is another destination.
+    for scanned, scopes in all_scanned_dirs(root):
+        walkers = " and ".join(f"--scope {name}" for name in scopes)
+        walk = "walks" if len(scopes) == 1 else "walk"
+        which = "that scope" if len(scopes) == 1 else "either scope"
+        if _contains(scanned, out_dir):
             raise BundleDestinationError(
                 f"refusing to write the bundle to {out_dir}: it is inside "
-                f"{scanned}, which --scope {scope} walks for sources, so every "
-                "run would re-ingest the previous run's output as source "
-                "material. Point --out at a directory no scope walks "
+                f"{scanned}, which {walkers} {walk} for sources, so a run of "
+                f"{which} would re-ingest this bundle as source material. "
+                "Point --out at a directory NO scope walks "
                 "(e.g. dist/okf-bundle)"
             )
-        if scanned.is_relative_to(out_dir):
+        if _contains(out_dir, scanned):
             raise BundleDestinationError(
                 f"refusing to write the bundle to {out_dir}: it contains "
-                f"{scanned}, which --scope {scope} walks for sources, so "
-                "clearing it would delete source data, not just the bundle"
+                f"{scanned}, which {walkers} {walk} for sources, so clearing "
+                "it would delete source data, not just the bundle"
             )
 
     # The memory dir is read ONLY under user scope (see the discover_memory
@@ -1070,7 +1149,7 @@ def write_bundle(
     # empty or already holds a bundle.
     if scope == "user" and memory_dir is not None:
         resolved_memory = Path(memory_dir).resolve()
-        if out_dir.is_relative_to(resolved_memory) or resolved_memory.is_relative_to(out_dir):
+        if _contains(resolved_memory, out_dir) or _contains(out_dir, resolved_memory):
             raise BundleDestinationError(
                 f"refusing to write the bundle to {out_dir}: it overlaps the "
                 f"memory dir {resolved_memory}, which this run reads as a "
