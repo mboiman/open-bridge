@@ -148,45 +148,84 @@ Frontmatter parsing is hand-rolled (no PyYAML dependency). It keeps
 `scripts/extract-frontmatter.py`'s `# yaml-language-server: $schema=...`
 comment-prolog skip and reads the same flat `key: value` scalars as
 `scripts/gen-board.py`'s `parse_status()`, but it deliberately diverges from
-that script on three points, because `gen-board.py` is lenient where YAML is
+that script on five points, because `gen-board.py` is lenient where YAML is
 not:
 
 - **Quoting is resolved before inline comments**, the order YAML itself uses.
   A `#` inside a quoted scalar is a literal character, so
   `headline: "... in review as PR #214"` keeps its issue number. On an
-  *unquoted* scalar a ` #` still opens a comment and is still stripped, and
-  `value#nospace` (no whitespace in front of the hash) stays whole.
+  *unquoted* scalar a ` #` after a space or a tab still opens a comment and is
+  still stripped, and `value#nospace` (no whitespace in front of the hash)
+  stays whole.
 - **A quote closes a quoted scalar only where a quote may close one**: with
   nothing behind it, or an inline comment. Anything else means that quote was
   a character inside the value, and the value then falls back to the plain
-  path *whole* rather than being cut at it. `title: 'Michael's bridge'` yields
+  path rather than being cut at it. `title: 'Michael's bridge'` yields
   `Michael's bridge`, and `title: "He said "stop" once"` yields
-  `He said "stop" once`. PyYAML rejects both of those lines outright, so there
-  is no conformant reading to defer to; keeping a malformed value whole is the
-  lesser failure. Doubling the inner apostrophe (`'Michael''s bridge'`) or
-  switching quote style still makes the line legal YAML, which is worth doing
-  for any consumer that is not this exporter.
-- **A `---` fence counts only at column 0**, for the opening and the closing
-  fence alike. A block-scalar continuation line is indented by definition, so
-  an indented `---` inside a `title: |` block is content, not the end of the
-  frontmatter block.
+  `He said "stop" once`: every character between the outer quotes survives,
+  and only that orphaned outer pair is dropped. PyYAML rejects both of those
+  lines outright, so there is no conformant reading to defer to; keeping a
+  malformed value whole is the lesser failure. Doubling the inner apostrophe
+  (`'Michael''s bridge'`) or switching quote style still makes the line legal
+  YAML, which is worth doing for any consumer that is not this exporter.
+- **An unquoted value keeps its last character, whatever it is.** The
+  orphaned-pair strip above applies only to a value that *opens* with a quote,
+  because a YAML plain scalar cannot. So `title: monitor is 12"`,
+  `title: The so-called "bridge"` and `title: it is 'fine'` reach the bundle
+  whole. All three are ordinary prose that PyYAML round-trips unchanged; an
+  earlier version of this exporter stripped quotes off both ends of every
+  fallen-through value and ate the last character of each.
+- **The opening `---` fence counts only at column 0; the closing one is judged
+  by block-scalar state.** A block-scalar continuation line is blank or
+  indented by definition, so an indented `---` inside a `title: |` block is
+  content, not the end of the frontmatter block. Outside a block scalar an
+  indented `---` still closes, because a file that merely indents its closing
+  fence would otherwise have the body below it read as frontmatter, up to the
+  next column-0 `---`, or no frontmatter recognised at all. A file whose
+  *first* non-blank line is an indented `---` has no frontmatter (it is an
+  indented code block).
+- **Only `\r\n`, `\r` and `\n` end a line, and a leading UTF-8 BOM is
+  ignored.** Python's `str.splitlines` also breaks on U+2028, U+2029 and five
+  more characters, which cut a scalar in half at a character PyYAML accepts
+  inside a double-quoted value; and `str.rstrip` does not remove U+FEFF, so a
+  BOM-prefixed file used to read as having no frontmatter at all. Whitespace
+  is trimmed as YAML trims it, spaces and tabs only, so a pasted U+00A0 is
+  content and stays.
 
-All three rules are about where a value or a block **ends**, and none of them
-raises. Where a source is malformed by YAML's own rules, content can still be
-dropped silently and the source is what has to be fixed:
-
-- An **unquoted** value whose last character is a quote loses that character:
-  `title: monitor is 12"` yields `monitor is 12`, and a `description:` ending
-  in a quoted phrase loses that phrase's closing quote. Wrap the whole value in
-  the other quote style (`description: 'a phrase like "this"'`) to keep it.
-- A frontmatter block closed by an **indented** `---` no longer ends there: the
-  parser reads on to the next `---` at column 0, so the body text in between is
-  consumed as frontmatter and never reaches the bundle. The keys still parse,
-  so nothing marks the loss. Put the closing fence at column 0; an indented one
-  used to close the block.
+None of these rules raises. Measured rather than asserted: over 21,144
+well-formed frontmatter lines (each probe value spelled plain, double quoted
+and single quoted, every line accepted by PyYAML), the parser agrees with
+PyYAML on all of them.
 
 A file with no frontmatter block at all still exports cleanly: its title falls
 back to the first H1, its description to `""`.
+
+### Where the parser still differs from a real one
+
+Three shapes remain where PyYAML reads more than this parser does. None of
+them raises, and in each case the source is what has to change if the
+difference matters:
+
+- **A block scalar loses blank lines and extra indentation.** A
+  `description: |` holding two paragraphs and an indented code line arrives as
+  three space-normalised lines joined by `\n`, where PyYAML keeps the blank
+  line and the four extra spaces. A folded `>-` block collapses its blank line
+  too: PyYAML's `one two\nthree` becomes `one two three`. Frontmatter values
+  here are one-line summaries by convention, so this shapes the formatting
+  inside a description rather than deciding which text reaches the bundle.
+- **Double-quoted escapes outside a small table come back verbatim.** The
+  table is `\\`, `\"`, `\/`, `\n`, `\r`, `\t`: exactly what this exporter
+  emits, plus YAML's `\/`. Anything else is left as its two literal characters
+  rather than guessed at, so `"\d+"` keeps its backslash, and a
+  PyYAML-*emitted* `"a\L b"` (its spelling of U+2028) or `"a\x41 b"` arrives
+  with the escape intact instead of the character. Sources here are
+  hand-written, and hand-written frontmatter uses the six in the table.
+- **U+2028/U+2029 are ordinary characters here and line breaks to PyYAML.**
+  PyYAML implements YAML 1.1, where those are breaks, so it folds the
+  whitespace next to one; this parser follows YAML 1.2 and keeps the value
+  exactly as written. The two therefore agree on the content and can differ by
+  a space beside a separator character. Every mismatch left in the fuzz above
+  is of that shape.
 
 ## Wikilink resolution
 
@@ -239,6 +278,14 @@ exactly what `[[wikilinks]]` reference, so memory links resolve naturally.
 `MEMORY.md`, `MEMORY-ARCHIVE.md`, `PROVENANCE.md`, `_`-prefixed files, and
 frontmatter-less strays are never exported.
 
+**The store is read in one scope and protected in every scope.** The exporter
+is strictly a reader of it, so `--out` may never point inside it, whichever
+`--scope` is running (see [the `--out` rules](#cli)). A `name:` also has to be
+one path segment and short enough to be a filename: a name that is not is
+replaced by the filename-derived slug, and a slug past the filesystem's
+255-byte limit is refused before anything is cleared rather than crashing
+half-way through the write.
+
 ## Output layout
 
 ```
@@ -288,40 +335,65 @@ destroyed by the generated `<type>/index.md` that lands after it. Only the
 comparison folds: the file keeps the concept's own slug, capitals, accents and
 normalization intact, so a case pair leaves the bundle as `readme.md` beside
 `README-2.md`. One consequence is deliberate. On a case-sensitive filesystem
-that pair would not have collided at all, and it is suffixed there too, so one
-source tree exports to one bundle on every platform.
+that pair would not have collided at all, and it is suffixed there too, so
+*which* concepts collide is the same question on every platform.
 
-The rule carries one limit: a bumped path is not a stable identifier across
-runs. `overview-2.md` belongs to whichever concept holds the lowest free claim
-on the day of the export, so adding a source that owns `overview-2` naturally
-moves the previous holder to `overview-3`. Key a consumer off a concept's
-`resource:` field, not off its bundle filename.
+That is the only axis folding closes, and it is worth being exact about the
+rest. Because the emitted filename keeps the source's own spelling, the same
+logical concept named in NFC and in NFD produces different bundle filename
+bytes, and normalization spelling is a per-tree property (APFS preserves
+whichever bytes were written; macOS git's default `core.precomposeunicode`
+hands them back as NFC). Two clones of one repo can still differ there.
+
+The suffix rule carries one limit of its own: a bumped path is not a stable
+identifier across runs. `overview-2.md` belongs to whichever concept holds the
+lowest free claim on the day of the export, so adding a source that owns
+`overview-2` naturally moves the previous holder to `overview-3`. Key a
+consumer off a concept's `resource:` field, not off its bundle filename.
 
 **Every index lists exactly as many entries as it has things to list**, one
-per line: a type index one entry per concept of that type, the root index one
-per populated type directory. A type index is the only generated file that
-puts source text into markdown, and the two fields it puts there (`title` and
-`description`) are rendered as inline **text**, not as markup. Every control
-character, line breaks included, becomes a space, and `[`, `]` and `\` are
-backslash-escaped, so the entry stays on its own line and its link stays
-inside the bundle. That is visible in the raw file: a title or description
-containing a bracket now shows it as `\[`, which a markdown renderer displays
-as the bare character.
+per line, and every entry's link points at that entry's own concept file: a
+type index one entry per concept of that type, the root index one per
+populated type directory. A type index is the only generated file that puts
+source text into markdown, and **three** of the values in an entry are
+source-derived, not two: the `title`, the `description`, and the slug, which
+is a source *filename*.
 
-Without that, a value could leave its own entry two ways, and neither one
-raised: a newline broke the bullet across two lines, so the overflow read as
-an entry the count above it did not admit (a newline reaches a description
-from a `description: |` block scalar, or from a `\n` escape inside a
-double-quoted one, which the parser now reads back); and an unescaped `]`
-closed the link text early, handing the `(…)` behind it to the source as a
-link destination without needing a newline at all. A generated index could
-therefore list a fabricated entry pointing anywhere.
+- The two text fields are rendered as inline **text**, not as markup. Every
+  control character (line breaks included, plus U+2028/U+2029) becomes a
+  space, and `[`, `]`, `\` and `<` are backslash-escaped. That is visible in
+  the raw file: a title containing a bracket shows as `\[`, which a markdown
+  renderer displays as the bare character.
+- The slug is percent-encoded into a relative URL, which is the form OKF
+  section 8 asks for. Only what a link destination cannot carry raw is
+  touched (space, parentheses, `<`, `>`, `#`, `?`, `%` and the RFC 3986
+  exclusions), so an ordinary slug reaches the entry byte for byte as the file
+  is named on disk, accents and capitals included.
 
-The guarantee is deliberately narrow: one entry per concept, whose link is
-that concept's own file. Other inline markdown inside an entry (emphasis, an
-autolink) still renders, exactly as it does inside a concept body, which is
-markdown by design. The concept files need none of this: every source-derived
-value there is written as an escaped double-quoted scalar.
+Four ways a value could otherwise leave its own entry, none of which raised.
+A newline broke the bullet across two lines, so the overflow read as an entry
+the count above it did not admit (a newline reaches a description from a
+`description: |` block scalar, or from a `\n` escape inside a double-quoted
+one, which the parser now reads back). An unescaped `]` closed the link text
+early, handing the `(…)` behind it to the source as a link destination without
+needing a newline at all. Raw inline HTML, which CommonMark passes straight
+through, opened list items of its own: a title of
+`a</li><li><a href='…'>evil</a>` rendered as four list items under a header
+claiming three. And a *filename* containing a space produced a bullet
+CommonMark does not read as a link at all, one containing `)` pointed the link
+at a file the bundle does not contain, and one containing U+2028 split its own
+bullet.
+
+Measured with a real CommonMark parser rather than by inspection: each index
+renders as exactly N list items carrying N hrefs, every one of which resolves
+(after URL-decoding) to one of that type's own concept files.
+
+The guarantee stops there, and stopping is deliberate. Other inline markdown
+inside an entry still renders, exactly as it does inside a concept body, which
+is markdown by design: emphasis around a `*`, a code span between backticks,
+an HTML entity such as `&auml;`. None of those can move an entry's link or
+fabricate a second entry. The concept files need none of this: every
+source-derived value there is written as an escaped double-quoted scalar.
 
 Writes are **deterministic and idempotent**: re-running against unchanged
 input produces a byte-identical file set, in a fresh interpreter too (concepts
@@ -350,13 +422,21 @@ python3 scripts/okf-export.py --out dist/okf-bundle --generated-by human:alice
 | `--generated-by` | `okf-export/<version>` | OKF actor for `generated.by` — see [Provenance and trust](#provenance-and-trust) |
 
 Exit codes: `0` on success; `1` if `--root` does not exist or is not a
-directory, if `--out` is `--root` or an ancestor of it, if `--out` points at
-an existing non-bundle directory (the exporter refuses to clear anything that
-does not look like a previous export), if `--out` sits inside a directory any
-scope walks or contains one (see below), if `--out` overlaps the memory dir a
-`user`-scope run reads, or if `--generated-by` is not a valid OKF actor; an
-unknown `--scope` value is rejected by `argparse` itself (`SystemExit`, exit
-code `2`) before the exporter runs.
+directory, if `--out` is refused, if a concept cannot be written, or if
+`--generated-by` is not a valid OKF actor; an unknown `--scope` value is
+rejected by `argparse` itself (`SystemExit`, exit code `2`) before the
+exporter runs.
+
+An `--out` is refused when it exists and is not a directory, when it is
+`--root` or an ancestor of it, when it sits inside a directory any scope walks
+or contains one (see below), when it overlaps the memory dir *in either
+scope*, or when it points at an existing non-empty directory that does not
+look like a previous export (the exporter refuses to clear anything it does
+not recognise as its own output). A concept cannot be written when two of one
+type name a single file, or when a slug is longer than the filesystem's
+255-byte filename limit. All of those are checked before the destination is
+cleared, so a refused run costs an error message and leaves the sources and
+any previous bundle exactly as they were.
 
 **`--out` must lie outside what *every* scope walks, not just the current
 one.** That means outside `docs/`, `examples/`, `work/` and `rules/`, in both
@@ -364,13 +444,27 @@ scopes, and outside the memory dir. The guard reads the union rather than the
 running scope because the bundle outlives the run that wrote it: `core` walks
 only `docs/` and `examples/`, so `--out rules/bundle --scope core` would land
 happily, and the next `--scope user` run would glob `rules/**/*.md` and ingest
-that bundle as `rule` concepts. `dist/okf-bundle` is outside every scope and
-outside the memory dir, which is what makes it the documented default.
+that bundle as `rule` concepts. The memory clause follows the same rule for
+the same reason: `core` scope never *reads* the memory store, but a bundle
+written there is still rmtree'd over on the next run of either scope, fact
+files and all, so a `core` run is refused a destination inside it too.
+`dist/okf-bundle` is outside every scope and outside the memory dir, which is
+what makes it the documented default.
 
-The refusal is raised before the walk and before the destination is cleared, so
-a mistaken `--out` costs an error message and nothing else. It is derived from
-the same pattern list the walk itself globs, so adding a source pattern extends
-the guard automatically.
+The refusal is raised before the walk and before the destination is cleared,
+so a mistaken `--out` costs an error message and nothing else. The scanned set
+is derived from the same pattern list the walk itself globs, so adding a source
+pattern extends the guard automatically. Each pattern contributes two things:
+
+- its **fixed leading path** (`docs/**/*.md` gives `docs`), which covers a
+  directory that does not exist yet and is scanned the moment it appears;
+- the resolved result of running **the walk's own glob** over the pattern's
+  parent (`work/**/deliverables/*.md` gives `work/**/deliverables`), which
+  covers a directory reached through a symlink at a literal segment *after*
+  the globbed part. `Path.glob` follows those, and the fixed prefix of that
+  pattern is only `work`, so a link named `deliverables` pointing into the
+  bundle was invisible to a prefix-only guard while the walk read straight
+  through it.
 
 Containment is judged segment-wise on **resolved** paths, in the same
 case-folded namespace the exporter uses for filenames:
@@ -379,7 +473,8 @@ case-folded namespace the exporter uses for filenames:
 - `DOCS/okfbundle` is refused like `docs/okfbundle`, because on the macOS
   default filesystem those are one directory;
 - a repo whose `docs/` is itself a symlink is compared on where that link
-  really reads, not on the link path;
+  really reads, not on the link path, and so is a symlinked `deliverables`
+  reached through a glob;
 - the sibling `docs-bundle` stays **legal**: segments are compared whole, so a
   shared name prefix is not containment.
 
@@ -387,23 +482,40 @@ The converse also fires: an `--out` that *contains* a scanned directory is
 refused, because clearing it would delete source data rather than a previous
 bundle. A `docs/` symlink pointing into the destination is how that is reached.
 
-**The guard refuses more than it strictly has to, on purpose.** Two widenings
-are deliberate, because the failure being guarded against is silent data
-corruption and the answer to a refusal is simply another destination:
+**The guard refuses more than it strictly has to, on purpose.** Three
+widenings are deliberate, because the failure being guarded against is silent
+data corruption and the answer to a refusal is simply another destination:
 
 - it covers scopes the current run is not in, as above;
 - prefix derivation takes each pattern's fixed leading path, and
   `work/**/deliverables/*.md` collapses to `work`. So **all** of `work/` is
   refused, `work/exports/okfbundle` included, even though that pattern needs a
   literal `deliverables` segment and the bundle's type directory is named
-  `deliverable`, so nothing written there could ever be globbed back in.
+  `deliverable`, so nothing written there could ever be globbed back in;
+- on a **case-sensitive** filesystem the fold refuses a `Docs/` that really is
+  a separate directory from `docs/`. The refusal names the comparison it made
+  for exactly that case, so the containment it states is never something the
+  operator can see is false in `ls`.
 
-Every refusal names `dist/okf-bundle`, which is a destination that works.
+Every refusal about *where* `--out` points names `dist/okf-bundle`, a
+destination that works. The two refusals that are not about the path (two
+concepts of one type naming a single file; a slug past the filename limit)
+name the source that has to change instead, since moving `--out` would not
+help.
 
 This is a **behaviour change**: a command that pointed `--out` into a directory
 any scope walks used to exit `0` and quietly produce a corrupted bundle, each
 run re-ingesting the last. It now exits `1`. Move `--out` to a directory
 outside the scanned tree.
+
+**A failed run leaves a destination the next run can still use.** The root
+`index.md` is written first, before any concept file, because that file is
+what marks a directory as a previous export. Written last, any mid-write
+failure (a full disk, a permission error) left a non-empty directory that no
+longer looked like a bundle, and every later run then refused to clear it:
+the only way out was deleting the directory by hand. The partial bundle from a
+crashed run is still incomplete and should be regenerated, but regenerating it
+is now one command.
 
 ## Migrating from v0.1
 
