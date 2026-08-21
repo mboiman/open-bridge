@@ -257,7 +257,11 @@ otherwise free.
 Writes are **deterministic and idempotent**: re-running against unchanged
 input produces a byte-identical file set (concepts are sorted by
 `(type, slug)`, the output directory is cleared and rebuilt on every run, and
-nothing in the render depends on wall-clock time).
+nothing in the render depends on wall-clock time). That property is now an
+enforced invariant rather than something the operator has to remember: an
+`--out` inside a directory the chosen scope walks is refused outright,
+because the walk would otherwise read the previous run's own output back in
+as source material and the concept count would climb on every run.
 
 ## CLI
 
@@ -278,9 +282,25 @@ python3 scripts/okf-export.py --out dist/okf-bundle --generated-by human:alice
 Exit codes: `0` on success; `1` if `--root` does not exist or is not a
 directory, if `--out` points at an existing non-bundle directory (the
 exporter refuses to clear anything that does not look like a previous
-export), or if `--generated-by` is not a valid OKF actor; an unknown
+export), if `--out` sits inside a directory the chosen scope walks (see
+below), or if `--generated-by` is not a valid OKF actor; an unknown
 `--scope` value is rejected by `argparse` itself (`SystemExit`, exit code
 `2`) before the exporter runs.
+
+**`--out` must lie outside every scanned directory.** Under `core` scope that
+means outside `docs/` and `examples/`; under `user` scope also outside
+`work/` and `rules/`, and outside the memory dir. `dist/okf-bundle` (the
+documented default) satisfies this in both scopes, and so does any other
+directory no scope walks. The refusal is raised before the walk and before
+the destination is cleared, so a mistaken `--out` costs you an error message
+and nothing else. It is checked against the same per-scope pattern list the
+walk itself globs, so adding a source pattern extends the guard automatically.
+
+This is a **behaviour change**: a command that pointed `--out` into `docs/`,
+`examples/`, `work/` or `rules/` used to exit `0` and quietly produce a
+corrupted bundle (each run re-ingesting the last one, so a two-concept tree
+reported 2, then 6, then 10). It now exits `1`. Move `--out` to a directory
+outside the scanned tree.
 
 ## Migrating from v0.1
 

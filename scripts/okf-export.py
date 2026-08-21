@@ -82,6 +82,15 @@ Scope controls which sources are walked:
                  scripts/no-scrub-leak.py over the output before publishing
                  a core-scope bundle.
 
+--out must lie OUTSIDE every directory the chosen scope walks, and outside
+the memory dir. A bundle written inside a scanned directory is read back in
+as source material on the next run, so the concept count climbs on every run
+and the byte-identical re-run guarantee is false; the destination is
+therefore refused before the walk and before anything is cleared. The scanned
+set is derived from the same per-scope pattern list discover_sources globs
+(_SCOPE_PATTERNS), so it can never drift out of step with what is actually
+read. dist/okf-bundle is outside the scanned set in both scopes.
+
 Usage:
   python3 scripts/okf-export.py --out dist/okf-bundle
   python3 scripts/okf-export.py --root . --out dist/okf-bundle --scope core
@@ -90,7 +99,10 @@ Usage:
 Exit codes:
   0 — bundle written successfully
   1 — --root does not exist / is not a directory, unsafe --out refused, or
-      --generated-by is not a valid OKF actor
+      --generated-by is not a valid OKF actor. An --out is unsafe when it is
+      --root or an ancestor of it, when it sits inside a scanned directory or
+      the memory dir, or when it is a non-empty directory that does not look
+      like a prior bundle.
   2 — argparse usage error (e.g. unknown --scope; raised as SystemExit)
 """
 from __future__ import annotations
@@ -349,26 +361,81 @@ def resolve_wikilinks(text: str, slug_to_relpath: dict) -> tuple[str, list[str]]
     return new_text, unresolved
 
 
+# The ONE list of source patterns per scope, read by BOTH consumers:
+# discover_sources (which globs them) and scanned_dirs (which derives from
+# them the directories write_bundle refuses to write a bundle into). A second
+# literal copy in the guard would drift silently the day someone adds a
+# pattern to only one of the two, and the walk would resume eating its own
+# output (issue #153). Add a pattern here and both behaviours follow.
+_SCOPE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "core": (
+        "docs/**/*.md",
+        "examples/**/*.md",
+    ),
+    "user": (
+        "work/tasks/*/STATUS.md",
+        "work/streams/*/STATUS.md",
+        "work/done/*/*/STATUS.md",
+        "work/**/deliverables/*.md",
+        "docs/**/*.md",
+        "rules/**/*.md",
+        "examples/**/*.md",
+    ),
+}
+
+# The glob metacharacters Path.glob honours. A segment containing any of them
+# is not a fixed directory name, so prefix derivation stops there.
+_GLOB_CHARS = frozenset("*?[")
+
+
+def patterns_for(scope: str) -> tuple[str, ...]:
+    """The source glob patterns for ``scope`` ("user" or "core")."""
+    try:
+        return _SCOPE_PATTERNS[scope]
+    except KeyError:
+        expected = " or ".join(repr(name) for name in sorted(_SCOPE_PATTERNS))
+        raise ValueError(f"unknown scope: {scope!r} (expected {expected})") from None
+
+
+def _pattern_prefix(pattern: str) -> str:
+    """The fixed leading path of a glob pattern, up to its first globbed segment.
+
+    ``docs/**/*.md`` -> ``docs``; ``work/tasks/*/STATUS.md`` -> ``work/tasks``;
+    ``work/**/deliverables/*.md`` -> ``work``. Segment-wise by construction,
+    never a string prefix, so a sibling named ``docs-bundle`` is not mistaken
+    for something inside ``docs``.
+
+    A pattern whose very first segment is globbed has NO fixed prefix and
+    yields "". The walk then reads the whole tree, which scanned_dirs turns
+    into the root itself rather than dropping the pattern and under-guarding.
+    """
+    fixed: list[str] = []
+    for segment in pattern.split("/"):
+        if _GLOB_CHARS & set(segment):
+            break
+        fixed.append(segment)
+    return "/".join(fixed)
+
+
+def scanned_dirs(root: Path, scope: str) -> list[Path]:
+    """The resolved directories ``discover_sources(root, scope)`` reads under.
+
+    Derived from ``patterns_for(scope)``, never from a hand-kept second list.
+    Resolved, so a symlinked or dot-segmented path is compared on its real
+    location. A directory that does not exist yet is still returned: it is
+    scanned as soon as it appears, and a bundle sitting there would be read
+    back in on the next run.
+    """
+    root = Path(root).resolve()
+    prefixes = {_pattern_prefix(pattern) for pattern in patterns_for(scope)}
+    return sorted({(root / prefix) if prefix else root for prefix in prefixes})
+
+
 def discover_sources(root: Path, scope: str) -> list[Path]:
     """Walk ``root`` for OKF source files per ``scope`` ("user" or "core")."""
     root = Path(root)
-    if scope == "core":
-        patterns = ["docs/**/*.md", "examples/**/*.md"]
-    elif scope == "user":
-        patterns = [
-            "work/tasks/*/STATUS.md",
-            "work/streams/*/STATUS.md",
-            "work/done/*/*/STATUS.md",
-            "work/**/deliverables/*.md",
-            "docs/**/*.md",
-            "rules/**/*.md",
-            "examples/**/*.md",
-        ]
-    else:
-        raise ValueError(f"unknown scope: {scope!r} (expected 'user' or 'core')")
-
     found: set[Path] = set()
-    for pattern in patterns:
+    for pattern in patterns_for(scope):
         found.update(p for p in root.glob(pattern) if p.is_file())
     return sorted(found, key=lambda p: p.relative_to(root).as_posix())
 
@@ -780,6 +847,45 @@ def write_bundle(
             "ancestor of --root, so clearing it would delete source data, "
             "not just the bundle"
         )
+
+    # The converse guard, and the reason it runs HERE: a destination inside a
+    # directory this scope walks would be read back in as source material on
+    # the very next run, so the bundle would grow a concept per generated file
+    # every time and the byte-identical re-run guarantee would be false. It
+    # has to fire before discover_sources below (or the previous run's output
+    # is already in memory) and before the rmtree further down (or the
+    # evidence is deleted by the same run that consumed it).
+    for scanned in scanned_dirs(root, scope):
+        if out_dir.is_relative_to(scanned):
+            raise BundleDestinationError(
+                f"refusing to write the bundle to {out_dir}: it is inside "
+                f"{scanned}, which --scope {scope} walks for sources, so every "
+                "run would re-ingest the previous run's output as source "
+                "material. Point --out at a directory no scope walks "
+                "(e.g. dist/okf-bundle)"
+            )
+        if scanned.is_relative_to(out_dir):
+            raise BundleDestinationError(
+                f"refusing to write the bundle to {out_dir}: it contains "
+                f"{scanned}, which --scope {scope} walks for sources, so "
+                "clearing it would delete source data, not just the bundle"
+            )
+
+    # The memory dir is read ONLY under user scope (see the discover_memory
+    # call below), and this clause mirrors that read exactly rather than
+    # exceeding it. The store usually lives outside the repo and the exporter
+    # is strictly a reader of it, so a bundle written there would put an
+    # rmtree on someone else's data every run. The non-bundle guard further
+    # down only covers this by accident, and not at all when the memory dir is
+    # empty or already holds a bundle.
+    if scope == "user" and memory_dir is not None:
+        resolved_memory = Path(memory_dir).resolve()
+        if out_dir.is_relative_to(resolved_memory) or resolved_memory.is_relative_to(out_dir):
+            raise BundleDestinationError(
+                f"refusing to write the bundle to {out_dir}: it overlaps the "
+                f"memory dir {resolved_memory}, which this run reads as a "
+                "source. The exporter never writes into the memory store"
+            )
 
     sources = discover_sources(root, scope)
     concepts = [build_concept(path, root) for path in sources]

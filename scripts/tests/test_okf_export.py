@@ -85,6 +85,32 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         rules/ excluded entirely — this is the public-safe subset for a
         demo export).
         Any other scope string raises ValueError.
+        Those patterns are NOT a literal inside this function. They live in
+        the module-level _SCOPE_PATTERNS and are read through patterns_for(),
+        which is also what scanned_dirs() (and therefore write_bundle's
+        destination guard) reads. ONE pattern source, two consumers: a second
+        hand-kept list would drift the day a pattern is added to only one of
+        them, and the walk would resume eating its own output.
+
+    patterns_for(scope: str) -> tuple[str, ...]
+        _SCOPE_PATTERNS[scope]; any other scope raises ValueError, with the
+        expected-values half of the message derived from _SCOPE_PATTERNS so
+        it cannot drift either.
+
+    _pattern_prefix(pattern: str) -> str
+        The fixed leading path of a glob pattern, up to its first globbed
+        segment: `docs/**/*.md` -> "docs", `work/tasks/*/STATUS.md` ->
+        "work/tasks", `work/**/deliverables/*.md` -> "work". Segment-wise,
+        never a string prefix, so `docs-bundle` is not inside `docs`. A
+        pattern whose first segment is already globbed yields "".
+
+    scanned_dirs(root: Path, scope: str) -> list[Path]
+        The sorted, deduplicated, RESOLVED directories discover_sources
+        reads under, derived from patterns_for(scope) via _pattern_prefix. An
+        empty prefix maps to root itself rather than being dropped, so a
+        future whole-tree pattern cannot silently under-guard. A directory
+        that does not exist yet is still returned: it is scanned the moment
+        it appears.
 
     concept_type_for(path: Path, root: Path) -> str
         .../work/tasks/<slug>/STATUS.md      -> "task"
@@ -142,6 +168,30 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         "generated_by": str, "concepts_without_generated_at": int,
         "unresolved_wikilinks": list[str]} — the undated figure is a COUNT,
         never a list of source paths, because the manifest is printed.
+
+        DESTINATION GUARDS, all three raising BundleDestinationError (exit 1
+        via main) and all three running BEFORE discover_sources walks
+        anything and BEFORE the output directory is cleared, so a refused
+        run costs an error message and leaves both the sources and any
+        previous bundle untouched:
+          * out_dir is --root or an ancestor of it (clearing would delete
+            the source tree). Checked FIRST, so its wording is stable.
+          * out_dir lies inside ANY directory this scope walks, or contains
+            one. `--out` must be outside every scanned_dirs(root, scope)
+            entry: `dist/okf-bundle` qualifies in both scopes, `docs/`,
+            `examples/`, `work/`, `rules/` and anything under them do not.
+            Without this the walk re-ingests the previous run's own output
+            as source material, the concept count climbs on every run, and
+            the byte-identical guarantee above is false (issue #153).
+            Containment is segment-wise, so the sibling `docs-bundle` is
+            legal; comparison is on resolved paths, so a symlinked or
+            dot-segmented `--out` is judged on where it really lands.
+          * under user scope with a memory_dir, out_dir overlaps that memory
+            dir in either direction. Gated on `scope == "user" and
+            memory_dir is not None` so it mirrors the run's actual read set:
+            core scope never walks the memory dir, so it never refuses one.
+            The exporter is strictly a READER of that (usually out-of-repo)
+            store and must never rmtree into it.
 
     Emitted concept frontmatter, in order, empty fields OMITTED:
         type, title, description?, resource, generated { by, at? },
@@ -1271,6 +1321,258 @@ def test_write_bundle_refuses_an_out_dir_that_would_delete_the_source(okf_export
         with pytest.raises(okf_export.BundleDestinationError):
             okf_export.write_bundle(bridge_root, destination, "user")
     assert (bridge_root / "docs" / "sample-doc.md").exists()
+
+
+# --------------------------------------------------------------------------
+# --out inside a scanned directory (issue #153)
+#
+# The converse of the guard above. That one asks "does --out CONTAIN the
+# source?"; these ask "does --out SIT INSIDE something the walk reads?".
+# Unguarded, every run re-ingests the previous run's own output as source
+# material, so the concept count grows without bound and the documented
+# byte-identical re-run property is false.
+# --------------------------------------------------------------------------
+
+def _core_docs_tree(root: Path) -> None:
+    """The filed reproduction's two-file docs/ tree."""
+    _write(root / "docs/alpha.md", '---\ntitle: "Alpha"\ndescription: "First doc"\n---\n\n# Alpha\n\nBody.\n')
+    _write(root / "docs/beta.md", '---\ntitle: "Beta"\ndescription: "Second doc"\n---\n\n# Beta\n\nBody.\n')
+
+
+def test_write_bundle_refuses_an_out_dir_inside_a_scanned_directory(okf_export, tmp_path):
+    """The filed defect, refused on the FIRST run rather than the second.
+
+    `--out ./docs/okfbundle` with `--scope core` satisfies neither term of
+    the --root guard, so today the export runs and leaves its own output
+    where the next walk will read it back in.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    out = root / "docs" / "okfbundle"
+
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(root, out, "core")
+
+    message = str(excinfo.value)
+    assert str((root / "docs").resolve()) in message, (
+        "the message must name the scanned directory the operator has to move --out out of"
+    )
+    assert not out.exists(), "guard raised but the destination was created anyway"
+
+
+def test_a_second_run_can_never_reingest_the_first_runs_output(okf_export, tmp_path):
+    """Issue #153 verbatim: concept_count went 2 -> 6 -> 10 across three runs.
+
+    The illegal destination is refused outright; a legal one keeps the count
+    flat, which is the byte-identical re-run property this defect broke.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, root / "docs" / "okfbundle", "core")
+
+    legal = root / "dist" / "okf-bundle"
+    counts = [okf_export.write_bundle(root, legal, "core")["concept_count"] for _ in range(3)]
+    assert counts == [2, 2, 2], f"count grew across runs: {counts}"
+
+
+@pytest.mark.parametrize(
+    ("scope", "scanned"),
+    [("core", "docs"), ("core", "examples"), ("user", "work"), ("user", "rules")],
+)
+def test_write_bundle_refuses_an_out_dir_equal_to_a_scanned_directory(
+    okf_export, bridge_root, scope, scanned
+):
+    """--out == a scanned directory is refused, and the sources survive.
+
+    Some of these are refused today too, but only by luck: the LATE
+    non-bundle guard happens to fire because the directory is non-empty and
+    carries no okf_version index. That is an accident of content, not a
+    rule, so it is pinned here as a rule.
+    """
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, bridge_root / scanned, scope)
+    assert (bridge_root / "docs" / "sample-doc.md").exists()
+    assert (bridge_root / "work" / "tasks" / "sample-task" / "STATUS.md").exists()
+
+
+def test_scanned_out_guard_fires_before_the_walk(okf_export, bridge_root, monkeypatch):
+    """The refusal must precede discover_sources, not follow it.
+
+    A guard placed after the walk would already hold the previous run's
+    output in memory, which is exactly how the filed bundle acquired a
+    `type: doc` concept whose body was the earlier run's rendered index.
+    """
+    def _explode(root, scope):  # pragma: no cover - must never run
+        raise AssertionError("discover_sources ran before the destination was validated")
+
+    monkeypatch.setattr(okf_export, "discover_sources", _explode)
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, bridge_root / "docs" / "okfbundle", "core")
+
+
+def test_scanned_out_guard_fires_before_anything_is_cleared(okf_export, tmp_path):
+    """A prior bundle at an illegal --out must be refused, not cleared.
+
+    This is the ordering trap in the filed report: the destination LOOKS
+    like a valid prior bundle, so the late guard clears it happily, and the
+    evidence of the re-ingestion is deleted in the very run that consumed
+    it. The sentinel proves the rmtree never happened.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    out = root / "docs" / "okfbundle"
+    out.mkdir(parents=True)
+    (out / "index.md").write_text('---\nokf_version: "0.2"\n---\n\n# OKF Bundle\n', encoding="utf-8")
+    sentinel = out / "sentinel.txt"
+    sentinel.write_text("untouched", encoding="utf-8")
+    assert okf_export._is_bundle_dir(out), "fixture must look like a prior bundle to the late guard"
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, out, "core")
+    assert sentinel.read_text(encoding="utf-8") == "untouched"
+
+
+def test_guard_and_discovery_share_one_pattern_source(okf_export, tmp_path, monkeypatch):
+    """One list of scanned patterns, read by both the walk and the guard.
+
+    A second literal directory list in the guard would drift silently the
+    day someone adds a pattern to only one of the two. Adding a pattern here
+    must therefore change BOTH behaviours at once.
+    """
+    monkeypatch.setitem(
+        okf_export._SCOPE_PATTERNS, "core", okf_export._SCOPE_PATTERNS["core"] + ("guides/**/*.md",)
+    )
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    _write(root / "guides/intro.md", '---\ntitle: "Intro"\n---\n\n# Intro\n\nBody.\n')
+
+    found = okf_export.discover_sources(root, "core")
+    assert root / "guides" / "intro.md" in found, "the walk did not pick up the new pattern"
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, root / "guides" / "okfbundle", "core")
+
+
+def test_sibling_directory_sharing_a_name_prefix_is_a_legal_out(okf_export, tmp_path):
+    """`docs-bundle` is not inside `docs`. Containment is segment-wise.
+
+    A `str.startswith` comparison would refuse this, because the string
+    `<root>/docs-bundle` does start with the string `<root>/docs`.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    manifest = okf_export.write_bundle(root, root / "docs-bundle", "core")
+    assert manifest["concept_count"] == 2
+    assert (root / "docs-bundle" / "index.md").exists()
+
+
+def test_an_unscanned_directory_inside_root_is_still_a_legal_out(okf_export, bridge_root):
+    """`dist/okf-bundle` under --root stays legal, in every scope.
+
+    It is the usage the module docstring and the guide both document, so a
+    blanket refusal of any --out beneath --root would break the documented
+    happy path.
+    """
+    for scope in ("core", "user"):
+        out = bridge_root / "dist" / f"okf-bundle-{scope}"
+        manifest = okf_export.write_bundle(bridge_root, out, scope)
+        assert manifest["scope"] == scope
+        assert (out / "index.md").exists()
+
+
+def test_write_bundle_refuses_an_out_dir_inside_the_memory_dir(okf_export, bridge_root, memory_dir):
+    """The exporter is strictly a READER of the memory dir. It never writes there.
+
+    The memory dir usually lives outside the repo, and --out inside it makes
+    every re-run rmtree part of that out-of-repo store.
+    """
+    with pytest.raises(okf_export.BundleDestinationError) as excinfo:
+        okf_export.write_bundle(bridge_root, memory_dir / "okfbundle", "user", memory_dir=memory_dir)
+    assert str(memory_dir.resolve()) in str(excinfo.value)
+    assert list(memory_dir.glob("*.md")), "guard raised but the fact files are gone"
+
+
+def test_write_bundle_refuses_an_out_dir_equal_to_an_empty_memory_dir(okf_export, bridge_root, tmp_path):
+    """The case the late non-bundle guard cannot see.
+
+    An EMPTY memory dir passes `any(out_dir.iterdir())`, so today the
+    exporter rmtrees the user's memory directory and writes a bundle over
+    it. A fresh instance has exactly that directory.
+    """
+    empty_memory = tmp_path / "empty-memory"
+    empty_memory.mkdir()
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(bridge_root, empty_memory, "user", memory_dir=empty_memory)
+    assert empty_memory.is_dir()
+    assert not (empty_memory / "index.md").exists(), "the memory dir was overwritten with a bundle"
+
+
+def test_core_scope_does_not_refuse_a_memory_dir_it_never_reads(okf_export, bridge_root, memory_dir):
+    """The memory clause mirrors the run's read set rather than exceeding it.
+
+    Core scope never walks the memory dir (write_bundle gates the memory
+    read on `scope == "user"`), so refusing an --out there would assert a
+    read that does not happen. Pinned as a decision, not an oversight.
+    """
+    manifest = okf_export.write_bundle(
+        bridge_root, memory_dir / "core-bundle", "core", memory_dir=memory_dir
+    )
+    assert manifest["scope"] == "core"
+    assert "memory" not in {p.parent.name for p in (memory_dir / "core-bundle").rglob("*.md")}
+
+
+def test_scanned_dirs_derives_the_core_set_from_the_patterns(okf_export, tmp_path):
+    """`docs/**/*.md` -> `docs`; the leading fixed segments, nothing more."""
+    root = tmp_path / "instance"
+    root.mkdir()
+    assert okf_export.scanned_dirs(root, "core") == [
+        (root / "docs").resolve(),
+        (root / "examples").resolve(),
+    ]
+    user = okf_export.scanned_dirs(root, "user")
+    for name in ("docs", "examples", "rules", "work"):
+        assert (root / name).resolve() in user, f"user scope must guard {name}/"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        ("docs/**/*.md", "docs"),
+        ("examples/**/*.md", "examples"),
+        ("work/tasks/*/STATUS.md", "work/tasks"),
+        ("work/done/*/*/STATUS.md", "work/done"),
+        ("work/**/deliverables/*.md", "work"),
+        ("rules/**/*.md", "rules"),
+        # No fixed leading segment at all: the whole root is scanned. Mapped
+        # to "" on purpose, so scanned_dirs can turn it into root rather than
+        # silently dropping the pattern and under-guarding.
+        ("**/*.md", ""),
+        ("*.md", ""),
+    ],
+)
+def test_pattern_prefix_stops_at_the_first_globbed_segment(okf_export, pattern, expected):
+    assert okf_export._pattern_prefix(pattern) == expected
+
+
+def test_patterns_for_rejects_an_unknown_scope(okf_export):
+    """The documented ValueError contract survives the shared-source refactor."""
+    with pytest.raises(ValueError):
+        okf_export.patterns_for("bogus")
+
+
+def test_main_cli_refuses_a_self_ingesting_out_with_exit_1(okf_export, tmp_path, capsys):
+    """The filed command line, end to end: exit 1, ERROR on stderr, no traceback."""
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    out = root / "docs" / "okfbundle"
+
+    rc = okf_export.main(["--root", str(root), "--out", str(out), "--scope", "core"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("ERROR: ")
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("concept_type", ["task", "stream", "deliverable", "doc", "rule", "example", "memory"])
