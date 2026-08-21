@@ -159,11 +159,17 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         `okf_version: "0.2"` AND NOTHING ELSE (the one key OKF permits in an
         index file). `generated_by` is run-wide, defaulting to
         default_generated_by(). Deterministic + idempotent: re-running with
-        unchanged input produces BYTE-IDENTICAL files. Two concepts of one
-        type sharing a slug raise BundleDestinationError (exit 1 via main),
-        checked after dedupe_slugs and BEFORE the output directory is
-        cleared, so the invariant fails loudly with the previous bundle
-        intact rather than silently dropping a concept. Returns a manifest:
+        unchanged input produces BYTE-IDENTICAL files, in a FRESH INTERPRETER
+        as much as in the same one. Set and dict iteration over strings is
+        fixed within a process and varies between processes (PYTHONHASHSEED),
+        so an in-process re-run cannot see a hash-ordered field at all: every
+        ordering that reaches the output has to come from a sorted list or
+        from the discovery-ordered concept list, never from a set.
+        Two concepts of one type sharing a slug raise
+        BundleDestinationError (exit 1 via main), checked after dedupe_slugs
+        and BEFORE the output directory is cleared, so the invariant fails
+        loudly with the previous bundle intact rather than silently dropping
+        a concept. Returns a manifest:
         {"okf_version": "0.2", "scope": scope, "concept_count": int,
         "generated_by": str, "concepts_without_generated_at": int,
         "unresolved_wikilinks": list[str]} — the undated figure is a COUNT,
@@ -232,7 +238,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import os
 import re
+import subprocess
 import sys
 import tokenize
 import types
@@ -913,6 +921,84 @@ def test_write_bundle_is_byte_identical_on_rerun(okf_export, bridge_root, tmp_pa
     assert digest_1 == digest_2
 
 
+# PYTHONHASHSEED values pinned as literals, so this test's verdict is fixed
+# rather than sampled: the same seeds run on every machine and every CI job.
+# Several of them because one 2-element set is a coin flip per seed, while the
+# multi-element orderings separate on the first seed.
+_HASH_SEEDS = ("1", "2", "3", "4", "5", "6", "7", "8")
+
+
+def _export_in_a_fresh_process(root: Path, out: Path, scope: str, hash_seed: str) -> dict:
+    """Run the exporter as its own process under a pinned PYTHONHASHSEED.
+
+    subprocess is a TEST-side tool here. The exporter itself may never call
+    it (test_module_source_has_no_wall_clock_call forbids exactly that), but
+    a second interpreter is the only place a hash-ordered field becomes
+    visible, so the check has to be made from outside.
+    """
+    completed = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--root", str(root), "--out", str(out),
+         "--scope", scope],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONHASHSEED": hash_seed},
+    )
+    assert completed.returncode == 0, completed.stderr
+    return _bundle_digest(out)
+
+
+def test_bundle_is_byte_identical_across_processes_with_different_hash_seeds(bridge_root, tmp_path):
+    """The determinism contract, measured where it can actually fail.
+
+    The in-process re-run above cannot see this class of defect at all. Set
+    and dict iteration over a fixed group of strings is stable for the whole
+    life of one interpreter, so a rendered field ordered by a set produces
+    the same bytes twice in a row and the digest comparison passes. Change
+    the hash seed and the same input yields a different bundle: two exports
+    of one unchanged instance stop matching, and any consumer diffing them
+    reads content churn that never happened.
+
+    Sweeping several pinned seeds is what makes the verdict deterministic.
+    Ordering a two-element field by a set flips on roughly half of all seeds,
+    so a single seed would decide by luck; eight decide by rule.
+    """
+    digests = [
+        _export_in_a_fresh_process(bridge_root, tmp_path / f"bundle-seed-{seed}", "user", seed)
+        for seed in _HASH_SEEDS
+    ]
+    assert digests[0], "the export produced no files to compare"
+    for seed, digest in zip(_HASH_SEEDS[1:], digests[1:]):
+        differing = sorted(
+            name for name in set(digest) | set(digests[0])
+            if digest.get(name) != digests[0].get(name)
+        )
+        assert not differing, (
+            f"PYTHONHASHSEED={seed} produced a different bundle: {differing}"
+        )
+
+
+def test_render_keeps_tags_in_source_order(okf_export):
+    """`tags` is a LIST in source order, so the render may not reorder it.
+
+    Passing it through a set is the shortest way to lose that: the emitted
+    order then follows string hashing, which is the one input the exporter is
+    not allowed to have. Eight tags rather than the two a real concept
+    carries, so the assertion holds by rule instead of by coin flip: a set
+    reproduces an eight-element insertion order once in 40320 attempts.
+    """
+    tags = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"]
+    concept = {
+        "okf_type": "doc",
+        "title": "Ordered Tags",
+        "description": "",
+        "resource": "docs/ordered.md",
+        "tags": list(tags),
+        "body": "Body.\n",
+    }
+    _, block, _ = okf_export._render_concept(concept).split("---\n", 2)
+    assert yaml.safe_load(block)["tags"] == tags
+
+
 def test_module_source_has_no_wall_clock_call():
     """No render path may read the clock, a file mtime, or git.
 
@@ -1466,6 +1552,50 @@ def test_sibling_directory_sharing_a_name_prefix_is_a_legal_out(okf_export, tmp_
     manifest = okf_export.write_bundle(root, root / "docs-bundle", "core")
     assert manifest["concept_count"] == 2
     assert (root / "docs-bundle" / "index.md").exists()
+
+
+def test_out_dir_reaching_a_scanned_directory_through_a_symlink_is_refused(okf_export, tmp_path):
+    """Containment is judged on where --out LANDS, not on how it is spelled.
+
+    The sibling test above pins the guard against being too broad. This one
+    pins the other edge: `<tmp>/docs-link/okfbundle` shares no leading path
+    with `<root>/docs`, so a comparison made on the argument as given reads
+    it as outside every scanned directory. It resolves straight into `docs/`,
+    and the walk then re-ingests the bundle exactly as in issue #153, with
+    the concept count climbing on every re-run.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+    link = tmp_path / "docs-link"
+    try:
+        link.symlink_to(root / "docs", target_is_directory=True)
+    except (OSError, NotImplementedError):  # pragma: no cover - platform without symlinks
+        pytest.skip("this platform does not permit creating symlinks")
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, link / "okfbundle", "core")
+    assert not (root / "docs" / "okfbundle").exists(), (
+        "guard raised but the bundle landed in docs/ anyway"
+    )
+
+
+def test_out_dir_reaching_a_scanned_directory_through_dot_segments_is_refused(okf_export, tmp_path):
+    """The same rule for `<root>/dist/../docs/okfbundle`.
+
+    `Path` carries a `..` segment verbatim, so an unresolved comparison reads
+    this destination as sitting under `dist/`, which no scope walks, and
+    waves it through. `dist/okf-bundle` is the documented happy path, so a
+    relative --out written from beside it is an ordinary typo rather than an
+    exotic one.
+    """
+    root = tmp_path / "instance"
+    _core_docs_tree(root)
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, root / "dist" / ".." / "docs" / "okfbundle", "core")
+    assert not (root / "docs" / "okfbundle").exists(), (
+        "guard raised but the bundle landed in docs/ anyway"
+    )
 
 
 def test_an_unscanned_directory_inside_root_is_still_a_legal_out(okf_export, bridge_root):
