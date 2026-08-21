@@ -144,13 +144,25 @@ enum whitelist. Absent `status` already means `stable` in OKF, which is the
 true claim about an exported Bridge write-up. The Bridge value travels under
 `bridge_status` (and, unchanged from v0.1, in `tags`).
 
-Frontmatter parsing is hand-rolled (no PyYAML dependency) and mirrors two
-conventions already in this repo: `scripts/extract-frontmatter.py`'s
-`# yaml-language-server: $schema=...` comment-prolog skip, and
-`scripts/gen-board.py`'s `parse_status()` flat `key: value` scalar extraction
-(quote- and inline-comment-stripping). A file with no frontmatter block at
-all still exports cleanly — its title falls back to the first H1, its
-description to `""`.
+Frontmatter parsing is hand-rolled (no PyYAML dependency). It keeps
+`scripts/extract-frontmatter.py`'s `# yaml-language-server: $schema=...`
+comment-prolog skip and reads the same flat `key: value` scalars as
+`scripts/gen-board.py`'s `parse_status()`, but it deliberately diverges from
+that script on two points, because `gen-board.py` is lenient where YAML is
+not:
+
+- **Quoting is resolved before inline comments**, the order YAML itself uses.
+  A `#` inside a quoted scalar is a literal character, so
+  `headline: "... in review as PR #214"` keeps its issue number. On an
+  *unquoted* scalar a ` #` still opens a comment and is still stripped, and
+  `value#nospace` (no whitespace in front of the hash) stays whole.
+- **A `---` fence counts only at column 0**, for the opening and the closing
+  fence alike. A block-scalar continuation line is indented by definition, so
+  an indented `---` inside a `title: |` block is content, not the end of the
+  frontmatter block.
+
+A file with no frontmatter block at all still exports cleanly: its title falls
+back to the first H1, its description to `""`.
 
 ## Wikilink resolution
 

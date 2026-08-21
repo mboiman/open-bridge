@@ -6,11 +6,20 @@ A single, additive, dependency-free script that walks a Bridge instance's
 knowledge surfaces (work/ STATUS.md + deliverables, docs/, rules/,
 examples/) and emits a static OKF bundle — one markdown file per concept, a
 per-type index.md, and a root index.md carrying the OKF version. No PyYAML
-dependency: frontmatter parsing is hand-rolled, mirroring the conventions
-already used by scripts/extract-frontmatter.py (skips the
-`# yaml-language-server: $schema=...` comment prolog) and scripts/gen-board.py
-(parse_status()'s flat `key: value` scalar extraction, quote + inline-comment
-stripping).
+dependency: frontmatter parsing is hand-rolled. It keeps
+scripts/extract-frontmatter.py's leading-comment-prolog convention (skips the
+`# yaml-language-server: $schema=...` hint) and reads the same flat
+`key: value` scalars scripts/gen-board.py's parse_status() reads, but it
+deliberately diverges from that script on two points, because gen-board.py is
+lenient where YAML is not:
+
+  * quoting is resolved BEFORE inline comments, the order YAML itself uses, so
+    a `#` inside a quoted scalar stays a literal character (`"... as PR #214"`
+    keeps its issue number). On an UNQUOTED scalar a ` #` still opens a
+    comment and is still stripped.
+  * a `---` fence is only a fence at COLUMN 0, for the opening and the closing
+    one alike. A block-scalar continuation line is indented by definition, so
+    an indented `---` is content and never ends the frontmatter block.
 
 Concept mapping (source -> OKF `type`):
   work/tasks/<slug>/STATUS.md          -> task
@@ -126,6 +135,14 @@ _WIKILINK_RE = re.compile(r"\[\[([a-z][a-z0-9-]*)\]\]")
 _FRONTMATTER_KV_RE = re.compile(r"^([A-Za-z_][\w]*):\s*(.*)$")
 _YAML_LS_PROLOG_RE = re.compile(r"^#\s*yaml-language-server:")
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
+# An inline comment on an UNQUOTED scalar. The `#` must open the line or follow
+# whitespace, exactly as YAML requires: `value#nospace` is one plain scalar, and
+# `key: # note` (the hash directly after the `key:` separator, so the value is
+# empty) is a comment. Applied only after quoting has been resolved.
+_PLAIN_COMMENT_RE = re.compile(r"(?:\A|\s)#.*\Z")
+# The escapes `_yaml_quote` emits, read back. Anything else is left verbatim
+# rather than guessed at, so an unrelated backslash pair survives untouched.
+_DQ_ESCAPES = {"\\": "\\", '"': '"', "/": "/", "n": "\n", "r": "\r", "t": "\t"}
 _RESERVED_SLUGS = frozenset({"index", "log"})
 # A slug becomes a FILENAME, so it must be one path segment and nothing else.
 # Repo-derived slugs come from the filesystem and are safe by construction, but
@@ -137,14 +154,78 @@ _SAFE_SLUG_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _MEMORY_SKIP = frozenset({"MEMORY.md", "MEMORY-ARCHIVE.md", "PROVENANCE.md"})
 
 
+def _resolve_scalar(raw: str) -> tuple[str, bool]:
+    """Resolve one frontmatter value. Returns (value, was_quoted).
+
+    Quoting is resolved FIRST and the inline comment second, which is the
+    order YAML itself uses: a `#` opens a comment only outside a quoted
+    scalar. Doing it the other way round truncates `"... as PR #214"` at the
+    hash and then removes the orphaned opening quote, so the loss leaves no
+    trace for the caller to notice.
+
+    Three paths:
+
+    * double-quoted: scan to the closing `"`, honouring backslash escapes so
+      `\\"` does not close the scalar. Exactly the set ``_yaml_quote`` emits is
+      unescaped, so a value this exporter wrote survives a write/read round
+      trip; any other backslash pair is left verbatim rather than guessed at,
+      which is what keeps a Windows path (`C:\\path\\to`) intact. Everything
+      after the closing quote is the comment position and is discarded.
+    * single-quoted: scan to the closing `'`, collapsing a doubled `''` to one
+      `'` (the only escape a YAML single-quoted scalar has).
+    * plain, or a quote that is never closed: strip a trailing inline comment,
+      then apply the historic quote strip so a malformed value degrades
+      exactly as it did before.
+
+    ``was_quoted`` is load-bearing rather than informational: with quotes
+    resolved first, `title: "|"` would otherwise reach the block-scalar check
+    as a bare `|` and swallow the following frontmatter lines as its body.
+    """
+    raw = raw.rstrip()  # also disposes of a trailing \r on a CRLF source
+
+    if raw.startswith('"'):
+        out: list[str] = []
+        idx = 1
+        while idx < len(raw):
+            ch = raw[idx]
+            if ch == "\\" and idx + 1 < len(raw):
+                unescaped = _DQ_ESCAPES.get(raw[idx + 1])
+                out.append(unescaped if unescaped is not None else raw[idx : idx + 2])
+                idx += 2
+                continue
+            if ch == '"':
+                return "".join(out), True
+            out.append(ch)
+            idx += 1
+    elif raw.startswith("'"):
+        out = []
+        idx = 1
+        while idx < len(raw):
+            ch = raw[idx]
+            if ch == "'":
+                if idx + 1 < len(raw) and raw[idx + 1] == "'":
+                    out.append("'")
+                    idx += 2
+                    continue
+                return "".join(out), True
+            out.append(ch)
+            idx += 1
+
+    value = _PLAIN_COMMENT_RE.sub("", raw, count=1).strip()
+    return value.strip('"').strip("'"), False
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Split ``text`` into (frontmatter dict, body). Hand-rolled, no PyYAML.
 
-    Mirrors scripts/gen-board.py's parse_status() field extraction plus
-    scripts/extract-frontmatter.py's leading-comment-prolog skip (so a
-    `# yaml-language-server: $schema=...` hint above the `---` fence never
-    confuses detection). A file with no frontmatter block returns ({}, text)
-    with the body left completely untouched.
+    Reads the same flat `key: value` scalars as scripts/gen-board.py's
+    parse_status() and keeps scripts/extract-frontmatter.py's
+    leading-comment-prolog skip (so a `# yaml-language-server: $schema=...`
+    hint above the `---` fence never confuses detection), with two deliberate
+    divergences from gen-board.py: quoting is resolved before inline comments
+    (see ``_resolve_scalar``), and a `---` fence counts only at column 0, for
+    the opening and the closing fence alike. A file with no frontmatter block
+    returns ({}, text) with the body left completely untouched.
     """
     lines = text.splitlines(keepends=True)
     in_block = False
@@ -155,7 +236,10 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
         if not in_block:
             if _YAML_LS_PROLOG_RE.match(line.lstrip()):
                 continue
-            if line.strip() == "---":
+            # `rstrip`, never `strip`: a fence lives at column 0. Trailing
+            # whitespace (and a CRLF `\r`) is tolerated, leading indentation is
+            # not, so an indented `---` stays content.
+            if line.rstrip() == "---":
                 in_block = True
                 fm_start_idx = idx + 1
                 continue
@@ -164,7 +248,10 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
             # first non-empty, non-comment, non-fence line -> no frontmatter block
             return {}, text
         else:
-            if line.strip() == "---":
+            # Same column-0 rule as the opening fence: a block-scalar
+            # continuation line is indented by definition, so an indented
+            # `---` inside one must not close the block.
+            if line.rstrip() == "---":
                 fence_close_idx = idx
                 break
 
@@ -185,8 +272,10 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
             idx2 += 1
             continue
         key, val = m.group(1), m.group(2)
-        val = re.sub(r"\s+#.*$", "", val).strip()
-        if _BLOCK_SCALAR_RE.match(val):
+        val, was_quoted = _resolve_scalar(val)
+        # A quoted value is a string, never an indicator: `title: "|"` is the
+        # one-character string, not the head of a block scalar.
+        if not was_quoted and _BLOCK_SCALAR_RE.match(val):
             # YAML block scalar (`>-`/`|`/...) — fold/preserve the indented
             # continuation lines instead of shipping the bare indicator as
             # the literal value.
@@ -202,7 +291,6 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
                 idx2 += 1
             val = " ".join(block_lines) if folded else "\n".join(block_lines)
         else:
-            val = val.strip('"').strip("'")
             idx2 += 1
         fm[key] = val
 

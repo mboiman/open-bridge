@@ -28,14 +28,32 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         reads only its argument, never the clock.
 
     parse_frontmatter(text: str) -> tuple[dict, str]
-        Hand-rolled (NO PyYAML dependency, mirrors gen-board.py's
-        parse_status()). Skips leading `# ...` comment lines (the
+        Hand-rolled (NO PyYAML dependency). Reads the same flat
+        `key: value` scalars as gen-board.py's parse_status() and skips
+        leading `# ...` comment lines (the
         `# yaml-language-server: $schema=...` prolog convention) before the
-        first `---` fence. Reads the first `---`...`---` block as flat
-        `key: value` scalar pairs, stripping a trailing inline `# comment`
-        and surrounding quotes. Returns (frontmatter_dict, body_text).
-        A file with NO frontmatter block returns ({}, text) — the body is
-        the untouched original text.
+        first `---` fence, but diverges from that script on two points:
+
+        RESOLUTION ORDER. Quoting is resolved BEFORE inline comments, the
+        order YAML itself uses. A `#` inside a double- or single-quoted
+        scalar is a literal character (`"... as PR #214"` keeps its issue
+        number); a backslash-escaped quote does not close a double-quoted
+        scalar, and the escapes _yaml_quote emits are read back; a doubled
+        `''` inside a single-quoted scalar collapses to one `'`. On an
+        UNQUOTED scalar a ` #` (start of value, or after whitespace) still
+        opens a comment and is still stripped, so `value#nospace` stays whole
+        and `key: # note` resolves to "". A QUOTED value is never a
+        block-scalar indicator: `title: "|"` is the one-character string.
+
+        FENCE COLUMN. A `---` fence counts only at column 0, opening and
+        closing alike (trailing whitespace, and a trailing CR on a CRLF
+        source, are tolerated). A block-scalar continuation line is indented
+        by definition, so an indented `---` is content and never ends the
+        block. A file whose first non-blank line is an INDENTED `---`
+        therefore has no frontmatter.
+
+        Returns (frontmatter_dict, body_text). A file with NO frontmatter
+        block returns ({}, text): the body is the untouched original text.
 
     concept_slug(path: Path) -> str
         `STATUS.md` -> parent directory name (task/stream slug, same
@@ -332,6 +350,164 @@ def test_parse_frontmatter_no_block_returns_empty_dict_and_full_body(okf_export)
 
 
 # --------------------------------------------------------------------------
+# parse_frontmatter: quoting is resolved BEFORE comments
+# --------------------------------------------------------------------------
+
+def test_hash_inside_a_double_quoted_value_is_literal(okf_export):
+    """In YAML a `#` inside a quoted scalar is a character, not a comment.
+
+    Stripping the inline comment before resolving the quotes truncated the
+    value at the first `#`, so an issue or PR reference was silently cut off
+    and the orphaned opening quote was then removed too, leaving no trace.
+    """
+    text = '---\nheadline: "fixes in review as PR #214"\n---\n\nBody.\n'
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["headline"] == "fixes in review as PR #214"
+
+
+def test_hash_inside_a_single_quoted_value_is_literal(okf_export):
+    """Single quotes protect a `#` exactly as double quotes do."""
+    text = "---\nheadline: 'issue #99 open'\n---\n\nBody.\n"
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["headline"] == "issue #99 open"
+
+
+def test_unquoted_inline_comment_is_still_stripped(okf_export):
+    """GUARD: on an UNQUOTED scalar a ` #` really does open a comment.
+
+    This is the behaviour the quote fix must not trade away. A `#` with no
+    whitespace in front of it is part of the value, so `value#nospace` stays
+    whole.
+    """
+    text = (
+        "---\n"
+        "plain: plain value  # a real comment\n"
+        "nospace: value#nospace\n"
+        "---\n\nBody.\n"
+    )
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["plain"] == "plain value"
+    assert fm["nospace"] == "value#nospace"
+
+
+def test_quoted_block_indicator_is_not_treated_as_a_block_scalar(okf_export):
+    """GUARD: `title: "|"` is the one-character string, not a block indicator.
+
+    Resolving the quotes ahead of the block-scalar check hands a bare `|` to
+    that check, which would swallow every following frontmatter line as the
+    block body. The resolver therefore has to report whether the value WAS
+    quoted, and a quoted value is never a block indicator.
+    """
+    text = '---\ntitle: "|"\nstatus: doing\n---\n\nBody.\n'
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {"title": "|", "status": "doing"}
+    assert body.strip() == "Body."
+
+
+def test_block_indicator_with_a_trailing_comment_still_folds(okf_export):
+    """GUARD: a block indicator may legally carry a trailing comment.
+
+    `title: | # note` must still fold its indented continuation lines, which
+    proves the plain-scalar comment strip still runs ahead of the
+    block-indicator match.
+    """
+    text = (
+        "---\n"
+        "title: | # note\n"
+        "  Line one\n"
+        "  Line two\n"
+        "status: doing\n"
+        "---\n\nBody.\n"
+    )
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["title"] == "Line one\nLine two"
+    assert fm["status"] == "doing"
+
+
+def test_double_quoted_escaped_quote_is_unescaped(okf_export):
+    """A `\\"` inside a double-quoted scalar does not close it."""
+    text = '---\ntitle: "He said \\"stop\\" once"\n---\n\nBody.\n'
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["title"] == 'He said "stop" once'
+
+
+def test_single_quoted_doubled_quote_collapses(okf_export):
+    """`''` is the only escape a YAML single-quoted scalar has."""
+    text = "---\ntitle: 'it''s fine'\n---\n\nBody.\n"
+    fm, _ = okf_export.parse_frontmatter(text)
+    assert fm["title"] == "it's fine"
+
+
+def test_comment_only_value_resolves_to_empty(okf_export):
+    """`title: # just a note` has no value, it has a comment.
+
+    Storing the comment text as the value titled the concept with it. An
+    empty value lets derive_title fall through to the body H1, which is the
+    honest answer. Locked explicitly because it is a deliberate behaviour
+    change rather than a side effect.
+    """
+    text = "---\ntitle: # just a note\n---\n\n# Real Heading\n\nBody.\n"
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm["title"] == ""
+    assert okf_export.derive_title(fm, body, fallback="slug") == "Real Heading"
+
+
+# --------------------------------------------------------------------------
+# parse_frontmatter: a fence lives at column 0
+# --------------------------------------------------------------------------
+
+def test_indented_fence_inside_a_block_scalar_does_not_close_the_frontmatter(okf_export):
+    """An indented `---` is block-scalar content, never the closing fence.
+
+    Comparing `line.strip()` against `---` threw away the one piece of
+    information that distinguishes the two: a frontmatter fence is at column
+    0 by definition, a block-scalar continuation line is indented by
+    definition. The block closed early, the remaining keys were lost and four
+    frontmatter lines leaked into the body.
+    """
+    text = (
+        "---\n"
+        "title: |\n"
+        "  Heading\n"
+        "  ---\n"
+        "  Trailer\n"
+        "status: doing\n"
+        "context: acme\n"
+        "---\n"
+        "\n# Body\n\nText.\n"
+    )
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {"title": "Heading\n---\nTrailer", "status": "doing", "context": "acme"}
+    assert body == "\n# Body\n\nText.\n"
+
+
+def test_column_zero_fence_still_closes_the_block(okf_export):
+    """GUARD: the ordinary closing fence keeps working.
+
+    Tightening the closer must not tighten it into never matching, and a
+    later `---` horizontal rule in the body stays part of the body.
+    """
+    text = "---\nstatus: doing\n---\n\nIntro.\n\n---\n\nAfter the rule.\n"
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {"status": "doing"}
+    assert body == "\nIntro.\n\n---\n\nAfter the rule.\n"
+
+
+def test_indented_opening_fence_is_not_frontmatter(okf_export):
+    """An indented leading `---` is content (an indented code block).
+
+    The opener is held to the same column-0 rule as the closer: a parser
+    whose opener is looser than its closer accepts a pair of fences that are
+    not the same kind of thing. The right answer for such a file is ({},
+    text) with the body untouched.
+    """
+    text = "  ---\n  title: not frontmatter\n  ---\n\nBody.\n"
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {}
+    assert body == text
+
+
+# --------------------------------------------------------------------------
 # concept_slug
 # --------------------------------------------------------------------------
 
@@ -611,6 +787,25 @@ def test_memory_name_cannot_escape_the_output_directory(
     # nothing landed beside or above the bundle
     assert not list((tmp_path / "nested").glob("*.md"))
     assert not list(tmp_path.glob("*.md"))
+
+
+def test_unsafe_memory_name_falls_back_to_the_filename_slug(okf_export, tmp_path):
+    """A `name:` carrying a literal `#` is not a usable single path segment.
+
+    The truncating comment strip used to sanitize it by accident: `"fact #2"`
+    arrived as `fact`, which _SAFE_SLUG_RE happily accepted. With the value
+    resolved correctly the name no longer matches, so the filename-derived
+    fallback takes over. This is the one slug-affecting consequence of the
+    quoting fix and it is pinned here on purpose.
+    """
+    mem = tmp_path / "memory-hash-name"
+    _write(
+        mem / "feedback_hash_name.md",
+        '---\nname: "fact #2"\ndescription: "note #7"\n---\n\nBody.\n',
+    )
+    concept = okf_export.build_memory_concept(mem / "feedback_hash_name.md")
+    assert concept["slug"] == "hash-name"
+    assert concept["description"] == "note #7"
 
 
 def test_default_memory_dir_derives_encoded_path_under_home(okf_export, tmp_path):
@@ -1218,14 +1413,38 @@ def test_block_scalar_title_roundtrips_through_pyyaml(okf_export, hostile_root, 
     assert fm["title"] == "Line one\nLine two"
 
 
+def test_exported_description_keeps_the_issue_number(okf_export, tmp_path):
+    """End to end: a `#` in a quoted headline reaches the emitted bundle.
+
+    Measured with a real YAML parser rather than the exporter's own reader,
+    so a lenient producer cannot be validated by an equally lenient consumer.
+    """
+    root = tmp_path / "issue-number-instance"
+    _write(
+        root / "work/tasks/cart-pass/STATUS.md",
+        "---\n"
+        "status: review\n"
+        'headline: "cart fixes in review as PR #214"\n'
+        "---\n\n"
+        "# Cart Pass\n\nBody.\n",
+    )
+    out = tmp_path / "bundle-issue-number"
+    okf_export.write_bundle(root, out, "user")
+    fm = _pyyaml_frontmatter(out / "task" / "cart-pass.md")
+    assert fm["description"] == "cart fixes in review as PR #214"
+
+
 def test_rendered_value_containing_a_yaml_fence_does_not_end_the_block(okf_export):
     """A `---` inside a VALUE must not terminate the emitted frontmatter.
 
-    Asserted at the render boundary rather than through a source file: the
-    hand-rolled source parser closes its block at the first line that strips
-    to `---`, so a fenced value cannot be delivered through a fixture. What
-    this locks is the half the exporter owns — whatever value arrives, the
-    block it writes stays one parseable unit.
+    Asserted at the render boundary, which is the half the exporter owns:
+    whatever value arrives, the block it writes stays one parseable unit.
+    The source half is now covered too, by
+    test_indented_fence_inside_a_block_scalar_does_not_close_the_frontmatter.
+    That such a value could not be delivered through a fixture used to be
+    true, and it was a defect rather than a property: the parser closed its
+    block at the first line that STRIPPED to `---`, which an indented
+    block-scalar line does.
     """
     concept = {
         "okf_type": "doc",
