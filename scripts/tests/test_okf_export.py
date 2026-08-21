@@ -93,6 +93,7 @@ under test.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import sys
 import types
@@ -515,14 +516,68 @@ def test_default_memory_dir_derives_encoded_path_under_home(okf_export, tmp_path
     assert encoded.startswith("-")  # leading slash of the abs path becomes a leading dash
 
 
-def test_write_bundle_is_idempotent_on_rerun(okf_export, bridge_root, tmp_path):
+def _bundle_digest(out: Path) -> dict:
+    """{bundle-relative path: sha256 of the file's bytes} for a whole bundle."""
+    return {
+        p.relative_to(out).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+
+
+def test_write_bundle_is_byte_identical_on_rerun(okf_export, bridge_root, tmp_path):
+    """Determinism is a load-bearing contract, so compare CONTENT, not names.
+
+    The former path-only comparison passed even if every byte of every file
+    had changed between runs — it only proved the same filenames were
+    written, which is not what the contract promises.
+    """
     out = tmp_path / "bundle-idempotent"
     manifest_1 = okf_export.write_bundle(bridge_root, out, "user")
-    files_1 = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    digest_1 = _bundle_digest(out)
     manifest_2 = okf_export.write_bundle(bridge_root, out, "user")
-    files_2 = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    digest_2 = _bundle_digest(out)
     assert manifest_1 == manifest_2
-    assert files_1 == files_2
+    assert digest_1 == digest_2
+
+
+def test_module_source_has_no_wall_clock_call():
+    """No render path may read the clock, a file mtime, or git.
+
+    Any of these makes a re-export differ from the previous one even when
+    the source tree is unchanged, breaking the byte-identical guarantee
+    above. Asserted against the module source so the regression is caught at
+    the exact line someone would write it.
+    """
+    source = MODULE_PATH.read_text(encoding="utf-8")
+    for forbidden in ("datetime.now", "utcnow", "date.today", "time.time", "st_mtime", "getmtime"):
+        assert forbidden not in source, f"wall-clock/mtime call {forbidden!r} in the exporter"
+
+
+def test_exporter_imports_without_pyyaml(bridge_root, tmp_path, monkeypatch):
+    """The exporter is dependency-free; PyYAML is a TEST-only dependency.
+
+    CI pre-installs PyYAML for this suite, so a stray ``import yaml`` in the
+    exporter would pass CI and only fail for a user running the script on a
+    bare interpreter. Blocking the module makes the constraint enforceable.
+    """
+
+    class _BlockYAML:
+        def find_spec(self, fullname, path=None, target=None):
+            del path, target  # part of the finder protocol, unused here
+            if fullname == "yaml" or fullname.startswith("yaml."):
+                raise ImportError("PyYAML is deliberately unavailable to the exporter")
+            return None
+
+    monkeypatch.delitem(sys.modules, "yaml", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BlockYAML(), *sys.meta_path])
+
+    spec = importlib.util.spec_from_file_location("okf_export_no_yaml", MODULE_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    manifest = module.write_bundle(bridge_root, tmp_path / "bundle-no-yaml", "user")
+    assert manifest["concept_count"] == 7
 
 
 # --------------------------------------------------------------------------
