@@ -161,6 +161,24 @@ not:
   an indented `---` inside a `title: |` block is content, not the end of the
   frontmatter block.
 
+Both rules are about where a value or a block **ends**, and neither one raises.
+Where a source is malformed by YAML's own rules, content is dropped silently
+and the source is what has to be fixed:
+
+- A quoted scalar whose quote is never closed ends at the first stray quote.
+  `title: 'Michael's bridge'` yields `Michael`; PyYAML rejects the same line
+  outright. Double the inner apostrophe (`'Michael''s bridge'`) or switch quote
+  style.
+- An **unquoted** value whose last character is a quote loses that character:
+  `title: monitor is 12"` yields `monitor is 12`, and a `description:` ending
+  in a quoted phrase loses that phrase's closing quote. Wrap the whole value in
+  the other quote style (`description: 'a phrase like "this"'`) to keep it.
+- A frontmatter block closed by an **indented** `---` no longer ends there: the
+  parser reads on to the next `---` at column 0, so the body text in between is
+  consumed as frontmatter and never reaches the bundle. The keys still parse,
+  so nothing marks the loss. Put the closing fence at column 0; an indented one
+  used to close the block.
+
 A file with no frontmatter block at all still exports cleanly: its title falls
 back to the first H1, its description to `""`.
 
@@ -254,14 +272,40 @@ moves, and the suffix is appended to that duplicate's own slug (a second
 `index-2.md` and `log-2.md` are what you get whenever those names are
 otherwise free.
 
+The rule carries two limits. First, a bumped path is not a stable identifier
+across runs: `overview-2.md` belongs to whichever concept holds the lowest free
+claim on the day of the export, so adding a source that owns `overview-2`
+naturally moves the previous holder to `overview-3`. Key a consumer off a
+concept's `resource:` field, not off its bundle filename. Second, a slug claim
+is byte-exact and the filesystem underneath may not be. Two concepts of one
+type whose slugs differ only in letter case, or only in Unicode normalization,
+both keep their natural slug and are both written into the same type
+directory, so on a case-insensitive or normalizing filesystem (the macOS
+default) the second write lands on the first file and one concept's body is
+gone. The reserved names are byte-exact for the same reason: a source named
+`Index.md` keeps the slug `Index`, is written to `<type>/Index.md`, and is then
+overwritten by the generated `<type>/index.md`. Both shapes exit `0`, and in
+both the type index goes on listing a bullet whose target no longer holds what
+the bullet says. Within one concept type, keep source stems distinct by more
+than letter case or Unicode normalization.
+
+The per-type listing is plain markdown with no escaping of its own, so a title
+or description carrying a newline breaks its bullet across two lines and the
+overflow reads as another entry. A newline reaches a description from a
+`description: |` block scalar or from a `\n` escape inside a double-quoted
+one. The concept files themselves are unaffected: every source-derived value
+there is written as an escaped double-quoted scalar.
+
 Writes are **deterministic and idempotent**: re-running against unchanged
-input produces a byte-identical file set (concepts are sorted by
-`(type, slug)`, the output directory is cleared and rebuilt on every run, and
-nothing in the render depends on wall-clock time). That property is now an
-enforced invariant rather than something the operator has to remember: an
-`--out` inside a directory the chosen scope walks is refused outright,
-because the walk would otherwise read the previous run's own output back in
-as source material and the concept count would climb on every run.
+input produces a byte-identical file set, in a fresh interpreter too (concepts
+are sorted by `(type, slug)`, the output directory is cleared and rebuilt on
+every run, and nothing in the render depends on wall-clock time). The largest
+way to lose that property is now refused rather than merely documented: an
+`--out` inside a directory the chosen scope walks exits `1`, because the walk
+would otherwise read the previous run's own output back in as source material
+and the concept count would climb on every run. That guard is a strong default
+and not a proof: see [the `--out` rules](#cli) for the destinations it does and
+does not recognise.
 
 ## CLI
 
@@ -280,27 +324,52 @@ python3 scripts/okf-export.py --out dist/okf-bundle --generated-by human:alice
 | `--generated-by` | `okf-export/<version>` | OKF actor for `generated.by` — see [Provenance and trust](#provenance-and-trust) |
 
 Exit codes: `0` on success; `1` if `--root` does not exist or is not a
-directory, if `--out` points at an existing non-bundle directory (the
-exporter refuses to clear anything that does not look like a previous
-export), if `--out` sits inside a directory the chosen scope walks (see
-below), or if `--generated-by` is not a valid OKF actor; an unknown
-`--scope` value is rejected by `argparse` itself (`SystemExit`, exit code
-`2`) before the exporter runs.
+directory, if `--out` is `--root` or an ancestor of it, if `--out` points at
+an existing non-bundle directory (the exporter refuses to clear anything that
+does not look like a previous export), if `--out` sits inside a directory the
+chosen scope walks (see below), if `--out` overlaps the memory dir a
+`user`-scope run reads, or if `--generated-by` is not a valid OKF actor; an
+unknown `--scope` value is rejected by `argparse` itself (`SystemExit`, exit
+code `2`) before the exporter runs.
 
 **`--out` must lie outside every scanned directory.** Under `core` scope that
-means outside `docs/` and `examples/`; under `user` scope also outside
-`work/` and `rules/`, and outside the memory dir. `dist/okf-bundle` (the
-documented default) satisfies this in both scopes, and so does any other
-directory no scope walks. The refusal is raised before the walk and before
-the destination is cleared, so a mistaken `--out` costs you an error message
-and nothing else. It is checked against the same per-scope pattern list the
-walk itself globs, so adding a source pattern extends the guard automatically.
+means outside `docs/` and `examples/`; under `user` scope also outside `work/`
+and `rules/`, and outside the memory dir. The refusal is raised before the walk
+and before the destination is cleared, so a mistaken `--out` costs an error
+message and nothing else, and it is derived from the same per-scope pattern
+list the walk itself globs, so adding a source pattern extends the guard
+automatically. That derivation takes each pattern's fixed leading path, which
+makes the refusal slightly wider than the glob:
+`work/**/deliverables/*.md` yields the prefix `work`, so a `user`-scope run
+refuses all of `work/`, including subdirectories that hold no sources at all.
 
-This is a **behaviour change**: a command that pointed `--out` into `docs/`,
-`examples/`, `work/` or `rules/` used to exit `0` and quietly produce a
-corrupted bundle (each run re-ingesting the last one, so a two-concept tree
-reported 2, then 6, then 10). It now exits `1`. Move `--out` to a directory
-outside the scanned tree.
+**Point `--out` outside what *every* scope walks, not just the current one.**
+The guard knows only the scope of the run in front of it, so
+`--out rules/bundle --scope core` is accepted (core walks `docs/` and
+`examples/` only) and the next `--scope user` run then globs `rules/**/*.md`
+and ingests that bundle as `rule` concepts. `dist/okf-bundle` is outside both
+scopes and outside the memory dir, which is what makes it the documented
+default.
+
+The guard resolves the destination first, so `dist/../docs/bundle` is refused
+exactly like `docs/bundle`. It compares that resolved path against the scanned
+directories as spelled under `--root`, which leaves two spellings that reach a
+scanned directory without matching it:
+
+- a different letter case on a case-insensitive filesystem, e.g.
+  `--out DOCS/okfbundle` under `core` scope on macOS;
+- a scanned directory that is itself a symlink, e.g. a repo whose `docs/`
+  points elsewhere.
+
+Both are accepted and both then reproduce the self-ingestion in full: on a
+small fixture the concept count runs 2, then 7, then 12 across three runs with
+the sources unchanged. Neither spelling is reachable from the documented
+`dist/okf-bundle`.
+
+This is a **behaviour change** for every spelling the guard does recognise: a
+command that pointed `--out` into a directory its own scope walks used to exit
+`0` and quietly produce a corrupted bundle, each run re-ingesting the last.
+It now exits `1`. Move `--out` to a directory outside the scanned tree.
 
 ## Migrating from v0.1
 
