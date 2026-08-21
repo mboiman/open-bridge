@@ -38,12 +38,26 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         order YAML itself uses. A `#` inside a double- or single-quoted
         scalar is a literal character (`"... as PR #214"` keeps its issue
         number); a backslash-escaped quote does not close a double-quoted
-        scalar, and the escapes _yaml_quote emits are read back; a doubled
-        `''` inside a single-quoted scalar collapses to one `'`. On an
-        UNQUOTED scalar a ` #` (start of value, or after whitespace) still
-        opens a comment and is still stripped, so `value#nospace` stays whole
-        and `key: # note` resolves to "". A QUOTED value is never a
-        block-scalar indicator: `title: "|"` is the one-character string.
+        scalar, and the two-character escapes in _DQ_ESCAPES are read back
+        (every one _yaml_quote emits, plus YAML's `\\/`; a control character,
+        which _yaml_quote writes as `\\xNN`, is NOT read back and returns as
+        four literal characters); a doubled `''` inside a single-quoted
+        scalar collapses to one `'`. On an UNQUOTED scalar a ` #` (start of
+        value, or after whitespace) still opens a comment and is still
+        stripped, so `value#nospace` stays whole and `key: # note` resolves
+        to "". A QUOTED value is never a block-scalar indicator:
+        `title: "|"` is the one-character string.
+
+        WHERE A QUOTE CLOSES. A quote closes a quoted scalar only where a
+        quote may close one: with nothing behind it, or an inline comment
+        (`"a"# tight` resolves to `a`, since the value has already ended at
+        the quote). Anything else means that quote was a character inside the
+        value, and the scalar then degrades to the plain path WHOLE rather
+        than being cut there: `'Michael's bridge'` and `"He said "stop" once"`
+        keep every character. PyYAML rejects both of those lines outright, so
+        there is no conformant answer to defer to; the choice is between
+        keeping a malformed value whole and silently dropping its tail, and
+        for a deliberately tolerant parser the second is the worse failure.
 
         FENCE COLUMN. A `---` fence counts only at column 0, opening and
         closing alike (trailing whitespace, and a trailing CR on a CRLF
@@ -174,6 +188,20 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         "generated_by": str, "concepts_without_generated_at": int,
         "unresolved_wikilinks": list[str]} — the undated figure is a COUNT,
         never a list of source paths, because the manifest is printed.
+
+        INDEX ENTRIES. Every index file lists exactly as many entries as it
+        has things to list (a type index one per concept of that type, the
+        root index one per populated type directory), each on ONE line, and
+        every entry's link points inside the bundle. A type index is the only
+        generated file that interpolates source text into markdown, and both
+        fields it interpolates go through _md_inline: control characters
+        (every line break included, plus U+2028/U+2029) become spaces, and
+        `[`, `]` and `\\` are backslash-escaped. Without that, a newline in a
+        title or description splits its bullet and the overflow reads as an
+        entry the header does not count, and an unescaped `]` hands the
+        `(...)` behind it to the source as a link destination. The concept
+        FILES need none of this: every source-derived value there is written
+        through _yaml_quote.
 
         DESTINATION GUARDS, all three raising BundleDestinationError (exit 1
         via main) and all three running BEFORE discover_sources walks
@@ -531,6 +559,92 @@ def test_comment_only_value_resolves_to_empty(okf_export):
     fm, body = okf_export.parse_frontmatter(text)
     assert fm["title"] == ""
     assert okf_export.derive_title(fm, body, fallback="slug") == "Real Heading"
+
+
+# --------------------------------------------------------------------------
+# parse_frontmatter: a quote closes a scalar only where a quote may close one
+# --------------------------------------------------------------------------
+
+def test_apostrophe_inside_a_single_quoted_value_keeps_the_whole_value(okf_export):
+    """REGRESSION: `title: 'Michael's bridge'` must not truncate to `Michael`.
+
+    A scanner that accepts the first quote it meets, whatever follows it,
+    reads the apostrophe as the closing quote and discards the rest as the
+    comment position. PyYAML rejects this line outright, so there is no
+    "matches YAML" answer to hide behind: the choice is between keeping the
+    value whole and dropping its tail, and silently dropping the tail is the
+    exact failure class this parser exists to avoid. An apostrophe inside a
+    single-quoted value is an everyday shape.
+    """
+    fm, _ = okf_export.parse_frontmatter("---\ntitle: 'Michael's bridge'\n---\n\nBody.\n")
+    assert fm["title"] == "Michael's bridge"
+
+
+def test_unescaped_inner_double_quote_keeps_the_whole_value(okf_export):
+    """REGRESSION: `title: "He said "stop" once"` must not truncate to `He said `.
+
+    Same defect through the double-quoted path. The escaped form
+    (`\\"stop\\"`) is handled by the escape branch and is tested separately;
+    this is the unescaped shape a human types.
+    """
+    fm, _ = okf_export.parse_frontmatter('---\ntitle: "He said "stop" once"\n---\n\nBody.\n')
+    assert fm["title"] == 'He said "stop" once'
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # A quote closes the scalar when nothing but a comment follows it.
+        ('"well formed"', "well formed"),
+        ("'well formed'", "well formed"),
+        ('"well formed"  # trailing comment', "well formed"),
+        ("'well formed'  # trailing comment", "well formed"),
+        # No whitespace before the `#` either: the value already ended at the
+        # quote, so there is nothing for the hash to be part of. PyYAML reads
+        # this one the same way.
+        ('"well formed"# tight comment', "well formed"),
+        # A `#` INSIDE the quotes is still a literal (the fix must not trade
+        # that away to get the tail rule).
+        ('"a # b"  # c', "a # b"),
+        # Anything else after the quote means it did not close the scalar, so
+        # the value degrades to the historic plain strip and stays whole.
+        ('"He said "stop" once"', 'He said "stop" once'),
+        ("'Michael's bridge'", "Michael's bridge"),
+        ('"value" trailing junk', 'value" trailing junk'),
+        # A quote that is never closed: unchanged, the historic plain strip.
+        ('"unterminated', "unterminated"),
+        ("'unterminated", "unterminated"),
+        # Empty and quotes-only values.
+        ('""', ""),
+        ("''", ""),
+        ('"""', ""),
+        ("'''", ""),
+    ],
+)
+def test_quoted_scalar_tail_rule(okf_export, value, expected):
+    """One table for the whole rule: a closing quote is only a closing quote
+    when what follows it is empty or a comment.
+
+    Every "did not close" row is the value origin/main produced. Preserving
+    those is the point: this parser is deliberately more tolerant than YAML,
+    and a tolerance that silently shortens a value is worse than no tolerance
+    at all.
+    """
+    fm, _ = okf_export.parse_frontmatter(f"---\ntitle: {value}\n---\n\nBody.\n")
+    assert fm["title"] == expected
+
+
+def test_a_fallen_through_quote_does_not_disturb_the_following_keys(okf_export):
+    """The degrade is confined to its own line: the block still parses."""
+    text = (
+        "---\n"
+        "title: 'Michael's bridge'\n"
+        "status: doing\n"
+        "---\n\nBody.\n"
+    )
+    fm, body = okf_export.parse_frontmatter(text)
+    assert fm == {"title": "Michael's bridge", "status": "doing"}
+    assert body.strip() == "Body."
 
 
 # --------------------------------------------------------------------------
@@ -1726,6 +1840,250 @@ def test_type_index_entries_match_spec_bullet_form(okf_export, bridge_root, tmp_
     assert "—" not in (out / "doc" / "index.md").read_text(encoding="utf-8")
 
 
+# --------------------------------------------------------------------------
+# Index integrity: one entry per concept, and the entry's link is its own
+# --------------------------------------------------------------------------
+
+# An index entry, spelled out rather than matched loosely. The title and the
+# description may hold anything EXCEPT an unescaped `[`, `]` or `\`. An
+# unescaped `]` closes the link text early and hands what follows to the
+# source as a destination; an unescaped `\` in front of an escaped `]` puts
+# that `]` back; `[` is held to the same rule so an entry's link text is
+# exactly its title. `(` and `)` are unrestricted on purpose: a destination
+# can only follow an unescaped `]`, and under this class the only one on the
+# line is the `]` the renderer itself writes.
+_INDEX_ENTRY_RE = re.compile(
+    r"\A\* \[(?:[^\[\]\\]|\\.)*\]\((?P<target>[^()]*)\)(?: - (?:[^\[\]\\]|\\.)*)?\Z"
+)
+
+
+def _index_entry_lines(index_md: Path) -> list[str]:
+    """Every non-blank line of a generated index after its `N concept(s).` line.
+
+    Deliberately NOT "every line starting with `* [`": a field carrying a
+    newline splits its own bullet across two lines, and such a filter would
+    drop the overflow line and count the broken entry as intact. The point of
+    this helper is to see every line the renderer produced.
+    """
+    lines = index_md.read_text(encoding="utf-8").splitlines()
+    for pos, line in enumerate(lines):
+        if line.endswith("concept(s)."):
+            return [rest for rest in lines[pos + 1:] if rest.strip()]
+    raise AssertionError(f"{index_md} carries no `N concept(s).` line")
+
+
+@pytest.fixture
+def index_hostile_root(tmp_path: Path) -> Path:
+    """An instance whose frontmatter is hostile to the INDEX renderer.
+
+    Separate from ``hostile_root`` (which is hostile to the frontmatter
+    renderer) so a failure names which of the two surfaces broke.
+    """
+    root = tmp_path / "index-hostile-instance"
+    # Route 1, NEW in the branch that resolved quoting: `\n` inside a
+    # double-quoted scalar is unescaped into a real newline, so a SINGLE-line
+    # source field reaches the renderer multi-line.
+    _write(
+        root / "docs/innocent.md",
+        "---\n"
+        'title: "Innocent"\n'
+        'description: "real desc\\n* [Fake](https://evil.example/x) - injected bullet"\n'
+        "---\n\n"
+        "Body.\n",
+    )
+    # Route 2, PRE-EXISTING: a `title: |` block scalar is multi-line in the
+    # source itself and never needed an escape to get there.
+    _write(
+        root / "docs/block-title.md",
+        "---\n"
+        "title: |\n"
+        "  Multi one\n"
+        "  * [BlockFake](https://evil.example/b) - injected via block scalar\n"
+        'description: "Block scalar title"\n'
+        "---\n\n"
+        "Body.\n",
+    )
+    # Route 3, PRE-EXISTING: no newline needed at all. A `]` closes the link
+    # text early and the `(...)` that follows becomes a destination the source
+    # chose, so the entry count stays right while the link leaves the bundle.
+    _write(
+        root / "rules/bracket-title.md",
+        "---\n"
+        'title: "x](https://evil.example/h) [y"\n'
+        'description: "desc [link](https://evil.example/d) here"\n'
+        "---\n\n"
+        "Body.\n",
+    )
+    # Not a fourth route but a GUARD on the escape set: a backslash directly
+    # in front of the source's `]`. Escape the brackets alone and the emitted
+    # `\\` reads as a literal backslash, leaving the `]` behind it bare again,
+    # so the hijack of route 3 comes straight back. (origin/main mis-renders
+    # this same file too, for its own reason: it never unescaped `\\`, so the
+    # value reached the entry with both backslashes.)
+    _write(
+        root / "examples/backslash-title.md",
+        "---\n"
+        'title: "x\\\\](https://evil.example/z) [y"\n'
+        "---\n\n"
+        "Body.\n",
+    )
+    _write(
+        root / "work/tasks/plain-task/STATUS.md",
+        "---\nstatus: doing\nheadline: \"An ordinary headline\"\n---\n\n# Plain Task\n\nBody.\n",
+    )
+    return root
+
+
+def test_every_generated_index_lists_exactly_one_entry_per_concept(
+    okf_export, index_hostile_root, tmp_path
+):
+    """THE RULE, not a spot check: every index file the bundle contains lists
+    exactly as many entries as it has things to list, and every entry is one
+    well-formed line.
+
+    A source-derived title or description is interpolated into a markdown
+    bullet, so a newline in one fabricates an entry: the header says
+    `1 concept(s).` and the list shows two, the second able to carry any link
+    it likes. Counting only lines that look like bullets would miss the other
+    half of the same defect, an entry broken across two lines.
+    """
+    out = tmp_path / "bundle-index-integrity"
+    manifest = okf_export.write_bundle(index_hostile_root, out, "user")
+
+    type_dirs = sorted(p for p in out.iterdir() if p.is_dir())
+    assert type_dirs, "no type directories were written"
+
+    total = 0
+    for type_dir in type_dirs:
+        concepts = sorted(p.name for p in type_dir.glob("*.md") if p.name != "index.md")
+        total += len(concepts)
+        entries = _index_entry_lines(type_dir / "index.md")
+        assert len(entries) == len(concepts), (
+            f"{type_dir.name}/index.md lists {len(entries)} entr(ies) for "
+            f"{len(concepts)} concept(s): {entries}"
+        )
+        for entry in entries:
+            match = _INDEX_ENTRY_RE.match(entry)
+            assert match, f"{type_dir.name}/index.md entry is not one clean bullet: {entry!r}"
+            assert match.group("target") in concepts, (
+                f"{type_dir.name}/index.md links {match.group('target')!r}, "
+                f"which is not one of its own concepts {concepts}"
+            )
+
+    assert total == manifest["concept_count"]
+
+    root_entries = _index_entry_lines(out / "index.md")
+    assert len(root_entries) == len(type_dirs), (
+        f"root index.md lists {len(root_entries)} entr(ies) for "
+        f"{len(type_dirs)} type director(ies): {root_entries}"
+    )
+    expected_targets = {f"{d.name}/index.md" for d in type_dirs}
+    for entry in root_entries:
+        match = _INDEX_ENTRY_RE.match(entry)
+        assert match, f"root index.md entry is not one clean bullet: {entry!r}"
+        assert match.group("target") in expected_targets
+
+
+def test_a_description_newline_cannot_fabricate_an_index_entry(
+    okf_export, index_hostile_root, tmp_path
+):
+    """The NEW route, reproduced end to end.
+
+    `description: "real desc\\n* [Fake](...)"` is one line of source. The
+    fabricated bullet must end up INSIDE the innocent concept's own entry,
+    flattened, rather than as a second entry with its own external link.
+    """
+    out = tmp_path / "bundle-index-desc-newline"
+    okf_export.write_bundle(index_hostile_root, out, "user")
+    text = (out / "doc" / "index.md").read_text(encoding="utf-8")
+
+    assert "\n* [Fake]" not in text
+    assert "\n* \\[Fake\\]" not in text
+    innocent = [line for line in text.splitlines() if line.startswith("* [Innocent]")]
+    assert len(innocent) == 1
+    assert "injected bullet" in innocent[0], (
+        "the description text itself must survive, only its line break goes"
+    )
+    # The concept file keeps the real newline: _yaml_quote escapes it there,
+    # and that path was never the broken one.
+    assert "\n" in _pyyaml_frontmatter(out / "doc" / "innocent.md")["description"]
+
+
+def test_a_block_scalar_title_cannot_fabricate_an_index_entry(
+    okf_export, index_hostile_root, tmp_path
+):
+    """The PRE-EXISTING route: a `title: |` block scalar is multi-line in the
+    source, so it needed no escape to reach the renderer with a newline in it.
+    """
+    out = tmp_path / "bundle-index-block-title"
+    okf_export.write_bundle(index_hostile_root, out, "user")
+    text = (out / "doc" / "index.md").read_text(encoding="utf-8")
+
+    assert "\n* [BlockFake]" not in text
+    assert "\n* \\[BlockFake\\]" not in text
+    entry = [line for line in text.splitlines() if line.startswith("* [Multi one")]
+    assert len(entry) == 1
+    assert "injected via block scalar" in entry[0]
+    assert entry[0].endswith("(block-title.md) - Block scalar title")
+
+
+def test_an_index_title_cannot_supply_its_own_link_target(
+    okf_export, index_hostile_root, tmp_path
+):
+    """The PRE-EXISTING bracket route, which fabricates no line at all.
+
+    `title: "x](https://evil.example/h) [y"` keeps the entry count right and
+    still moves the entry's first link off the bundle, because the `]` closes
+    the link text early and the `(...)` behind it becomes the destination.
+    """
+    out = tmp_path / "bundle-index-bracket-title"
+    okf_export.write_bundle(index_hostile_root, out, "user")
+    entries = _index_entry_lines(out / "rule" / "index.md")
+
+    assert len(entries) == 1
+    match = _INDEX_ENTRY_RE.match(entries[0])
+    # The regex is the assertion: it admits no unescaped `[` or `]` inside the
+    # title or the description, so the only link the entry can form is the one
+    # the renderer wrote, and its destination is the concept's own file.
+    assert match, f"entry is not one clean bullet: {entries[0]!r}"
+    assert match.group("target") == "bracket-title.md"
+    # Escaped, not dropped: a reader still sees exactly what the source said.
+    assert "x\\](https://evil.example/h) \\[y" in entries[0]
+    assert "desc \\[link\\](https://evil.example/d) here" in entries[0]
+
+
+def test_a_backslash_before_the_bracket_does_not_defeat_the_escape(
+    okf_export, index_hostile_root, tmp_path
+):
+    """GUARD on the escape set: `\\` has to be escaped alongside the brackets.
+
+    `title: "x\\\\](...)"` carries a backslash in front of its `]`. Escape only
+    the brackets and the emitted text is `x\\\\](...)`, where the `\\\\` is a
+    literal backslash and the `]` behind it is bare, so it closes the link
+    text and the `(...)` becomes the destination. Escaping `\\` too keeps the
+    pair as `\\\\` plus `\\]`, and the entry's link stays the concept's own file.
+    """
+    out = tmp_path / "bundle-index-backslash-title"
+    okf_export.write_bundle(index_hostile_root, out, "user")
+    entries = _index_entry_lines(out / "example" / "index.md")
+
+    assert len(entries) == 1
+    match = _INDEX_ENTRY_RE.match(entries[0])
+    assert match, f"entry is not one clean bullet: {entries[0]!r}"
+    assert match.group("target") == "backslash-title.md"
+    assert entries[0].startswith("* [x\\\\\\](https://evil.example/z) \\[y]")
+
+
+def test_an_ordinary_title_and_description_reach_the_index_unchanged(
+    okf_export, bridge_root, tmp_path
+):
+    """GUARD: the flattening must be invisible to content that never needed it."""
+    out = tmp_path / "bundle-index-ordinary"
+    okf_export.write_bundle(bridge_root, out, "user")
+    entries = _index_entry_lines(out / "doc" / "index.md")
+    assert entries == ["* [Sample Doc](sample-doc.md) - Doc about acme"]
+
+
 def test_no_concept_file_is_named_index_or_log(okf_export, tmp_path):
     """REGRESSION on _RESERVED_SLUGS + dedupe_slugs (spec 2 reserved names)."""
     root = tmp_path / "reserved-instance"
@@ -1739,7 +2097,7 @@ def test_no_concept_file_is_named_index_or_log(okf_export, tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Slug uniqueness — a bumped slug must land on a name nobody else claims
+# Slug uniqueness: a bumped slug must land on a name nobody else claims
 # --------------------------------------------------------------------------
 
 def _doc(title: str, summary: str) -> str:
@@ -1801,7 +2159,7 @@ def test_natural_owner_keeps_its_slug_in_either_discovery_order(okf_export, tmp_
     """The natural owner wins whether it is discovered before or after the
     duplicate that would be bumped onto its slug.
 
-    Guards the plausible wrong fix — a SINGLE pass carrying a taken-set —
+    Guards the plausible wrong fix (a SINGLE pass carrying a taken-set),
     which happens to be right when the owner sorts first and still steals the
     slug when it sorts last.
     """
@@ -1935,7 +2293,7 @@ def test_slug_assignment_is_identical_for_two_identical_trees(okf_export, tmp_pa
 
 def test_memory_slug_collision_gets_a_free_suffix(okf_export, tmp_path):
     """Memory concepts are appended AFTER the repo concepts, so they take the
-    same bump path — and their slug comes from `name:`, not the filename."""
+    same bump path, and their slug comes from `name:`, not the filename."""
     root = tmp_path / "memory-collision-root"
     _write(root / "docs/sample-doc.md", _doc("Sample Doc", "A doc"))
     mem = tmp_path / "memory-collision"

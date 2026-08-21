@@ -16,7 +16,10 @@ lenient where YAML is not:
   * quoting is resolved BEFORE inline comments, the order YAML itself uses, so
     a `#` inside a quoted scalar stays a literal character (`"... as PR #214"`
     keeps its issue number). On an UNQUOTED scalar a ` #` still opens a
-    comment and is still stripped.
+    comment and is still stripped. A quote closes a quoted scalar only where
+    a quote may close one (nothing behind it, or a comment); anywhere else it
+    was a character in the value, and the value degrades to the plain path
+    WHOLE instead of being cut there.
   * a `---` fence is only a fence at COLUMN 0, for the opening and the closing
     one alike. A block-scalar continuation line is indented by definition, so
     an indented `---` is content and never ends the frontmatter block.
@@ -65,6 +68,16 @@ What v0.2 emits, and what it deliberately does not:
 Empty optional fields are omitted, never written as "" or []: absence
 carries meaning in OKF, so an empty value is a different claim from
 "not recorded".
+
+Every index file lists exactly as many entries as it has things to list, one
+per line. A per-type index.md is the only generated file that puts source
+text into markdown, so the title and description it lists are rendered as
+inline TEXT rather than markup: control characters (every line break
+included) become spaces, and the two bracket characters and the backslash are
+escaped. Otherwise a newline in either field splits its own bullet and the
+overflow reads as an entry the count above it does not admit, and an
+unescaped closing bracket hands the parentheses behind it to the source as a
+link destination. See _md_inline.
 
 Wikilinks (kebab-case `[[slug]]` only — bash `[[ -f ... ]]` conditionals
 never match) are resolved at export time against the bundle's own slug
@@ -152,8 +165,11 @@ _BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?\d*$")
 # `key: # note` (the hash directly after the `key:` separator, so the value is
 # empty) is a comment. Applied only after quoting has been resolved.
 _PLAIN_COMMENT_RE = re.compile(r"(?:\A|\s)#.*\Z")
-# The escapes `_yaml_quote` emits, read back. Anything else is left verbatim
-# rather than guessed at, so an unrelated backslash pair survives untouched.
+# The two-character escapes read back inside a double-quoted scalar: every one
+# `_yaml_quote` emits, plus YAML's `\/`. Anything else is left verbatim rather
+# than guessed at, so `"\d+"` keeps its backslash. Note what that does NOT
+# cover: `_yaml_quote` writes a control character as `\xNN`, which is not in
+# this table and is read back as the four literal characters.
 _DQ_ESCAPES = {"\\": "\\", '"': '"', "/": "/", "n": "\n", "r": "\r", "t": "\t"}
 _RESERVED_SLUGS = frozenset({"index", "log"})
 # A slug becomes a FILENAME, so it must be one path segment and nothing else.
@@ -164,6 +180,27 @@ _RESERVED_SLUGS = frozenset({"index", "log"})
 _SAFE_SLUG_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 # Memory-dir housekeeping files that are never concepts (index + provenance).
 _MEMORY_SKIP = frozenset({"MEMORY.md", "MEMORY-ARCHIVE.md", "PROVENANCE.md"})
+
+
+def _closes_quoted_scalar(rest: str) -> bool:
+    """True when ``rest`` is a legal tail for a quoted scalar.
+
+    ``rest`` is everything after a candidate closing quote. Only two tails
+    mean the quote really closed the value: nothing at all, or an inline
+    comment. Anything else means the quote was a character inside the value
+    and the real closing quote is elsewhere (or nowhere).
+
+    Taking the first quote whatever follows it is how `'Michael's bridge'`
+    resolved to `Michael`: the apostrophe looked like the closing quote, and
+    the rest of the value was then discarded as the comment position. No
+    whitespace is required in front of the `#`, because the value has already
+    ended at the quote and there is nothing left for the hash to be part of
+    (PyYAML reads `"a"#b` the same way). That is the opposite of the rule for
+    a PLAIN scalar, where a `#` without leading whitespace is content
+    (``_PLAIN_COMMENT_RE``).
+    """
+    rest = rest.strip()
+    return not rest or rest.startswith("#")
 
 
 def _resolve_scalar(raw: str) -> tuple[str, bool]:
@@ -178,16 +215,28 @@ def _resolve_scalar(raw: str) -> tuple[str, bool]:
     Three paths:
 
     * double-quoted: scan to the closing `"`, honouring backslash escapes so
-      `\\"` does not close the scalar. Exactly the set ``_yaml_quote`` emits is
-      unescaped, so a value this exporter wrote survives a write/read round
-      trip; any other backslash pair is left verbatim rather than guessed at,
-      which is what keeps a Windows path (`C:\\path\\to`) intact. Everything
-      after the closing quote is the comment position and is discarded.
+      `\\"` does not close the scalar. The escapes read back are the ones in
+      ``_DQ_ESCAPES``; any other backslash pair is left verbatim rather than
+      guessed at, so `"\\d+"` reaches the caller as `\\d+`. That guarantee is
+      narrower than it looks, and deliberately not sold as more: a hand-written
+      `"C:\\path\\to"` resolves to `C:\\path`, a TAB, `o`, because `\\t` IS in
+      the table. Values this exporter wrote survive a write/read round trip
+      except for control characters, which ``_yaml_quote`` writes as `\\xNN`
+      and this table does not read back.
     * single-quoted: scan to the closing `'`, collapsing a doubled `''` to one
       `'` (the only escape a YAML single-quoted scalar has).
-    * plain, or a quote that is never closed: strip a trailing inline comment,
-      then apply the historic quote strip so a malformed value degrades
-      exactly as it did before.
+    * plain, or a quote that never closes the scalar: strip a trailing inline
+      comment, then apply the historic quote strip so a malformed value
+      degrades exactly as it did before.
+
+    A quote counts as closing only where ``_closes_quoted_scalar`` says one
+    may (nothing but a comment behind it). Where it does not, the scan is
+    abandoned and the value takes the plain path WHOLE rather than being cut
+    at a quote that was really a character: `'Michael's bridge'` and
+    `"He said "stop" once"` both keep every character. PyYAML rejects both
+    lines outright, so there is no YAML-conformant answer to defer to here;
+    the choice is between keeping a malformed value whole and silently
+    dropping its tail, and this parser is tolerant on purpose.
 
     ``was_quoted`` is load-bearing rather than informational: with quotes
     resolved first, `title: "|"` would otherwise reach the block-scalar check
@@ -206,7 +255,9 @@ def _resolve_scalar(raw: str) -> tuple[str, bool]:
                 idx += 2
                 continue
             if ch == '"':
-                return "".join(out), True
+                if _closes_quoted_scalar(raw[idx + 1 :]):
+                    return "".join(out), True
+                break  # a quote mid-value: degrade to the plain path, whole
             out.append(ch)
             idx += 1
     elif raw.startswith("'"):
@@ -219,7 +270,9 @@ def _resolve_scalar(raw: str) -> tuple[str, bool]:
                     out.append("'")
                     idx += 2
                     continue
-                return "".join(out), True
+                if _closes_quoted_scalar(raw[idx + 1 :]):
+                    return "".join(out), True
+                break  # ditto: an apostrophe is not a closing quote
             out.append(ch)
             idx += 1
 
@@ -669,6 +722,65 @@ def _render_concept(concept: dict, generated_by: str | None = None) -> str:
     return "\n".join(lines) + concept["body"]
 
 
+# What a markdown index entry escapes so a source-derived scalar cannot leave
+# its own position. `\` belongs in the set for the same reason the brackets do,
+# one character further back: escape only `[` and `]`, and a title reading
+# `x\](evil)` is emitted as `x\\](evil)`, where the `\\` is a literal backslash
+# and the `]` behind it is bare again, closing the link text and handing
+# `(evil)` to the source as the destination. Measured, not reasoned.
+_MD_INLINE_ESCAPES = {"\\": "\\\\", "[": "\\[", "]": "\\]"}
+
+
+def _is_control(ch: str) -> bool:
+    """True for a character that must not reach a ONE-line markdown entry.
+
+    The C0 and C1 control ranges (every ASCII line break included), which is
+    the range ``_yaml_quote`` escapes, reached from the other side: a
+    frontmatter scalar escapes them to stay on one line, an index entry
+    replaces them to stay on one line. Widened by U+2028/U+2029: CommonMark
+    does not count those as line endings, but Unicode calls them line
+    separators and Python's own ``str.splitlines`` breaks on them, so a
+    consumer reading the index line by line would see an entry the count above
+    it does not admit.
+    """
+    return ch < "\x20" or ch == "\x7f" or "\x80" <= ch <= "\x9f" or ch in "\u2028\u2029"
+
+
+def _md_inline(value: str) -> str:
+    """Render a source-derived scalar as markdown inline TEXT for an index entry.
+
+    An index entry is `* [title](slug.md) - description` on ONE line, and both
+    interpolated fields arrive verbatim from source frontmatter. Two things
+    let a field leave its own position:
+
+    * a line break ends the entry, so everything after it reads as another
+      entry. The header then states one concept while the list shows two, and
+      the fabricated one carries whatever link it likes. A `title: |` block
+      scalar arrives multi-line from the source itself; a single-line
+      `description: "a\\n* [x](...)"` gets there too, now that a double-quoted
+      scalar's escapes are read back. Every control character becomes a space
+      and the result is stripped, so a field spans exactly one line and adds
+      no trailing whitespace of its own.
+    * an unescaped `]` closes the link text early and lets the `(...)` behind
+      it become a destination the source chose, which needs no line break at
+      all. `[`, `]` and `\\` are escaped; CommonMark renders a
+      backslash-escaped punctuation mark as the bare character, so a
+      legitimate bracket still reads as a bracket. `(` and `)` need no escape:
+      a destination can only follow an unescaped `]`, and after the escape
+      above the only unescaped `]` on the line is the one this renderer
+      writes, whose destination is the concept's own file.
+
+    That is the whole guarantee, and it is deliberately narrow: one entry per
+    concept, whose link is that concept's own file. Other inline markdown
+    inside an entry (emphasis, an autolink) still renders, exactly as it does
+    in the concept bodies, which are markdown by design. The concept FILES
+    never needed any of this: every source-derived value there goes through
+    ``_yaml_quote``.
+    """
+    one_line = "".join(" " if _is_control(ch) else ch for ch in value).strip()
+    return "".join(_MD_INLINE_ESCAPES.get(ch, ch) for ch in one_line)
+
+
 def _render_type_index(okf_type: str, concepts: list[dict]) -> str:
     """Render a per-type ``index.md`` — a reserved filename, so it carries NO
     frontmatter block (the root ``index.md`` is the sole exception, carrying
@@ -680,10 +792,15 @@ def _render_type_index(okf_type: str, concepts: list[dict]) -> str:
         "",
     ]
     # `* [Title](relative-url) - short description` is the form OKF section 8
-    # shows for an index entry.
+    # shows for an index entry. Title and description are the only
+    # source-derived values in this file, and both go through _md_inline: the
+    # count above is a claim about the list below, and an unescaped field
+    # falsifies it (see _md_inline).
     for concept in sorted(concepts, key=lambda c: c["slug"]):
-        suffix = f" - {concept['description']}" if concept["description"] else ""
-        lines.append(f"* [{concept['title']}]({concept['slug']}.md){suffix}")
+        title = _md_inline(concept["title"])
+        description = _md_inline(concept["description"])
+        suffix = f" - {description}" if description else ""
+        lines.append(f"* [{title}]({concept['slug']}.md){suffix}")
     lines.append("")
     return "\n".join(lines)
 
@@ -696,6 +813,12 @@ def _render_root_index(scope: str, concepts: list[dict], types: list[str]) -> st
     the body prose instead of the block. ``_is_bundle_dir`` keys off
     ``okf_version`` alone, so the destructive ``--out`` guard still
     recognises bundles written by earlier versions.
+
+    Nothing SOURCE-DERIVED is interpolated here, which is why no value on this
+    page goes through ``_md_inline``: ``scope`` is one of two literals
+    argparse accepts, and every entry is a concept TYPE from the closed set
+    ``concept_type_for`` returns. Route any future field that carries source
+    text through ``_md_inline`` before it reaches a line.
     """
     lines = [
         "---",

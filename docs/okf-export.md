@@ -148,7 +148,7 @@ Frontmatter parsing is hand-rolled (no PyYAML dependency). It keeps
 `scripts/extract-frontmatter.py`'s `# yaml-language-server: $schema=...`
 comment-prolog skip and reads the same flat `key: value` scalars as
 `scripts/gen-board.py`'s `parse_status()`, but it deliberately diverges from
-that script on two points, because `gen-board.py` is lenient where YAML is
+that script on three points, because `gen-board.py` is lenient where YAML is
 not:
 
 - **Quoting is resolved before inline comments**, the order YAML itself uses.
@@ -156,19 +156,25 @@ not:
   `headline: "... in review as PR #214"` keeps its issue number. On an
   *unquoted* scalar a ` #` still opens a comment and is still stripped, and
   `value#nospace` (no whitespace in front of the hash) stays whole.
+- **A quote closes a quoted scalar only where a quote may close one**: with
+  nothing behind it, or an inline comment. Anything else means that quote was
+  a character inside the value, and the value then falls back to the plain
+  path *whole* rather than being cut at it. `title: 'Michael's bridge'` yields
+  `Michael's bridge`, and `title: "He said "stop" once"` yields
+  `He said "stop" once`. PyYAML rejects both of those lines outright, so there
+  is no conformant reading to defer to; keeping a malformed value whole is the
+  lesser failure. Doubling the inner apostrophe (`'Michael''s bridge'`) or
+  switching quote style still makes the line legal YAML, which is worth doing
+  for any consumer that is not this exporter.
 - **A `---` fence counts only at column 0**, for the opening and the closing
   fence alike. A block-scalar continuation line is indented by definition, so
   an indented `---` inside a `title: |` block is content, not the end of the
   frontmatter block.
 
-Both rules are about where a value or a block **ends**, and neither one raises.
-Where a source is malformed by YAML's own rules, content is dropped silently
-and the source is what has to be fixed:
+All three rules are about where a value or a block **ends**, and none of them
+raises. Where a source is malformed by YAML's own rules, content can still be
+dropped silently and the source is what has to be fixed:
 
-- A quoted scalar whose quote is never closed ends at the first stray quote.
-  `title: 'Michael's bridge'` yields `Michael`; PyYAML rejects the same line
-  outright. Double the inner apostrophe (`'Michael''s bridge'`) or switch quote
-  style.
 - An **unquoted** value whose last character is a quote loses that character:
   `title: monitor is 12"` yields `monitor is 12`, and a `description:` ending
   in a quoted phrase loses that phrase's closing quote. Wrap the whole value in
@@ -289,12 +295,31 @@ both the type index goes on listing a bullet whose target no longer holds what
 the bullet says. Within one concept type, keep source stems distinct by more
 than letter case or Unicode normalization.
 
-The per-type listing is plain markdown with no escaping of its own, so a title
-or description carrying a newline breaks its bullet across two lines and the
-overflow reads as another entry. A newline reaches a description from a
-`description: |` block scalar or from a `\n` escape inside a double-quoted
-one. The concept files themselves are unaffected: every source-derived value
-there is written as an escaped double-quoted scalar.
+**Every index lists exactly as many entries as it has things to list**, one
+per line: a type index one entry per concept of that type, the root index one
+per populated type directory. A type index is the only generated file that
+puts source text into markdown, and the two fields it puts there (`title` and
+`description`) are rendered as inline **text**, not as markup. Every control
+character, line breaks included, becomes a space, and `[`, `]` and `\` are
+backslash-escaped, so the entry stays on its own line and its link stays
+inside the bundle. That is visible in the raw file: a title or description
+containing a bracket now shows it as `\[`, which a markdown renderer displays
+as the bare character.
+
+Without that, a value could leave its own entry two ways, and neither one
+raised: a newline broke the bullet across two lines, so the overflow read as
+an entry the count above it did not admit (a newline reaches a description
+from a `description: |` block scalar, or from a `\n` escape inside a
+double-quoted one, which the parser now reads back); and an unescaped `]`
+closed the link text early, handing the `(…)` behind it to the source as a
+link destination without needing a newline at all. A generated index could
+therefore list a fabricated entry pointing anywhere.
+
+The guarantee is deliberately narrow: one entry per concept, whose link is
+that concept's own file. Other inline markdown inside an entry (emphasis, an
+autolink) still renders, exactly as it does inside a concept body, which is
+markdown by design. The concept files need none of this: every source-derived
+value there is written as an escaped double-quoted scalar.
 
 Writes are **deterministic and idempotent**: re-running against unchanged
 input produces a byte-identical file set, in a fresh interpreter too (concepts
