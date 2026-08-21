@@ -244,11 +244,15 @@ it carries **`okf_version` alone** — the one key OKF permits in an index file
 per-type `index.md` carries no frontmatter at all, only a heading and a
 directory listing in the spec's `* [Title](slug.md) - description` form.
 `index` and
-`log` are also reserved concept slugs — a source file that would otherwise
-map to either is disambiguated with a numeric suffix (`index-2.md`,
-`log-2.md`, ...) so it never collides with the reserved filename. The same
-suffixing applies to any other same-type slug collision (e.g. two
-differently-pathed `README.md` sources).
+`log` are also reserved concept slugs. A source file that would otherwise map
+to either, and any other same-type slug collision (e.g. two differently-pathed
+`README.md` sources), is disambiguated with a numeric suffix: the **lowest one
+not already claimed** by another concept of the same type. A concept keeps its
+own natural slug wherever it can, so the colliding duplicate is the one that
+moves, and the suffix is appended to that duplicate's own slug (a second
+`overview-2` becomes `overview-2-2`, never `overview-3`). The familiar
+`index-2.md` and `log-2.md` are what you get whenever those names are
+otherwise free.
 
 Writes are **deterministic and idempotent**: re-running against unchanged
 input produces a byte-identical file set (concepts are sorted by

@@ -106,16 +106,38 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         [frontmatter["context"]] (only the ones present), else [].
         `body` is the RAW markdown body (wikilinks not yet resolved).
 
+    dedupe_slugs(concepts: list[dict]) -> None
+        Mutates concept["slug"] in place so every (okf_type, slug) is unique
+        AND never one of the reserved names ("index", "log"), which
+        write_bundle generates itself for every populated type directory.
+        A colliding concept takes the LOWEST FREE numeric suffix on its own
+        natural slug (`slug-2`, `slug-3`, ...), free meaning claimed by no
+        other concept of that type and not reserved. Two properties follow,
+        and both are asserted: a concept KEEPS its natural slug wherever it
+        can, so the duplicate is what moves and a bumped name can never land
+        on a slug another concept owns, whether that owner is discovered
+        before or after it; and the suffix is appended to the concept's own
+        slug rather than to a parsed-off stem, so a duplicate of a natural
+        `overview-2` becomes `overview-2-2` and never steals `overview-3`.
+        Deterministic: both passes walk the list in discovery order (it
+        arrives pre-sorted by source path) and try suffixes from 2 upward,
+        so the assignment depends on the input list alone.
+
     write_bundle(root, out_dir, scope, memory_dir=None, generated_by=None) -> dict
-        Orchestrates discover_sources -> build_concept (all) -> a
-        slug->relpath index -> resolve_wikilinks over every body -> writes
+        Orchestrates discover_sources -> build_concept (all) ->
+        dedupe_slugs -> a slug->relpath index -> resolve_wikilinks over every
+        body -> writes
         out_dir/<type>/<slug>.md for every populated type, writes
         out_dir/<type>/index.md per populated type directory, and writes
         out_dir/index.md (root) whose frontmatter carries
         `okf_version: "0.2"` AND NOTHING ELSE (the one key OKF permits in an
         index file). `generated_by` is run-wide, defaulting to
         default_generated_by(). Deterministic + idempotent: re-running with
-        unchanged input produces BYTE-IDENTICAL files. Returns a manifest:
+        unchanged input produces BYTE-IDENTICAL files. Two concepts of one
+        type sharing a slug raise BundleDestinationError (exit 1 via main),
+        checked after dedupe_slugs and BEFORE the output directory is
+        cleared, so the invariant fails loudly with the previous bundle
+        intact rather than silently dropping a concept. Returns a manifest:
         {"okf_version": "0.2", "scope": scope, "concept_count": int,
         "generated_by": str, "concepts_without_generated_at": int,
         "unresolved_wikilinks": list[str]} — the undated figure is a COUNT,
@@ -160,6 +182,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import re
 import sys
 import tokenize
 import types
@@ -1281,6 +1304,223 @@ def test_no_concept_file_is_named_index_or_log(okf_export, tmp_path):
     assert (out / "doc" / "index-2.md").exists()
     assert (out / "doc" / "log-2.md").exists()
     assert not _pyyaml_frontmatter(out / "doc" / "index-2.md").get("okf_version")
+
+
+# --------------------------------------------------------------------------
+# Slug uniqueness — a bumped slug must land on a name nobody else claims
+# --------------------------------------------------------------------------
+
+def _doc(title: str, summary: str) -> str:
+    return f'---\nsummary: "{summary}"\n---\n\n# {title}\n\nBody.\n'
+
+
+def _index_bullet_targets(index_md: Path) -> list[str]:
+    """Every `* [Title](target.md) - description` link target, in file order."""
+    return re.findall(r"^\* \[[^\]]*\]\(([^)]+)\)", index_md.read_text(encoding="utf-8"), re.M)
+
+
+def test_bumped_slug_never_lands_on_a_slug_another_concept_owns(okf_export, tmp_path):
+    """The reproduction from issue #152.
+
+    Two `overview.md` sources collide; the loser is bumped to `overview-2`,
+    which is the slug the third source already owns naturally. Today the two
+    concepts share one file, so the bundle holds one fewer file than the
+    manifest counts and one index bullet points at another concept's content.
+    """
+    root = tmp_path / "collision-instance"
+    _write(root / "docs/api/overview.md", _doc("API Overview", "API overview"))
+    _write(root / "docs/cli/overview.md", _doc("CLI Overview", "CLI overview"))
+    _write(root / "docs/zz/overview-2.md", _doc("ZZ Overview Two", "Already owns overview-2"))
+    out = tmp_path / "bundle-collision"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == 3
+    assert len(_concept_files(out)) == 3
+    # The natural owner of `overview-2` keeps it; the bumped duplicate takes
+    # the next FREE suffix instead of overwriting a name in use.
+    assert _pyyaml_frontmatter(out / "doc" / "overview-2.md")["title"] == "ZZ Overview Two"
+    assert _pyyaml_frontmatter(out / "doc" / "overview.md")["title"] == "API Overview"
+    assert (out / "doc" / "overview-3.md").is_file()
+    assert _pyyaml_frontmatter(out / "doc" / "overview-3.md")["title"] == "CLI Overview"
+
+
+def test_reserved_bump_never_overwrites_a_real_index_2_source(okf_export, tmp_path):
+    """The reserved half of the same hole.
+
+    `docs/index.md` is bumped off the reserved slug onto `index-2`, which is
+    the slug the real `docs/index-2.md` source owns. The concept destroyed is
+    therefore not the duplicate but an untouched, uncontested source file.
+    """
+    root = tmp_path / "reserved-collision"
+    _write(root / "docs/index.md", _doc("Index Doc", "Would collide with the reserved name"))
+    _write(root / "docs/index-2.md", _doc("Real Index Two", "A genuine index-2 source"))
+    out = tmp_path / "bundle-reserved-collision"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == 2
+    assert len(_concept_files(out)) == 2
+    assert _pyyaml_frontmatter(out / "doc" / "index-2.md")["title"] == "Real Index Two"
+    assert (out / "doc" / "index-3.md").is_file()
+    assert _pyyaml_frontmatter(out / "doc" / "index-3.md")["title"] == "Index Doc"
+
+
+@pytest.mark.parametrize("owner_dir", ["aa", "zz"])
+def test_natural_owner_keeps_its_slug_in_either_discovery_order(okf_export, tmp_path, owner_dir):
+    """The natural owner wins whether it is discovered before or after the
+    duplicate that would be bumped onto its slug.
+
+    Guards the plausible wrong fix — a SINGLE pass carrying a taken-set —
+    which happens to be right when the owner sorts first and still steals the
+    slug when it sorts last.
+    """
+    root = tmp_path / f"order-{owner_dir}"
+    _write(root / f"docs/{owner_dir}/overview-2.md", _doc("Natural Owner", "Owns overview-2"))
+    _write(root / "docs/api/overview.md", _doc("API Overview", "API overview"))
+    _write(root / "docs/cli/overview.md", _doc("CLI Overview", "CLI overview"))
+    out = tmp_path / f"bundle-order-{owner_dir}"
+    okf_export.write_bundle(root, out, "core")
+
+    assert len(_concept_files(out)) == 3
+    assert _pyyaml_frontmatter(out / "doc" / "overview-2.md")["resource"] == (
+        f"docs/{owner_dir}/overview-2.md"
+    )
+
+
+def test_bumped_stem_does_not_steal_a_later_natural_suffix(okf_export, tmp_path):
+    """The suffix is appended to the concept's OWN natural slug.
+
+    Guards a fix that parses the trailing number off `overview-2` and keeps
+    counting from it: that hands the duplicate `overview-3`, which is a slug
+    a third source owns naturally.
+    """
+    root = tmp_path / "stem-instance"
+    _write(root / "docs/a/overview-2.md", _doc("A Two", "First overview-2"))
+    _write(root / "docs/b/overview-2.md", _doc("B Two", "Second overview-2"))
+    _write(root / "docs/c/overview-3.md", _doc("C Three", "Natural overview-3"))
+    out = tmp_path / "bundle-stem"
+    okf_export.write_bundle(root, out, "core")
+
+    assert len(_concept_files(out)) == 3
+    assert _pyyaml_frontmatter(out / "doc" / "overview-2.md")["title"] == "A Two"
+    assert _pyyaml_frontmatter(out / "doc" / "overview-2-2.md")["title"] == "B Two"
+    assert _pyyaml_frontmatter(out / "doc" / "overview-3.md")["title"] == "C Three"
+
+
+def test_concept_count_equals_the_number_of_concept_files_written(okf_export, tmp_path):
+    """The failure is silent in BOTH directions, so assert both halves.
+
+    A count that outruns the file listing, and index bullets that point twice
+    at one file, are the two user-visible symptoms of a lost concept.
+    """
+    root = tmp_path / "heavy-instance"
+    _write(root / "docs/api/overview.md", _doc("API Overview", "One"))
+    _write(root / "docs/cli/overview.md", _doc("CLI Overview", "Two"))
+    _write(root / "docs/zz/overview-2.md", _doc("ZZ Overview", "Three"))
+    _write(root / "docs/index.md", _doc("Index Doc", "Four"))
+    _write(root / "docs/nested/index-2.md", _doc("Nested Index Two", "Five"))
+    _write(root / "examples/api/overview.md", _doc("Example Overview", "Six"))
+    _write(root / "examples/cli/overview.md", _doc("Example Overview Two", "Seven"))
+    out = tmp_path / "bundle-heavy"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == len(_concept_files(out))
+    targets = _index_bullet_targets(out / "doc" / "index.md")
+    assert len(targets) == len(set(targets)), f"index bullets share a target: {targets}"
+    for target in targets:
+        assert (out / "doc" / target).is_file(), f"index bullet points at a missing {target}"
+
+
+def test_duplicate_slugs_raise_before_the_output_directory_is_cleared(
+    okf_export, bridge_root, tmp_path, monkeypatch
+):
+    """Belt and braces behind dedupe_slugs, and its PLACEMENT matters.
+
+    A future regression that lets two concepts share a (type, slug) must fail
+    loudly, before the previous bundle is destroyed and before a single file
+    is written, rather than producing a quietly short bundle.
+    """
+    prior = tmp_path / "bundle-prior"
+    okf_export.write_bundle(bridge_root, prior, "core")
+    prior_digest = _bundle_digest(prior)
+    assert prior_digest
+
+    root = tmp_path / "dup-instance"
+    _write(root / "docs/api/overview.md", _doc("API Overview", "API overview"))
+    _write(root / "docs/cli/overview.md", _doc("CLI Overview", "CLI overview"))
+    monkeypatch.setattr(okf_export, "dedupe_slugs", lambda concepts: None)
+
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, prior, "core")
+    assert _bundle_digest(prior) == prior_digest, "the previous bundle was destroyed"
+
+    fresh = tmp_path / "bundle-never-created"
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, fresh, "core")
+    assert not fresh.exists(), "a partial bundle directory was left behind"
+
+
+def test_bundle_is_byte_identical_on_rerun_with_colliding_slugs(okf_export, tmp_path):
+    """The existing determinism test uses a collision-free fixture, so it
+    never exercised the bump path at all."""
+    root = tmp_path / "rerun-instance"
+    _write(root / "docs/api/overview.md", _doc("API Overview", "One"))
+    _write(root / "docs/cli/overview.md", _doc("CLI Overview", "Two"))
+    _write(root / "docs/zz/overview-2.md", _doc("ZZ Overview", "Three"))
+    _write(root / "docs/index.md", _doc("Index Doc", "Four"))
+    out = tmp_path / "bundle-rerun"
+
+    manifest_1 = okf_export.write_bundle(root, out, "core")
+    digest_1 = _bundle_digest(out)
+    manifest_2 = okf_export.write_bundle(root, out, "core")
+    digest_2 = _bundle_digest(out)
+    assert manifest_1 == manifest_2
+    assert digest_1 == digest_2
+
+
+def test_slug_assignment_is_identical_for_two_identical_trees(okf_export, tmp_path):
+    """Assignment depends on discovery order alone.
+
+    Two separately built but content-identical trees must produce the same
+    bytes, which no set or dict iteration order could guarantee.
+    """
+    files = {
+        "docs/api/overview.md": _doc("API Overview", "One"),
+        "docs/cli/overview.md": _doc("CLI Overview", "Two"),
+        "docs/zz/overview-2.md": _doc("ZZ Overview", "Three"),
+        "docs/index.md": _doc("Index Doc", "Four"),
+        "docs/log.md": _doc("Log Doc", "Five"),
+    }
+    digests = []
+    for run in ("one", "two"):
+        root = tmp_path / f"twin-{run}"
+        for relpath, content in files.items():
+            _write(root / relpath, content)
+        out = tmp_path / f"bundle-twin-{run}"
+        okf_export.write_bundle(root, out, "core")
+        digests.append(_bundle_digest(out))
+    assert digests[0] == digests[1]
+
+
+def test_memory_slug_collision_gets_a_free_suffix(okf_export, tmp_path):
+    """Memory concepts are appended AFTER the repo concepts, so they take the
+    same bump path — and their slug comes from `name:`, not the filename."""
+    root = tmp_path / "memory-collision-root"
+    _write(root / "docs/sample-doc.md", _doc("Sample Doc", "A doc"))
+    mem = tmp_path / "memory-collision"
+    _write(mem / "feedback_a.md", "---\nname: acme-thing\ndescription: First\n---\n\nA body.\n")
+    _write(mem / "feedback_b.md", "---\nname: acme-thing\ndescription: Second\n---\n\nB body.\n")
+    _write(mem / "feedback_c.md", "---\nname: acme-thing-2\ndescription: Third\n---\n\nC body.\n")
+    out = tmp_path / "bundle-memory-collision"
+    manifest = okf_export.write_bundle(root, out, "user", memory_dir=mem)
+
+    memory_files = sorted(p.name for p in (out / "memory").glob("*.md") if p.name != "index.md")
+    assert len(memory_files) == 3, memory_files
+    assert manifest["concept_count"] == len(_concept_files(out))
+    # feedback_c.md owns `acme-thing-2` naturally even though it is discovered
+    # last; the duplicate feedback_b.md is the one that moves.
+    assert _pyyaml_frontmatter(out / "memory" / "acme-thing-2.md")["resource"] == (
+        "memory/feedback_c.md"
+    )
 
 
 def test_manifest_reports_generated_by_and_undated_count(okf_export, bridge_root, tmp_path):

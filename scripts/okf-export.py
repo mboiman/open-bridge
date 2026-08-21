@@ -661,29 +661,93 @@ def _is_bundle_dir(path: Path) -> bool:
     return "okf_version" in fm
 
 
+def _slug_is_taken(taken: set[tuple[str, str]], okf_type: str, slug: str) -> bool:
+    """True when ``slug`` is unavailable for a concept of ``okf_type``.
+
+    The ONE predicate both passes of dedupe_slugs ask, so a reserved name and
+    a claimed name can never be checked asymmetrically. The reserved test is
+    deliberately type-independent: ``<type>/index.md`` is generated for every
+    populated type directory, so no type may ever hold a concept named after
+    a reserved file, and a future reserved name such as "log-2" is honoured
+    by the bump loop for free.
+    """
+    return slug in _RESERVED_SLUGS or (okf_type, slug) in taken
+
+
 def dedupe_slugs(concepts: list[dict]) -> None:
     """Ensure every concept's (okf_type, slug) is unique and never collides
-    with a reserved OKF filename — mutates ``concept["slug"]`` in place.
+    with a reserved OKF filename. Mutates ``concept["slug"]`` in place.
 
     "index" is always reserved: write_bundle generates ``<type>/index.md``
     itself, so any source concept slugged "index" would otherwise be
     silently clobbered by it. "log" is reserved for a chronological
     change-history file. Both, plus any other same-type slug collision
-    (e.g. two differently-pathed ``README.md`` sources), get a stable
-    numeric suffix (``slug-2``, ``slug-3``, ...) in discovery order
-    (concepts arrive pre-sorted by source path; a stable sort keeps that
-    order for equal keys).
+    (e.g. two differently-pathed ``README.md`` sources), take the LOWEST FREE
+    numeric suffix (``slug-2``, ``slug-3``, ...), checked against every
+    natural claim in the bundle rather than against a per-stem counter.
+
+    A concept keeps its own natural slug wherever it can; the colliding
+    duplicate is the one that moves. That rule needs TWO passes, because the
+    natural owner of a bumped name may be discovered AFTER the duplicate that
+    would otherwise be handed it (issue #152: docs/api/overview.md,
+    docs/cli/overview.md, docs/zz/overview-2.md). Pass 1 claims every natural
+    slug; only then does pass 2 compute a suffix, so a bumped name can never
+    land on a slug some other concept owns, whichever order they arrive in.
+
+    The suffix is appended to the concept's OWN natural slug, never to a
+    parsed-off stem: a duplicate of a natural "overview-2" becomes
+    "overview-2-2" rather than stealing "overview-3" from its potential
+    natural owner.
+
+    Deterministic: both passes walk ``concepts`` in discovery order (the list
+    arrives pre-sorted by source path) and each candidate suffix is tried
+    from 2 upward, so the assignment is fully determined by the input list.
+    ``taken`` is a membership set only and is never iterated, so no set
+    ordering can reach a filename.
     """
-    seen: dict[tuple[str, str], int] = {
-        (okf_type, reserved): 1
-        for okf_type in {c["okf_type"] for c in concepts}
-        for reserved in _RESERVED_SLUGS
-    }
+    taken: set[tuple[str, str]] = set()
+    pending: list[dict] = []
+
+    # Pass 1 (claim): every concept that CAN keep its natural slug does, and
+    # the rest are parked. `taken` is complete before any suffix is computed.
+    for concept in concepts:
+        okf_type, slug = concept["okf_type"], concept["slug"]
+        if _slug_is_taken(taken, okf_type, slug):
+            pending.append(concept)
+        else:
+            taken.add((okf_type, slug))
+
+    # Pass 2 (bump): the lowest free suffix on the concept's own stem.
+    for concept in pending:
+        okf_type, stem = concept["okf_type"], concept["slug"]
+        suffix = 2
+        while _slug_is_taken(taken, okf_type, f"{stem}-{suffix}"):
+            suffix += 1
+        concept["slug"] = f"{stem}-{suffix}"
+        taken.add((okf_type, concept["slug"]))
+
+
+def _assert_unique_slugs(concepts: list[dict]) -> None:
+    """Belt and braces behind dedupe_slugs: no two concepts of one type may
+    share a slug, because ``write_text`` would silently let the second win.
+
+    The failure this guards is invisible in both directions (issue #152): the
+    bundle holds one fewer file than the manifest counts, and the type index
+    grows two bullets pointing at one file. Raising ``BundleDestinationError``
+    rather than a new exception type is deliberate, so main() already turns it
+    into a clean stderr line and exit 1 instead of a traceback.
+    """
+    claimed: dict[tuple[str, str], str] = {}
     for concept in concepts:
         key = (concept["okf_type"], concept["slug"])
-        seen[key] = seen.get(key, 0) + 1
-        if seen[key] > 1:
-            concept["slug"] = f"{concept['slug']}-{seen[key]}"
+        first = claimed.get(key)
+        if first is not None:
+            raise BundleDestinationError(
+                f"refusing to write the bundle: two {key[0]} concepts both "
+                f"resolve to the slug {key[1]!r} ({first} and "
+                f"{concept['resource']}), so one would overwrite the other"
+            )
+        claimed[key] = concept["resource"]
 
 
 def write_bundle(
@@ -722,6 +786,9 @@ def write_bundle(
     if scope == "user" and memory_dir is not None:
         concepts.extend(build_memory_concept(path) for path in discover_memory(memory_dir))
     dedupe_slugs(concepts)
+    # Before the sort, before the rmtree below, and before any write: a future
+    # regression must fail with the previous bundle intact, not after it.
+    _assert_unique_slugs(concepts)
     concepts.sort(key=lambda c: (c["okf_type"], c["slug"]))
 
     # Wikilinks are memory references by convention — on a cross-type slug
