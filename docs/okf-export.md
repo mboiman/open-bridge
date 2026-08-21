@@ -278,22 +278,24 @@ moves, and the suffix is appended to that duplicate's own slug (a second
 `index-2.md` and `log-2.md` are what you get whenever those names are
 otherwise free.
 
-The rule carries two limits. First, a bumped path is not a stable identifier
-across runs: `overview-2.md` belongs to whichever concept holds the lowest free
-claim on the day of the export, so adding a source that owns `overview-2`
-naturally moves the previous holder to `overview-3`. Key a consumer off a
-concept's `resource:` field, not off its bundle filename. Second, a slug claim
-is byte-exact and the filesystem underneath may not be. Two concepts of one
-type whose slugs differ only in letter case, or only in Unicode normalization,
-both keep their natural slug and are both written into the same type
-directory, so on a case-insensitive or normalizing filesystem (the macOS
-default) the second write lands on the first file and one concept's body is
-gone. The reserved names are byte-exact for the same reason: a source named
-`Index.md` keeps the slug `Index`, is written to `<type>/Index.md`, and is then
-overwritten by the generated `<type>/index.md`. Both shapes exit `0`, and in
-both the type index goes on listing a bullet whose target no longer holds what
-the bullet says. Within one concept type, keep source stems distinct by more
-than letter case or Unicode normalization.
+A claim is measured in the FILESYSTEM's namespace rather than the byte
+string's, because a slug becomes a filename. Two slugs are one claim when they
+name one file: the comparison normalizes to NFC and case-folds, so `readme` and
+`README`, and the NFC and NFD spellings of `café`, collide and the second one
+takes a suffix. The reserved names are compared the same way, which is why a
+source named `Index.md` is written to `<type>/Index-2.md` instead of being
+destroyed by the generated `<type>/index.md` that lands after it. Only the
+comparison folds: the file keeps the concept's own slug, capitals, accents and
+normalization intact, so a case pair leaves the bundle as `readme.md` beside
+`README-2.md`. One consequence is deliberate. On a case-sensitive filesystem
+that pair would not have collided at all, and it is suffixed there too, so one
+source tree exports to one bundle on every platform.
+
+The rule carries one limit: a bumped path is not a stable identifier across
+runs. `overview-2.md` belongs to whichever concept holds the lowest free claim
+on the day of the export, so adding a source that owns `overview-2` naturally
+moves the previous holder to `overview-3`. Key a consumer off a concept's
+`resource:` field, not off its bundle filename.
 
 **Every index lists exactly as many entries as it has things to list**, one
 per line: a type index one entry per concept of that type, the root index one

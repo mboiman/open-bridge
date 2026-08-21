@@ -124,6 +124,7 @@ import argparse
 import re
 import shutil
 import sys
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
@@ -172,6 +173,41 @@ _PLAIN_COMMENT_RE = re.compile(r"(?:\A|\s)#.*\Z")
 # this table and is read back as the four literal characters.
 _DQ_ESCAPES = {"\\": "\\", '"': '"', "/": "/", "n": "\n", "r": "\r", "t": "\t"}
 _RESERVED_SLUGS = frozenset({"index", "log"})
+
+
+def _fs_identity(slug: str) -> str:
+    """The form in which two slugs name the SAME FILE.
+
+    A slug becomes a filename, so the namespace that has to stay unique is
+    the filesystem's, not the byte string's. The macOS default (APFS) and
+    NTFS compare filenames case-insensitively, and APFS additionally reads
+    the NFC and NFD spellings of one character as the same name while
+    preserving whichever bytes were written. So `readme` and `README`, and
+    the two spellings of `café`, are one file there: two byte-distinct slugs
+    pass a byte-equality check and the second write silently replaces the
+    first (issue #152, the same symptom as an exact duplicate).
+
+    NFC then case-fold covers both spellings, and is a pure function of its
+    argument: no clock, no environment, no set iteration, so nothing about
+    the exporter's determinism moves.
+
+    Only the uniqueness KEY folds. This decides WHETHER two concepts collide
+    and never what either of them is called: the emitted filename stays the
+    concept's own slug, capitals, accents and normalization intact.
+
+    The cost is deliberate. On a case-SENSITIVE filesystem `readme.md` and
+    `README.md` really are two files, and folding bumps one of them anyway.
+    That is the trade taken on purpose: a bundle exported from one tree is
+    then the same bundle everywhere, rather than one whose file set depends
+    on which machine ran the export.
+    """
+    return unicodedata.normalize("NFC", slug).casefold()
+
+
+# The reserved names in the form _slug_is_taken compares, DERIVED rather than
+# hand-written, so a future reserved name added in any spelling is folded too.
+_RESERVED_IDENTITIES = frozenset(_fs_identity(name) for name in _RESERVED_SLUGS)
+
 # A slug becomes a FILENAME, so it must be one path segment and nothing else.
 # Repo-derived slugs come from the filesystem and are safe by construction, but
 # a memory fact's `name:` is arbitrary frontmatter: `../../x` or `sub/dir` would
@@ -860,13 +896,36 @@ def _slug_is_taken(taken: set[tuple[str, str]], okf_type: str, slug: str) -> boo
     populated type directory, so no type may ever hold a concept named after
     a reserved file, and a future reserved name such as "log-2" is honoured
     by the bump loop for free.
+
+    Both halves ask about the slug's ``_fs_identity``, because availability
+    is a question about the FILE and two slugs can be one file. A byte-exact
+    reserved test is how ``docs/Index.md`` kept the slug ``Index``, was
+    written to ``<type>/Index.md``, and was then destroyed by the generated
+    ``<type>/index.md`` written after it.
     """
-    return slug in _RESERVED_SLUGS or (okf_type, slug) in taken
+    identity = _fs_identity(slug)
+    return identity in _RESERVED_IDENTITIES or (okf_type, identity) in taken
+
+
+def _claim_slug(taken: set[tuple[str, str]], okf_type: str, slug: str) -> None:
+    """Record ``slug`` as no longer available for ``okf_type``.
+
+    Paired with _slug_is_taken on purpose: a claim stored in one form and
+    asked about in another is precisely the hole this pair exists to close,
+    so the folding lives in exactly these two functions and nowhere else.
+    """
+    taken.add((okf_type, _fs_identity(slug)))
 
 
 def dedupe_slugs(concepts: list[dict]) -> None:
-    """Ensure every concept's (okf_type, slug) is unique and never collides
-    with a reserved OKF filename. Mutates ``concept["slug"]`` in place.
+    """Ensure every concept of one type names its own FILE, and never a
+    reserved OKF filename. Mutates ``concept["slug"]`` in place.
+
+    Uniqueness is measured on ``_fs_identity(slug)``, not on the slug: a
+    slug becomes a filename, and `readme`/`README`, or the NFC and NFD
+    spellings of `café`, are one file on a case-insensitive or normalizing
+    filesystem. The emitted filename is unaffected and stays the concept's
+    own slug: only the uniqueness key folds.
 
     "index" is always reserved: write_bundle generates ``<type>/index.md``
     itself, so any source concept slugged "index" would otherwise be
@@ -905,7 +964,7 @@ def dedupe_slugs(concepts: list[dict]) -> None:
         if _slug_is_taken(taken, okf_type, slug):
             pending.append(concept)
         else:
-            taken.add((okf_type, slug))
+            _claim_slug(taken, okf_type, slug)
 
     # Pass 2 (bump): the lowest free suffix on the concept's own stem.
     for concept in pending:
@@ -914,30 +973,38 @@ def dedupe_slugs(concepts: list[dict]) -> None:
         while _slug_is_taken(taken, okf_type, f"{stem}-{suffix}"):
             suffix += 1
         concept["slug"] = f"{stem}-{suffix}"
-        taken.add((okf_type, concept["slug"]))
+        _claim_slug(taken, okf_type, concept["slug"])
 
 
 def _assert_unique_slugs(concepts: list[dict]) -> None:
     """Belt and braces behind dedupe_slugs: no two concepts of one type may
-    share a slug, because ``write_text`` would silently let the second win.
+    name the same file, because ``write_text`` would silently let the second
+    win.
 
     The failure this guards is invisible in both directions (issue #152): the
     bundle holds one fewer file than the manifest counts, and the type index
     grows two bullets pointing at one file. Raising ``BundleDestinationError``
     rather than a new exception type is deliberate, so main() already turns it
     into a clean stderr line and exit 1 instead of a traceback.
+
+    Keyed on ``_fs_identity``, the same namespace dedupe_slugs assigns in. A
+    backstop that compares bytes while the filesystem compares folded names
+    would wave through exactly the collision it exists to catch, so both
+    slugs go into the message: they are not necessarily equal, they only
+    name one file.
     """
-    claimed: dict[tuple[str, str], str] = {}
+    claimed: dict[tuple[str, str], tuple[str, str]] = {}
     for concept in concepts:
-        key = (concept["okf_type"], concept["slug"])
+        key = (concept["okf_type"], _fs_identity(concept["slug"]))
         first = claimed.get(key)
         if first is not None:
             raise BundleDestinationError(
-                f"refusing to write the bundle: two {key[0]} concepts both "
-                f"resolve to the slug {key[1]!r} ({first} and "
-                f"{concept['resource']}), so one would overwrite the other"
+                f"refusing to write the bundle: {first[0]} (slug {first[1]!r}) "
+                f"and {concept['resource']} (slug {concept['slug']!r}) are both "
+                f"{key[0]} concepts naming one file, so one would overwrite "
+                "the other"
             )
-        claimed[key] = concept["resource"]
+        claimed[key] = (concept["resource"], concept["slug"])
 
 
 def write_bundle(

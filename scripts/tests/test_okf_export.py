@@ -147,21 +147,45 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         `body` is the RAW markdown body (wikilinks not yet resolved).
 
     dedupe_slugs(concepts: list[dict]) -> None
-        Mutates concept["slug"] in place so every (okf_type, slug) is unique
-        AND never one of the reserved names ("index", "log"), which
-        write_bundle generates itself for every populated type directory.
-        A colliding concept takes the LOWEST FREE numeric suffix on its own
-        natural slug (`slug-2`, `slug-3`, ...), free meaning claimed by no
-        other concept of that type and not reserved. Two properties follow,
-        and both are asserted: a concept KEEPS its natural slug wherever it
-        can, so the duplicate is what moves and a bumped name can never land
-        on a slug another concept owns, whether that owner is discovered
-        before or after it; and the suffix is appended to the concept's own
-        slug rather than to a parsed-off stem, so a duplicate of a natural
-        `overview-2` becomes `overview-2-2` and never steals `overview-3`.
+        Mutates concept["slug"] in place so no two concepts of one type name
+        the same FILE, and no concept names a reserved one ("index", "log"),
+        which write_bundle generates itself for every populated type
+        directory. A colliding concept takes the LOWEST FREE numeric suffix
+        on its own natural slug (`slug-2`, `slug-3`, ...), free meaning
+        claimed by no other concept of that type and not reserved. Two
+        properties follow, and both are asserted: a concept KEEPS its
+        natural slug wherever it can, so the duplicate is what moves and a
+        bumped name can never land on a slug another concept owns, whether
+        that owner is discovered before or after it; and the suffix is
+        appended to the concept's own slug rather than to a parsed-off stem,
+        so a duplicate of a natural `overview-2` becomes `overview-2-2` and
+        never steals `overview-3`.
+
+        THE NAMESPACE IS THE FILESYSTEM'S, not the byte string's. Both the
+        claim and the reserved test are keyed on _fs_identity(slug) =
+        unicodedata.normalize("NFC", slug).casefold(), because a slug becomes
+        a filename and `readme`/`README`, or the NFC and NFD spellings of
+        `café`, are ONE file on a case-insensitive or normalizing filesystem
+        (the macOS default). Byte-keyed, both concepts keep their natural
+        slug, the second write lands on the first file, and one body is gone
+        with the manifest still counting it; a source named `Index.md` is
+        destroyed by the generated `<type>/index.md` written after it. Only
+        the KEY folds: the emitted filename stays the concept's own slug
+        (`readme.md` + `README-2.md`), and a bumped memory slug still
+        satisfies _SAFE_SLUG_RE. On a case-SENSITIVE filesystem this bumps a
+        pair that would not have collided there, which is the deliberate
+        trade: one tree exports to one bundle on every platform.
+
         Deterministic: both passes walk the list in discovery order (it
         arrives pre-sorted by source path) and try suffixes from 2 upward,
-        so the assignment depends on the input list alone.
+        so the assignment depends on the input list alone. _fs_identity is
+        pure, so folding adds no new input to that.
+
+        NOT folded: the slug -> relpath index write_bundle builds for
+        wikilink resolution. The wikilink grammar is ASCII lowercase kebab,
+        so a folded link index could only differ from an exact one where the
+        target slug could never have been named by a link anyway, and it
+        would have to choose arbitrarily between two now-distinct files.
 
     write_bundle(root, out_dir, scope, memory_dir=None, generated_by=None) -> dict
         Orchestrates discover_sources -> build_concept (all) ->
@@ -179,7 +203,8 @@ repo already uses). scripts/okf-export.py implements this exact surface:
         so an in-process re-run cannot see a hash-ordered field at all: every
         ordering that reaches the output has to come from a sorted list or
         from the discovery-ordered concept list, never from a set.
-        Two concepts of one type sharing a slug raise
+        Two concepts of one type naming the same file (compared in the same
+        folded namespace dedupe_slugs assigns in) raise
         BundleDestinationError (exit 1 via main), checked after dedupe_slugs
         and BEFORE the output directory is cleared, so the invariant fails
         loudly with the previous bundle intact rather than silently dropping
@@ -272,6 +297,7 @@ import subprocess
 import sys
 import tokenize
 import types
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -2311,6 +2337,288 @@ def test_memory_slug_collision_gets_a_free_suffix(okf_export, tmp_path):
     assert _pyyaml_frontmatter(out / "memory" / "acme-thing-2.md")["resource"] == (
         "memory/feedback_c.md"
     )
+
+
+# --------------------------------------------------------------------------
+# Slug uniqueness is a FILESYSTEM property, not a byte-string one
+# --------------------------------------------------------------------------
+
+def _fs_name(name: str) -> str:
+    """The filesystem's own name identity, restated independently of the
+    exporter: NFC-normalized and case-folded.
+
+    Written out here rather than imported from the module under test, so
+    these tests measure the RULE (two names that are one file) instead of
+    echoing whatever the implementation happens to compute.
+    """
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _marked_doc(title: str, marker: str) -> str:
+    """A doc source whose BODY carries a marker found nowhere else.
+
+    The marker never appears in the title or the description, so it can only
+    reach the bundle through the concept file the exporter writes for this
+    source: finding it proves the body survived, and the generated indexes
+    cannot supply it by accident.
+    """
+    return f'---\nsummary: "A doc"\n---\n\n# {title}\n\n{marker}\n'
+
+
+def _assert_every_concept_reached_the_bundle(out: Path, manifest: dict, markers: list[str]) -> None:
+    """The invariant behind issue #152, stated for ANY bundle rather than for
+    one example tree.
+
+    Two halves, because a lost concept is silent in both directions.
+
+    COUNT. A populated type directory holds exactly one file per concept of
+    that type plus the one index the exporter generates for it, so the whole
+    bundle holds concept_count + one index per type directory + the root
+    index. A bundle short of that is a bundle whose manifest counts a
+    concept the filesystem no longer has.
+
+    BODY. Every marker is still somewhere in the bundle, in exactly one
+    file. The count alone passes when a GENERATED index overwrites a
+    concept, because the eaten file is still a file: only the body says
+    whether what is left is the concept or the index that landed on it.
+    """
+    type_dirs = sorted(p for p in out.iterdir() if p.is_dir())
+    files = sorted(out.rglob("*.md"))
+    expected = manifest["concept_count"] + len(type_dirs) + 1
+    assert len(files) == expected, (
+        f"bundle holds {len(files)} files, expected {expected} "
+        f"({manifest['concept_count']} concepts + {len(type_dirs)} type "
+        f"index(es) + the root index): {[p.name for p in files]}"
+    )
+    for marker in markers:
+        holders = sorted(p.name for p in files if marker in p.read_text(encoding="utf-8"))
+        assert len(holders) == 1, f"{marker} is in {holders}, expected exactly one file"
+
+
+def test_two_slugs_differing_only_in_case_both_reach_the_bundle(okf_export, tmp_path):
+    """Issue #152's symptom, reached through case instead of byte equality.
+
+    `readme` and `README` are two byte-distinct slugs and one filename on a
+    case-insensitive filesystem (the macOS default), so the second write
+    lands on the first file: the manifest counts two doc concepts and the
+    bundle holds one, exit code 0, no warning.
+    """
+    root = tmp_path / "case-instance"
+    _write(root / "docs/api/readme.md", _marked_doc("Api Readme", "MARKER_LOWER"))
+    _write(root / "docs/cli/README.md", _marked_doc("Cli Readme", "MARKER_UPPER"))
+    # A fixture that silently made ONE file would make every assertion below
+    # pass for the wrong reason, so prove the two sources exist first. They
+    # live in DIFFERENT parent directories precisely because they could not
+    # coexist in one.
+    sources = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.md"))
+    assert sources == ["docs/api/readme.md", "docs/cli/README.md"], sources
+
+    out = tmp_path / "bundle-case"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == 2
+    _assert_every_concept_reached_the_bundle(out, manifest, ["MARKER_LOWER", "MARKER_UPPER"])
+    # The EMITTED filename is the concept's own slug, never a folded key: the
+    # natural owner (discovered first) keeps its lowercase stem and the
+    # duplicate takes a suffix on its OWN stem, capitals intact. Compared
+    # against the directory listing, so this is a byte-exact name check
+    # rather than a case-insensitive existence probe.
+    assert sorted(p.name for p in (out / "doc").iterdir()) == [
+        "README-2.md",
+        "index.md",
+        "readme.md",
+    ]
+
+
+def test_two_slugs_differing_only_in_normalization_both_reach_the_bundle(okf_export, tmp_path):
+    """The same hole through Unicode normalization instead of case.
+
+    APFS preserves the bytes of a filename but compares NFC and NFD
+    spellings of one character as the same name, so two byte-distinct
+    `café.md` sources are one file in the bundle.
+    """
+    nfc = unicodedata.normalize("NFC", "café")
+    nfd = unicodedata.normalize("NFD", "café")
+    assert nfc != nfd, "the fixture needs two distinct byte spellings"
+
+    root = tmp_path / "normalization-instance"
+    _write(root / "docs/x" / f"{nfc}.md", _marked_doc("Cafe NFC", "MARKER_NFC"))
+    _write(root / "docs/y" / f"{nfd}.md", _marked_doc("Cafe NFD", "MARKER_NFD"))
+    sources = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.md"))
+    assert sources == [f"docs/x/{nfc}.md", f"docs/y/{nfd}.md"], sources
+
+    out = tmp_path / "bundle-normalization"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == 2
+    _assert_every_concept_reached_the_bundle(out, manifest, ["MARKER_NFC", "MARKER_NFD"])
+    assert sorted(p.name for p in (out / "doc").iterdir()) == sorted(
+        [f"{nfc}.md", f"{nfd}-2.md", "index.md"]
+    )
+
+
+@pytest.mark.parametrize("stem", ["Index", "INDEX", "Log", "LOG", "lOg"])
+def test_a_reserved_slug_in_another_case_is_still_reserved(okf_export, tmp_path, stem):
+    """The exporter's own generated index eats a source concept.
+
+    The reserved-name check compares bytes, so `docs/Index.md` keeps the slug
+    `Index` and is written to `doc/Index.md`. write_bundle then writes the
+    generated `doc/index.md` LAST, which is the same file on this
+    filesystem, and the source concept is gone. Parametrized over several
+    spellings on purpose: a fix keyed on the three literal trees in the
+    report would leave the fourth one live.
+    """
+    root = tmp_path / f"reserved-case-{stem}"
+    _write(root / f"docs/{stem}.md", _marked_doc(f"{stem} Doc", "UNIQUE_BODY_MARKER_A"))
+    _write(root / "docs/other.md", _marked_doc("Other Doc", "UNIQUE_BODY_MARKER_B"))
+    out = tmp_path / f"bundle-reserved-case-{stem}"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["concept_count"] == 2
+    _assert_every_concept_reached_the_bundle(
+        out, manifest, ["UNIQUE_BODY_MARKER_A", "UNIQUE_BODY_MARKER_B"]
+    )
+    # The generated index is still a generated index, and the source concept
+    # is still a concept: neither has become the other.
+    assert (out / "doc" / "index.md").read_text(encoding="utf-8").startswith("# Doc Index")
+    # And no concept file NAMES a reserved file, whatever its spelling: `log`
+    # generates nothing today, so a `Log.md` concept survives the count check
+    # by luck and would be eaten the day the change-history file lands.
+    for path in (out / "doc").iterdir():
+        if path.name == "index.md":
+            continue
+        assert _fs_name(path.stem) not in {"index", "log"}, (
+            f"concept written as {path.name}, which is a reserved bundle filename"
+        )
+
+
+def test_memory_names_differing_only_in_case_both_reach_the_bundle(okf_export, tmp_path):
+    """The memory path, whose slug comes from a fact's `name:` rather than
+    from a filename, and is therefore not safe by construction.
+
+    Also pins the property a bumped memory slug must keep: it stays a legal
+    single path segment under _SAFE_SLUG_RE, so the suffix can never be the
+    thing that lets a slug escape its type directory.
+    """
+    root = tmp_path / "memory-case-root"
+    _write(root / "docs/sample-doc.md", _marked_doc("Sample Doc", "MARKER_DOC"))
+    mem = tmp_path / "memory-case"
+    _write(mem / "feedback_a.md", "---\nname: acme-thing\n---\n\nMARKER_MEM_LOWER\n")
+    _write(mem / "feedback_b.md", "---\nname: Acme-Thing\n---\n\nMARKER_MEM_UPPER\n")
+    out = tmp_path / "bundle-memory-case"
+    manifest = okf_export.write_bundle(root, out, "user", memory_dir=mem)
+
+    assert manifest["concept_count"] == 3
+    _assert_every_concept_reached_the_bundle(
+        out, manifest, ["MARKER_DOC", "MARKER_MEM_LOWER", "MARKER_MEM_UPPER"]
+    )
+    for path in (out / "memory").iterdir():
+        if path.name == "index.md":
+            continue
+        assert okf_export._SAFE_SLUG_RE.match(path.stem), (
+            f"bumped memory slug {path.stem!r} is not a safe path segment"
+        )
+
+
+def test_the_uniqueness_guard_also_sees_a_case_only_duplicate(okf_export, tmp_path, monkeypatch):
+    """_assert_unique_slugs is the backstop behind dedupe_slugs, so it has to
+    measure the same namespace dedupe_slugs does.
+
+    A guard that compares bytes while the filesystem compares folded names
+    waves through exactly the collision it exists to catch.
+    """
+    root = tmp_path / "guard-case-instance"
+    _write(root / "docs/api/readme.md", _marked_doc("Api Readme", "MARKER_LOWER"))
+    _write(root / "docs/cli/README.md", _marked_doc("Cli Readme", "MARKER_UPPER"))
+    monkeypatch.setattr(okf_export, "dedupe_slugs", lambda concepts: None)
+
+    fresh = tmp_path / "bundle-never-created"
+    with pytest.raises(okf_export.BundleDestinationError):
+        okf_export.write_bundle(root, fresh, "core")
+    assert not fresh.exists(), "a partial bundle directory was left behind"
+
+
+def test_folding_the_uniqueness_key_does_not_fold_wikilink_resolution(okf_export, tmp_path):
+    """Deliberate limit of the fix, pinned so it is a decision and not a
+    later surprise.
+
+    The wikilink grammar is ASCII lowercase kebab (`[a-z][a-z0-9-]*`), so a
+    folded link index could only ever differ from an exact one where the
+    target slug is NOT lowercase kebab, i.e. where the link text could never
+    have named it in the first place. Folding there would invent a target
+    the author did not write, and would have to pick arbitrarily between two
+    now-distinct files. `slug_to_relpath` therefore stays byte-exact:
+    `[[readme]]` resolves to the concept whose slug IS `readme`, and reaches
+    nothing when no concept spells it that way.
+    """
+    root = tmp_path / "wikilink-case-instance"
+    _write(root / "docs/api/readme.md", _marked_doc("Api Readme", "MARKER_LOWER"))
+    _write(root / "docs/cli/README.md", _marked_doc("Cli Readme", "MARKER_UPPER"))
+    _write(root / "docs/other.md", _marked_doc("Other Doc", "See [[readme]] for more."))
+    out = tmp_path / "bundle-wikilink-case"
+    manifest = okf_export.write_bundle(root, out, "core")
+
+    assert manifest["unresolved_wikilinks"] == []
+    body = (out / "doc" / "other.md").read_text(encoding="utf-8")
+    assert "[readme](/doc/readme.md)" in body
+
+    # ... and with no exact `readme` owner in the tree, the link stays whole
+    # rather than being handed to the `README` concept.
+    upper_only = tmp_path / "wikilink-upper-only"
+    _write(upper_only / "docs/cli/README.md", _marked_doc("Cli Readme", "MARKER_UPPER"))
+    _write(upper_only / "docs/other.md", _marked_doc("Other Doc", "See [[readme]] for more."))
+    out_upper = tmp_path / "bundle-wikilink-upper"
+    manifest_upper = okf_export.write_bundle(upper_only, out_upper, "core")
+
+    assert manifest_upper["unresolved_wikilinks"] == ["readme"]
+    assert "[[readme]]" in (out_upper / "doc" / "other.md").read_text(encoding="utf-8")
+
+
+def _folded_collision_tree(root: Path) -> None:
+    """One tree carrying every folded-collision shape at once."""
+    nfc = unicodedata.normalize("NFC", "café")
+    nfd = unicodedata.normalize("NFD", "café")
+    _write(root / "docs/api/readme.md", _marked_doc("Api Readme", "MARKER_LOWER"))
+    _write(root / "docs/cli/README.md", _marked_doc("Cli Readme", "MARKER_UPPER"))
+    _write(root / "docs/zz/ReadMe.md", _marked_doc("Zz Readme", "MARKER_MIXED"))
+    _write(root / "docs/x" / f"{nfc}.md", _marked_doc("NFC", "MARKER_NFC"))
+    _write(root / "docs/y" / f"{nfd}.md", _marked_doc("NFD", "MARKER_NFD"))
+    _write(root / "docs/Index.md", _marked_doc("Index Doc", "MARKER_INDEX"))
+    _write(root / "docs/LOG.md", _marked_doc("Log Doc", "MARKER_LOG"))
+
+
+def test_folded_collision_bundle_is_byte_identical_on_rerun(okf_export, tmp_path):
+    """Determinism has to hold on the path the fix added, not only on the
+    collision-free fixture."""
+    root = tmp_path / "folded-rerun-instance"
+    _folded_collision_tree(root)
+    out = tmp_path / "bundle-folded-rerun"
+
+    manifest_1 = okf_export.write_bundle(root, out, "core")
+    digest_1 = _bundle_digest(out)
+    manifest_2 = okf_export.write_bundle(root, out, "core")
+    digest_2 = _bundle_digest(out)
+    assert manifest_1 == manifest_2
+    assert digest_1 == digest_2
+
+
+def test_folded_collision_bundle_is_identical_across_hash_seeds(tmp_path):
+    """The folded key is a set membership test, and a set is exactly where a
+    hash-ordered assignment would hide. Measured from fresh interpreters,
+    since in-process iteration order is stable for the life of one."""
+    root = tmp_path / "folded-seed-instance"
+    _folded_collision_tree(root)
+    digests = [
+        _export_in_a_fresh_process(root, tmp_path / f"bundle-folded-{seed}", "core", seed)
+        for seed in _HASH_SEEDS
+    ]
+    assert digests[0], "the export produced no files to compare"
+    for seed, digest in zip(_HASH_SEEDS[1:], digests[1:]):
+        differing = sorted(
+            name for name in set(digest) | set(digests[0])
+            if digest.get(name) != digests[0].get(name)
+        )
+        assert not differing, f"PYTHONHASHSEED={seed} produced a different bundle: {differing}"
 
 
 def test_manifest_reports_generated_by_and_undated_count(okf_export, bridge_root, tmp_path):
