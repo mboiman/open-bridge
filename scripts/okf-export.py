@@ -320,14 +320,38 @@ def build_memory_concept(path: Path) -> dict:
     }
 
 
+_YAML_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
 def _yaml_quote(value: str) -> str:
-    """Render a scalar as a double-quoted YAML string (backslash + quote escaped)."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    """Render a scalar as a double-quoted YAML string, safe on ONE line.
+
+    A double-quoted scalar is the only flow form that can carry an arbitrary
+    string, but only if everything that would end the scalar or the line is
+    escaped. Escaping just backslash and quote is not enough: a raw newline
+    folds the value into a space, or — when the continuation line happens to
+    start with ``---`` — terminates the frontmatter block outright, and a raw
+    control character makes the whole block unreadable to a real YAML parser.
+    Source frontmatter reaches this function verbatim (a ``title: |`` block
+    scalar arrives multi-line), so it must survive anything a source file
+    can hold.
+    """
+    out: list[str] = []
+    for ch in value:
+        escaped = _YAML_ESCAPES.get(ch)
+        if escaped is not None:
+            out.append(escaped)
+        elif ch < "\x20" or ch == "\x7f" or "\x80" <= ch <= "\x9f":
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 def _render_concept(concept: dict) -> str:
-    tags = ", ".join(concept["tags"])
+    # Every tag is quoted individually: an unquoted flow sequence splits a
+    # tag on its own comma and is broken outright by a `]` inside a value.
+    tags = ", ".join(_yaml_quote(tag) for tag in concept["tags"])
     header = "\n".join(
         [
             "---",

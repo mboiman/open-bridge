@@ -100,9 +100,25 @@ import types
 from pathlib import Path
 
 import pytest
+import yaml  # TEST-only dependency — never imported by the exporter itself
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = REPO_ROOT / "scripts" / "okf-export.py"
+
+
+def _pyyaml_frontmatter(path: Path) -> dict:
+    """Parse a bundle file's frontmatter block with a REAL YAML parser.
+
+    Deliberately NOT parse_frontmatter: validating a lenient producer with
+    its own lenient reader is the same procedure run twice, and lets a
+    malformed block round-trip "successfully". A real parser is what an
+    actual OKF consumer will use, so it is what conformance must be
+    measured against.
+    """
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("---\n"), f"{path} carries no frontmatter fence"
+    _, block, _ = text.split("---\n", 2)
+    return yaml.safe_load(block) or {}
 
 
 @pytest.fixture(scope="module")
@@ -578,6 +594,128 @@ def test_exporter_imports_without_pyyaml(bridge_root, tmp_path, monkeypatch):
     spec.loader.exec_module(module)
     manifest = module.write_bundle(bridge_root, tmp_path / "bundle-no-yaml", "user")
     assert manifest["concept_count"] == 7
+
+
+# --------------------------------------------------------------------------
+# YAML safety — every emitted frontmatter block must survive a REAL parser
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def hostile_root(tmp_path: Path) -> Path:
+    """A mini instance whose frontmatter values are hostile to naive quoting.
+
+    Kept separate from ``bridge_root`` on purpose: that fixture's file count
+    is asserted verbatim by the discovery tests, so growing it would couple
+    unrelated suites together.
+    """
+    root = tmp_path / "hostile-instance"
+    _write(
+        root / "docs/block-title.md",
+        "---\n"
+        "title: |\n"
+        "  Line one\n"
+        "  Line two\n"
+        'summary: "Doc whose title is a block scalar"\n'
+        "---\n\n"
+        "Body.\n",
+    )
+    _write(
+        root / "work/tasks/comma-tag/STATUS.md",
+        "---\n"
+        'status: "final, not sent"\n'
+        "context: acme\n"
+        "---\n\n"
+        "# Comma Tag\n\nBody.\n",
+    )
+    _write(
+        root / "work/tasks/bracket-tag/STATUS.md",
+        "---\n"
+        'status: "blocked [see issue 42]"\n'
+        "context: acme\n"
+        "---\n\n"
+        "# Bracket Tag\n\nBody.\n",
+    )
+    return root
+
+
+def test_render_escapes_newlines_in_quoted_scalars(okf_export):
+    """A multi-line scalar must render on ONE physical line, escaped.
+
+    Today it is emitted verbatim, so the value silently folds (newline ->
+    space) or, if a line happens to start with `---` or hold a control
+    character, produces frontmatter no real parser can read at all.
+    """
+    quoted = okf_export._yaml_quote("Line one\nLine two")
+    assert "\n" not in quoted
+    assert quoted == '"Line one\\nLine two"'
+    assert yaml.safe_load(f"title: {quoted}")["title"] == "Line one\nLine two"
+
+
+def test_yaml_quote_escapes_tabs_and_control_characters(okf_export):
+    value = "Head\tTabbed\x01ctrl\rreturn"
+    quoted = okf_export._yaml_quote(value)
+    assert yaml.safe_load(f"title: {quoted}")["title"] == value
+
+
+def test_block_scalar_title_roundtrips_through_pyyaml(okf_export, hostile_root, tmp_path):
+    """Both lines of a `title: |` block scalar survive the export."""
+    out = tmp_path / "bundle-hostile-title"
+    okf_export.write_bundle(hostile_root, out, "user")
+    fm = _pyyaml_frontmatter(out / "doc" / "block-title.md")
+    assert fm["title"] == "Line one\nLine two"
+
+
+def test_rendered_value_containing_a_yaml_fence_does_not_end_the_block(okf_export):
+    """A `---` inside a VALUE must not terminate the emitted frontmatter.
+
+    Asserted at the render boundary rather than through a source file: the
+    hand-rolled source parser closes its block at the first line that strips
+    to `---`, so a fenced value cannot be delivered through a fixture. What
+    this locks is the half the exporter owns — whatever value arrives, the
+    block it writes stays one parseable unit.
+    """
+    concept = {
+        "okf_type": "doc",
+        "title": "Heading\n---\nTrailer",
+        "description": "",
+        "resource": "docs/x.md",
+        "timestamp": "",
+        "tags": [],
+        "body": "Body.\n",
+    }
+    rendered = okf_export._render_concept(concept)
+    _, block, body = rendered.split("---\n", 2)
+    assert yaml.safe_load(block)["title"] == "Heading\n---\nTrailer"
+    assert body == "Body.\n"
+
+
+def test_tag_containing_comma_does_not_split_into_two_tags(okf_export, hostile_root, tmp_path):
+    """`final, not sent` is ONE tag, not two."""
+    out = tmp_path / "bundle-hostile-comma"
+    okf_export.write_bundle(hostile_root, out, "user")
+    tags = _pyyaml_frontmatter(out / "task" / "comma-tag.md")["tags"]
+    assert "final, not sent" in tags
+    assert len(tags) == 2  # the status value plus the context value, never three
+
+
+def test_tag_containing_bracket_does_not_corrupt_the_list(okf_export, hostile_root, tmp_path):
+    """A `]` inside a tag must not close the flow sequence early."""
+    out = tmp_path / "bundle-hostile-bracket"
+    okf_export.write_bundle(hostile_root, out, "user")
+    tags = _pyyaml_frontmatter(out / "task" / "bracket-tag.md")["tags"]
+    assert "blocked [see issue 42]" in tags
+
+
+def test_every_emitted_concept_frontmatter_parses_with_pyyaml(okf_export, hostile_root, tmp_path):
+    """OKF conformance clause 1, swept over a whole hostile bundle."""
+    out = tmp_path / "bundle-hostile-sweep"
+    okf_export.write_bundle(hostile_root, out, "user")
+    concepts = [p for p in out.rglob("*.md") if p.name != "index.md"]
+    assert concepts, "fixture produced no concept files"
+    for path in concepts:
+        fm = _pyyaml_frontmatter(path)
+        assert isinstance(fm, dict), path
+        assert fm.get("type"), f"{path} has no non-empty type"  # clause 2
 
 
 # --------------------------------------------------------------------------
