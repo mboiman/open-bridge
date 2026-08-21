@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Pytest suite for scripts/okf-export.py (the Tier 1 OKF v0.1 exporter).
+"""Pytest suite for scripts/okf-export.py (the Tier 1 OKF v0.2 exporter).
 
 CONTRACT — this file is the authoritative spec for the exporter's public
 surface (read against scripts/extract-frontmatter.py and
 scripts/gen-board.py for the existing hand-rolled-parsing conventions this
 repo already uses). scripts/okf-export.py implements this exact surface:
 
-    OKF_VERSION: str                                            = "0.1"
+    OKF_VERSION: str                                            = "0.2"
+    EXPORTER_VERSION: str                                       = "1.0"
+        The exporter's OWN version, deliberately a separate constant from
+        the spec version so the two can never drift into each other.
+
+    default_generated_by() -> str
+        f"okf-export/{EXPORTER_VERSION}". Names the transformation that
+        produced the bundle document, NEVER the author of the underlying
+        knowledge. Must not read git, $USER, or any environment.
+
+    normalize_timestamp(value: str) -> str | None
+        Two accepted shapes, everything else -> None:
+        a full `YYYY-MM-DD` calendar date -> widened to `<date>T00:00:00Z`;
+        an ISO datetime that already carries an explicit offset -> verbatim.
+        None for a partial date, the literal `YYYY-MM-DD` placeholder, a
+        calendar-impossible date, a naive datetime, free text and "". The
+        strict regex gate runs BEFORE date.fromisoformat, which on Python
+        3.11+ would otherwise accept `20260702` and `2026-W27-1`. Pure:
+        reads only its argument, never the clock.
 
     parse_frontmatter(text: str) -> tuple[dict, str]
         Hand-rolled (NO PyYAML dependency, mirrors gen-board.py's
@@ -61,30 +79,58 @@ repo already uses). scripts/okf-export.py implements this exact surface:
 
     build_concept(path: Path, root: Path) -> dict
         {"slug": str, "okf_type": str, "title": str, "description": str,
-         "timestamp": str, "tags": list[str], "body": str}
-        `timestamp` <- frontmatter.get("last_updated") or
-        frontmatter.get("created") or "". `tags` <- [frontmatter["status"]]
-        + [frontmatter["context"]] (only the ones present), else [].
+         "resource": str, "generated_at": str | None,
+         "bridge_status": str | None, "tags": list[str], "body": str}
+        `generated_at` <- normalize_timestamp(frontmatter["last_updated"] or
+        frontmatter["created"] or ""). `bridge_status` <-
+        frontmatter["status"] or None — a Bridge WORKFLOW state, never OKF's
+        own `status`. `tags` <- [frontmatter["status"]] +
+        [frontmatter["context"]] (only the ones present), else [].
         `body` is the RAW markdown body (wikilinks not yet resolved).
 
-    write_bundle(root: Path, out_dir: Path, scope: str) -> dict
+    write_bundle(root, out_dir, scope, memory_dir=None, generated_by=None) -> dict
         Orchestrates discover_sources -> build_concept (all) -> a
         slug->relpath index -> resolve_wikilinks over every body -> writes
-        out_dir/<type>/<slug>.md (OKF frontmatter type/title/description/
-        timestamp/tags + resolved body) for every populated type, writes
+        out_dir/<type>/<slug>.md for every populated type, writes
         out_dir/<type>/index.md per populated type directory, and writes
         out_dir/index.md (root) whose frontmatter carries
-        `okf_version: "0.1"`. Deterministic + idempotent: re-running with
-        unchanged input produces byte-identical file sets. Returns a
-        manifest: {"okf_version": "0.1", "scope": scope,
-        "concept_count": int, "unresolved_wikilinks": list[str]}.
+        `okf_version: "0.2"` AND NOTHING ELSE (the one key OKF permits in an
+        index file). `generated_by` is run-wide, defaulting to
+        default_generated_by(). Deterministic + idempotent: re-running with
+        unchanged input produces BYTE-IDENTICAL files. Returns a manifest:
+        {"okf_version": "0.2", "scope": scope, "concept_count": int,
+        "generated_by": str, "concepts_without_generated_at": int,
+        "unresolved_wikilinks": list[str]} — the undated figure is a COUNT,
+        never a list of source paths, because the manifest is printed.
+
+    Emitted concept frontmatter, in order, empty fields OMITTED:
+        type, title, description?, resource, generated { by, at? },
+        bridge_status?, tags?
+
+    NEVER EMITTED, and each an explicit decision rather than an oversight:
+        timestamp    superseded by generated.at in v0.2; not dual-emitted,
+                     because the spec's legacy fallback applies only when
+                     `generated` is absent, which it never is.
+        status       OKF `status` is document readiness; a Bridge status is
+                     work state, and `draft` is a homograph across the two.
+        verified     nothing in a Bridge instance is a verification event,
+                     and trust tiers are derived purely from this field.
+        sources      `related:` is see-also, not derived-from; a fabricated
+                     entry manufactures a lineage edge consumers walk.
+        stale_after  a consumer GATE; no Bridge field says when a document
+                     stops being true. If ever adopted it is an absolute ISO
+                     instant with an offset, never a bare date, never a TTL.
 
     main(argv: list[str] | None = None) -> int
         argparse CLI: --root (default "."), --out (required), --scope
         {"user","core"} (default "user"; invalid choice -> argparse
-        SystemExit). Non-existent/non-dir --root -> prints to stderr,
-        returns a non-zero exit code (no traceback). On success prints a
-        one-line summary and returns 0.
+        SystemExit), --memory-dir, --generated-by ACTOR. A --generated-by
+        value that is not an OKF actor (`<producer>/<version>`, `human:<id>`
+        or `process:<id>`) -> stderr + exit 1, no bundle written. A `human:`
+        actor with --scope core -> stderr WARNING, still exits 0.
+        Non-existent/non-dir --root -> prints to stderr, returns a non-zero
+        exit code (no traceback). On success prints a one-line summary and
+        returns 0.
 
 Hermetic: every test builds its own synthetic mini-instance under tmp_path
 (generic names only — "acme", "sample-task" — never real repo/customer
@@ -428,7 +474,8 @@ def test_build_concept_task_status_maps_headline_status_context_and_timestamp(ok
     assert c["okf_type"] == "task"
     assert c["title"] == "Sample Task"
     assert c["description"] == "Kickoff automation for Acme"
-    assert c["timestamp"] == "2026-01-05"
+    assert c["generated_at"] == "2026-01-05T00:00:00Z"
+    assert c["bridge_status"] == "doing"
     assert "doing" in c["tags"] and "acme" in c["tags"]
 
 
@@ -437,7 +484,8 @@ def test_build_concept_doc_uses_summary_field_and_h1_title(okf_export, bridge_ro
     assert c["okf_type"] == "doc"
     assert c["title"] == "Sample Doc"
     assert c["description"] == "Doc about acme"
-    assert c["timestamp"] == "2026-01-03"
+    assert c["generated_at"] == "2026-01-03T00:00:00Z"
+    assert c["bridge_status"] is None
     assert c["tags"] == []
 
 
@@ -446,7 +494,7 @@ def test_build_concept_rule_without_frontmatter_falls_back_to_h1_and_empty_field
     assert c["okf_type"] == "rule"
     assert c["title"] == "Sample Rule"
     assert c["description"] == ""
-    assert c["timestamp"] == ""
+    assert c["generated_at"] is None
     assert c["tags"] == []
 
 
@@ -457,7 +505,7 @@ def test_build_concept_rule_without_frontmatter_falls_back_to_h1_and_empty_field
 def test_write_bundle_user_scope_manifest_counts_and_version(okf_export, bridge_root, tmp_path):
     out = tmp_path / "bundle-user"
     manifest = okf_export.write_bundle(bridge_root, out, "user")
-    assert manifest["okf_version"] == "0.1"
+    assert manifest["okf_version"] == "0.2"
     assert manifest["scope"] == "user"
     assert manifest["concept_count"] == 7
     assert "missing-thing" in manifest["unresolved_wikilinks"]
@@ -467,7 +515,7 @@ def test_write_bundle_root_index_declares_okf_version(okf_export, bridge_root, t
     out = tmp_path / "bundle-root-index"
     okf_export.write_bundle(bridge_root, out, "user")
     fm, _ = okf_export.parse_frontmatter((out / "index.md").read_text(encoding="utf-8"))
-    assert fm.get("okf_version") == "0.1"
+    assert fm.get("okf_version") == "0.2"
 
 
 def test_write_bundle_creates_per_type_index_files(okf_export, bridge_root, tmp_path):
@@ -594,6 +642,347 @@ def test_exporter_imports_without_pyyaml(bridge_root, tmp_path, monkeypatch):
     spec.loader.exec_module(module)
     manifest = module.write_bundle(bridge_root, tmp_path / "bundle-no-yaml", "user")
     assert manifest["concept_count"] == 7
+
+
+# --------------------------------------------------------------------------
+# OKF v0.2 — normalize_timestamp
+# --------------------------------------------------------------------------
+
+def test_normalize_timestamp_widens_bare_date_to_midnight_utc(okf_export):
+    assert okf_export.normalize_timestamp("2026-07-02") == "2026-07-02T00:00:00Z"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-08-04T15:50:53Z", "2026-08-04T15:50:53+02:00", "2026-08-04T15:50:53-05:00"],
+)
+def test_normalize_timestamp_passes_through_offset_bearing_datetime(okf_export, value):
+    """An instant that already carries an explicit offset is never rewritten."""
+    assert okf_export.normalize_timestamp(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "YYYY-MM-DD",              # the literal placeholder work/templates/STATUS.md seeds
+        "2026-03",                 # partial: would require inventing one day out of 31
+        "2026-02-30",              # calendar-impossible
+        "2026-08-04T15:50:53",     # naive: no offset, so not a knowable instant
+        "sometime in March",
+        "",
+    ],
+)
+def test_normalize_timestamp_returns_none_for_unprovable_values(okf_export, value):
+    """Refuse rather than guess — the field is simply omitted downstream."""
+    assert okf_export.normalize_timestamp(value) is None
+
+
+@pytest.mark.parametrize("value", ["20260702", "2026-W27-1"])
+def test_normalize_timestamp_rejects_compact_and_week_forms(okf_export, value):
+    """The strict regex gate must run BEFORE date.fromisoformat.
+
+    Python 3.11+ accepts both of these, so without the gate they would be
+    silently widened into an instant the source never stated.
+    """
+    assert okf_export.normalize_timestamp(value) is None
+
+
+# --------------------------------------------------------------------------
+# OKF v0.2 — generated / trust / lifecycle fields
+# --------------------------------------------------------------------------
+
+CORE_SCOPE_KEY_ALLOWLIST = {
+    "type", "title", "description", "resource", "generated", "bridge_status", "tags",
+}
+
+
+def _concept_files(out: Path) -> list[Path]:
+    return [p for p in out.rglob("*.md") if p.name != "index.md"]
+
+
+def _trust_tier(fm: dict) -> str:
+    """OKF section 5.3's tier rule, implemented independently of the exporter."""
+    verified = fm.get("verified")
+    if not verified:
+        return "unverified"
+    entries = verified if isinstance(verified, list) else [verified]
+    actors = [str(e.get("by", "")) for e in entries]
+    return "human-reviewed" if any(a.startswith("human:") for a in actors) else "machine-confirmed"
+
+
+def test_concept_emits_generated_flow_mapping_with_by(okf_export, bridge_root, tmp_path):
+    """`by` is the only REQUIRED key inside `generated` (spec 5.2)."""
+    out = tmp_path / "bundle-generated"
+    okf_export.write_bundle(bridge_root, out, "user")
+    for path in _concept_files(out):
+        generated = _pyyaml_frontmatter(path).get("generated")
+        assert isinstance(generated, dict), path
+        assert generated.get("by") == f"okf-export/{okf_export.EXPORTER_VERSION}", path
+
+
+def test_generated_at_present_for_dated_source_and_absent_for_undated(okf_export, bridge_root, tmp_path):
+    out = tmp_path / "bundle-generated-at"
+    okf_export.write_bundle(bridge_root, out, "user")
+    # Asserted on the emitted TEXT: an unquoted ISO instant is what the spec's
+    # own examples show, and PyYAML (YAML 1.1) resolves it to a native
+    # datetime, so a value comparison would test the parser, not the output.
+    assert "at: 2026-01-05T00:00:00Z" in (out / "task" / "sample-task.md").read_text(encoding="utf-8")
+    assert "at" in _pyyaml_frontmatter(out / "task" / "sample-task.md")["generated"]
+    undated = _pyyaml_frontmatter(out / "rule" / "sample-rule.md")["generated"]
+    assert "at" not in undated
+
+
+def test_generated_at_omitted_when_source_date_unparseable(okf_export, tmp_path):
+    root = tmp_path / "partial-date-instance"
+    _write(root / "docs/partial.md", "---\ncreated: 2026-03\n---\n\n# Partial\n\nBody.\n")
+    out = tmp_path / "bundle-partial"
+    okf_export.write_bundle(root, out, "core")
+    fm = _pyyaml_frontmatter(out / "doc" / "partial.md")
+    assert "at" not in fm["generated"]
+    assert "2026-03" not in (out / "doc" / "partial.md").read_text(encoding="utf-8").split("---")[1]
+
+
+def test_no_timestamp_key_emitted_for_any_concept(okf_export, bridge_root, tmp_path):
+    """v0.2 clean break: `timestamp` is superseded by `generated.at`."""
+    out = tmp_path / "bundle-no-timestamp"
+    okf_export.write_bundle(bridge_root, out, "user")
+    for path in _concept_files(out):
+        assert "timestamp" not in _pyyaml_frontmatter(path), path
+
+
+def test_no_concept_emits_okf_status_key(okf_export, bridge_root, tmp_path):
+    """The homograph guard.
+
+    OKF `status` is document readiness (draft|stable|deprecated); a Bridge
+    `status` is WORK state (backlog|doing|review|done). Mapping one onto the
+    other, even behind an enum whitelist, would turn a Bridge task in draft
+    state into the OKF claim that the DOCUMENT is unreviewed and possibly
+    incomplete. Absent `status` already means `stable`, which is the true
+    claim about an exported write-up.
+    """
+    out = tmp_path / "bundle-no-status"
+    okf_export.write_bundle(bridge_root, out, "user")
+    for path in _concept_files(out):
+        assert "status" not in _pyyaml_frontmatter(path), path
+
+
+def test_bridge_status_is_namespaced_and_preserves_its_value(okf_export, hostile_root, tmp_path):
+    out = tmp_path / "bundle-bridge-status"
+    okf_export.write_bundle(hostile_root, out, "user")
+    assert _pyyaml_frontmatter(out / "task" / "comma-tag.md")["bridge_status"] == "final, not sent"
+
+
+def test_bridge_status_value_still_appears_in_tags(okf_export, bridge_root, tmp_path):
+    """REGRESSION — the v0.1 tags derivation is untouched by the migration."""
+    out = tmp_path / "bundle-tags-regression"
+    okf_export.write_bundle(bridge_root, out, "user")
+    tags = _pyyaml_frontmatter(out / "task" / "sample-task.md")["tags"]
+    assert "doing" in tags and "acme" in tags
+
+
+@pytest.mark.parametrize("field", ["verified", "sources", "stale_after", "usage_window"])
+def test_no_concept_emits_a_fabricated_provenance_or_trust_field(okf_export, bridge_root, tmp_path, field):
+    """Nothing in a Bridge instance honestly supplies any of these.
+
+    `verified` is the costliest to fake: spec 5.3 derives trust tiers purely
+    from it, so a synthetic entry silently promotes every concept in the
+    bundle out of `unverified`. `stale_after` is a consumer GATE (10.5), so
+    a fabricated horizon suppresses content that is perfectly current.
+    """
+    out = tmp_path / f"bundle-no-{field}"
+    okf_export.write_bundle(bridge_root, out, "user")
+    for path in _concept_files(out):
+        assert field not in _pyyaml_frontmatter(path), path
+
+
+def test_every_concept_derives_trust_tier_unverified(okf_export, bridge_root, memory_dir, tmp_path):
+    """Asserts the consumer-visible consequence, not just key absence."""
+    out = tmp_path / "bundle-trust-tier"
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
+    for path in _concept_files(out):
+        assert _trust_tier(_pyyaml_frontmatter(path)) == "unverified", path
+
+
+def test_related_frontmatter_is_never_promoted_to_sources(okf_export, tmp_path):
+    """`related:` is see-also, not derived-from (spec 5.1)."""
+    root = tmp_path / "related-instance"
+    _write(
+        root / "docs/with-related.md",
+        "---\nsummary: \"Doc with a related list\"\nrelated:\n  - other-doc.md\n  - ../scripts/x.py\n---\n\n# With Related\n\nBody.\n",
+    )
+    out = tmp_path / "bundle-related"
+    okf_export.write_bundle(root, out, "core")
+    fm = _pyyaml_frontmatter(out / "doc" / "with-related.md")
+    assert "sources" not in fm
+    assert "other-doc.md" not in str(fm)
+
+
+def test_concept_with_no_frontmatter_invents_nothing(okf_export, bridge_root, tmp_path):
+    """The anti-fabrication guard, stated as an exact key set."""
+    out = tmp_path / "bundle-invents-nothing"
+    okf_export.write_bundle(bridge_root, out, "user")
+    fm = _pyyaml_frontmatter(out / "rule" / "sample-rule.md")
+    assert set(fm) == {"type", "title", "resource", "generated"}
+    assert fm["generated"] == {"by": f"okf-export/{okf_export.EXPORTER_VERSION}"}
+
+
+def test_empty_description_and_tags_keys_are_omitted(okf_export, bridge_root, tmp_path):
+    """Spec 5: absence carries meaning, so never write `description: ""`."""
+    out = tmp_path / "bundle-omit-empty"
+    okf_export.write_bundle(bridge_root, out, "user")
+    fm = _pyyaml_frontmatter(out / "rule" / "sample-rule.md")
+    assert "description" not in fm
+    assert "tags" not in fm
+
+
+# --------------------------------------------------------------------------
+# OKF v0.2 — the --generated-by actor
+# --------------------------------------------------------------------------
+
+def test_generated_by_defaults_to_exporter_actor(okf_export):
+    assert okf_export.EXPORTER_VERSION != okf_export.OKF_VERSION
+    assert okf_export.default_generated_by() == f"okf-export/{okf_export.EXPORTER_VERSION}"
+
+
+@pytest.mark.parametrize("actor", ["human:sample", "process:nightly-export", "some-tool/2.1"])
+def test_generated_by_cli_override_used_verbatim(okf_export, bridge_root, tmp_path, actor):
+    out = tmp_path / f"bundle-actor-{actor.replace(':', '-').replace('/', '-')}"
+    rc = okf_export.main(
+        ["--root", str(bridge_root), "--out", str(out), "--scope", "user", "--generated-by", actor]
+    )
+    assert rc == 0
+    assert _pyyaml_frontmatter(out / "doc" / "sample-doc.md")["generated"]["by"] == actor
+
+
+@pytest.mark.parametrize("actor", ["Some Person", "human:", "no-slash-no-prefix", "a/b/c"])
+def test_generated_by_rejects_non_actor_string_with_nonzero_exit(okf_export, bridge_root, tmp_path, actor):
+    """A typo'd actor would silently mis-tier a whole bundle (spec 5.3/7)."""
+    out = tmp_path / "bundle-bad-actor"
+    rc = okf_export.main(
+        ["--root", str(bridge_root), "--out", str(out), "--scope", "user", "--generated-by", actor]
+    )
+    assert rc == 1
+    assert not out.exists()
+
+
+def test_generated_by_never_reads_git_or_environment(okf_export, bridge_root, tmp_path, monkeypatch):
+    """Locks the privacy + determinism boundary against a future 'convenience' default."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=bridge_root, check=True)
+    subprocess.run(["git", "config", "user.name", "Real Person"], cwd=bridge_root, check=True)
+    subprocess.run(["git", "config", "user.email", "real@example.com"], cwd=bridge_root, check=True)
+    monkeypatch.setenv("USER", "realperson")
+
+    out = tmp_path / "bundle-no-git-actor"
+    okf_export.write_bundle(bridge_root, out, "user")
+    rendered = (out / "doc" / "sample-doc.md").read_text(encoding="utf-8")
+    assert f"okf-export/{okf_export.EXPORTER_VERSION}" in rendered
+    assert "Real Person" not in rendered and "realperson" not in rendered
+
+
+def test_core_scope_warns_when_generated_by_is_a_human_actor(okf_export, bridge_root, tmp_path, capsys):
+    out = tmp_path / "bundle-core-human-actor"
+    rc = okf_export.main(
+        ["--root", str(bridge_root), "--out", str(out), "--scope", "core",
+         "--generated-by", "human:sample"]
+    )
+    assert rc == 0
+    assert "WARNING" in capsys.readouterr().err
+
+
+def test_core_scope_frontmatter_keys_are_within_allowlist(okf_export, bridge_root, memory_dir, tmp_path):
+    """Privacy regression for the newly added keys."""
+    out = tmp_path / "bundle-core-allowlist"
+    okf_export.write_bundle(bridge_root, out, "core", memory_dir=memory_dir)
+    for path in _concept_files(out):
+        fm = _pyyaml_frontmatter(path)
+        assert set(fm) <= CORE_SCOPE_KEY_ALLOWLIST, (path, set(fm) - CORE_SCOPE_KEY_ALLOWLIST)
+        blob = str(fm)
+        assert "memory/" not in blob and "work/" not in blob and "human:" not in blob
+
+
+# --------------------------------------------------------------------------
+# OKF v0.2 — bundle level
+# --------------------------------------------------------------------------
+
+def test_root_index_frontmatter_carries_only_okf_version(okf_export, bridge_root, tmp_path):
+    """Spec 8/12: `okf_version` is the ONE key permitted in an index.md."""
+    out = tmp_path / "bundle-root-index-trim"
+    okf_export.write_bundle(bridge_root, out, "user")
+    index = out / "index.md"
+    assert _pyyaml_frontmatter(index) == {"okf_version": "0.2"}
+    body = index.read_text(encoding="utf-8")
+    assert "scope: user" not in body.split("---")[1]
+    assert "user" in body and "7" in body  # both still stated in the body prose
+
+
+def test_is_bundle_dir_still_recognizes_a_v01_bundle(okf_export, tmp_path):
+    """REGRESSION on the destructive --out guard.
+
+    Trimming the root index must not make a previously written v0.1 bundle
+    unrecognisable, or a mistyped --out becomes an unguarded rmtree.
+    """
+    old = tmp_path / "v01-bundle"
+    old.mkdir()
+    (old / "index.md").write_text('---\nokf_version: "0.1"\nscope: user\n---\n\n# OKF Bundle\n', encoding="utf-8")
+    assert okf_export._is_bundle_dir(old) is True
+
+
+@pytest.mark.parametrize("concept_type", ["task", "stream", "deliverable", "doc", "rule", "example", "memory"])
+def test_type_index_has_no_frontmatter(okf_export, bridge_root, memory_dir, tmp_path, concept_type):
+    out = tmp_path / "bundle-type-index-nofm"
+    okf_export.write_bundle(bridge_root, out, "user", memory_dir=memory_dir)
+    text = (out / concept_type / "index.md").read_text(encoding="utf-8")
+    assert not text.startswith("---")
+
+
+def test_type_index_entries_match_spec_bullet_form(okf_export, bridge_root, tmp_path):
+    """Spec 8 shows `* [Title](relative-url) - short description`."""
+    out = tmp_path / "bundle-type-index-form"
+    okf_export.write_bundle(bridge_root, out, "user")
+    entries = [
+        line for line in (out / "doc" / "index.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith("* [")
+    ]
+    assert entries, "no spec-form bullets found"
+    assert "* [Sample Doc](sample-doc.md) - Doc about acme" in entries
+    assert "—" not in (out / "doc" / "index.md").read_text(encoding="utf-8")
+
+
+def test_no_concept_file_is_named_index_or_log(okf_export, tmp_path):
+    """REGRESSION on _RESERVED_SLUGS + dedupe_slugs (spec 2 reserved names)."""
+    root = tmp_path / "reserved-instance"
+    _write(root / "docs/index.md", "---\nsummary: \"Would collide\"\n---\n\n# Index Doc\n\nBody.\n")
+    _write(root / "docs/log.md", "---\nsummary: \"Would collide too\"\n---\n\n# Log Doc\n\nBody.\n")
+    out = tmp_path / "bundle-reserved"
+    okf_export.write_bundle(root, out, "core")
+    assert (out / "doc" / "index-2.md").exists()
+    assert (out / "doc" / "log-2.md").exists()
+    assert not _pyyaml_frontmatter(out / "doc" / "index-2.md").get("okf_version")
+
+
+def test_manifest_reports_generated_by_and_undated_count(okf_export, bridge_root, tmp_path):
+    out = tmp_path / "bundle-manifest"
+    manifest = okf_export.write_bundle(bridge_root, out, "user")
+    assert manifest["okf_version"] == "0.2"
+    assert manifest["generated_by"] == f"okf-export/{okf_export.EXPORTER_VERSION}"
+    # sample-rule.md and examples/acme-demo/README.md carry no date at all
+    assert manifest["concepts_without_generated_at"] == 2
+    assert isinstance(manifest["concepts_without_generated_at"], int)
+
+
+def test_contract_docstring_and_guide_declare_v0_2():
+    """A half-migrated suite would freeze v0.1 semantics while the bundle says 0.2."""
+    contract = Path(__file__).read_text(encoding="utf-8")
+    guide = (REPO_ROOT / "docs" / "okf-export.md").read_text(encoding="utf-8")
+    assert 'OKF_VERSION: str' in contract and '"0.2"' in contract
+    # The guide may REFERENCE v0.1 (the migration note does); what it must not
+    # do is still describe itself as PRODUCING one.
+    assert "(OKF) v0.2 bundle" in guide
+    assert "(OKF) v0.1 bundle" not in guide
+    for declined in ("verified", "sources", "stale_after"):
+        assert declined in guide, f"guide does not state why {declined} is not emitted"
 
 
 # --------------------------------------------------------------------------

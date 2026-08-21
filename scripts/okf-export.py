@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Export a Bridge instance as an Open Knowledge Format (OKF) v0.1 bundle.
+"""Export a Bridge instance as an Open Knowledge Format (OKF) v0.2 bundle.
 
 A single, additive, dependency-free script that walks a Bridge instance's
 knowledge surfaces (work/ STATUS.md + deliverables, docs/, rules/,
@@ -28,6 +28,35 @@ Memory facts are the instance's auto-memory files (frontmatter with a
 Every concept carries a `resource:` field pointing at its source (repo-
 relative path, or `memory/<filename>` for memory facts).
 
+What v0.2 emits, and what it deliberately does not:
+
+  generated.by   the actor that produced this BUNDLE DOCUMENT — by default
+                 `okf-export/<EXPORTER_VERSION>`, overridable with
+                 --generated-by. It never claims to be the author of the
+                 underlying knowledge; `resource` is the provenance pointer.
+  generated.at   the source's `last_updated`/`created`, normalized to an ISO
+                 instant. A date that cannot be proven (partial, the literal
+                 `YYYY-MM-DD` template placeholder, calendar-impossible) is
+                 OMITTED rather than guessed.
+  bridge_status  the source's Bridge workflow state, under a namespaced key.
+                 It is NEVER written to OKF's own `status`: that field means
+                 document readiness (draft|stable|deprecated) while a Bridge
+                 status means work state (backlog|doing|review|done), and
+                 `draft` is a homograph across the two. Absent `status`
+                 already means `stable`, which is the true claim here.
+  timestamp      REMOVED in v0.2 (superseded by generated.at). Not dual-emitted:
+                 the spec's legacy fallback applies only when `generated` is
+                 absent, which it never is.
+  verified /     never emitted. Nothing in a Bridge instance is a verification
+  sources /      event, a derivation edge, or an expiry instant, and all three
+  stale_after    drive consumer behaviour (trust tiers, credibility
+                 propagation, staleness gating) — so a fabricated value does
+                 not read as noise, it reads as a false claim.
+
+Empty optional fields are omitted, never written as "" or []: absence
+carries meaning in OKF, so an empty value is a different claim from
+"not recorded".
+
 Wikilinks (kebab-case `[[slug]]` only — bash `[[ -f ... ]]` conditionals
 never match) are resolved at export time against the bundle's own slug
 index — never rewritten in the source repo. A resolved link becomes a
@@ -47,10 +76,12 @@ Scope controls which sources are walked:
 Usage:
   python3 scripts/okf-export.py --out dist/okf-bundle
   python3 scripts/okf-export.py --root . --out dist/okf-bundle --scope core
+  python3 scripts/okf-export.py --out dist/okf-bundle --generated-by human:alice
 
 Exit codes:
   0 — bundle written successfully
-  1 — --root does not exist / is not a directory, or unsafe --out refused
+  1 — --root does not exist / is not a directory, unsafe --out refused, or
+      --generated-by is not a valid OKF actor
   2 — argparse usage error (e.g. unknown --scope; raised as SystemExit)
 """
 from __future__ import annotations
@@ -59,9 +90,28 @@ import argparse
 import re
 import shutil
 import sys
+from datetime import date
 from pathlib import Path
 
-OKF_VERSION = "0.1"
+OKF_VERSION = "0.2"
+# The exporter's OWN version, deliberately separate from the spec version so
+# the two can never drift into each other. Hand-bumped: deriving it from
+# `git describe` would make the output depend on clone state and break the
+# byte-identical re-run guarantee.
+EXPORTER_VERSION = "1.0"
+
+# OKF section 7 actor convention: `<producer>/<version>` for an agent or tool,
+# `human:<id>` for a person, `process:<id>` for an automated process. Consumers
+# classify trust by the literal `human:` prefix (section 5.3), so a malformed
+# actor silently mis-tiers an entire bundle. Validated rather than trusted.
+_ACTOR_RE = re.compile(r"^(?:human|process):[A-Za-z0-9._-]+$|^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+# Only a full calendar date. `date.fromisoformat` also accepts `20260702` and
+# `2026-W27-1` on Python 3.11+, which must NOT be silently widened.
+_BARE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# An instant that already carries an explicit UTC offset, as OKF section 5 requires.
+_OFFSET_DATETIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$"
+)
 
 # Kebab-case identifiers only: bash `[[ -f file ]]` conditionals inside code
 # blocks must never match (and must never be rewritten or reported).
@@ -247,6 +297,50 @@ def concept_type_for(path: Path, root: Path) -> str:
     raise ValueError(f"cannot determine OKF concept type for {rel}")
 
 
+def default_generated_by() -> str:
+    """The actor this exporter names as the producer of a bundle document.
+
+    It names the TRANSFORMATION, never the author of the underlying
+    knowledge: the exporter produced this OKF file, it did not write the
+    Bridge document behind it. `resource` is the real provenance pointer.
+    Deriving an author from `git log`/`git config`/`$USER` is refused on
+    three counts: a committer is not a knowledge author, it would inject a
+    real identity into a `--scope core` bundle, and it would make output
+    depend on clone state.
+    """
+    return f"okf-export/{EXPORTER_VERSION}"
+
+
+def normalize_timestamp(value: str) -> str | None:
+    """Coerce a source date to an OKF instant, or return None if unprovable.
+
+    OKF section 5 requires every timestamp-valued key to be an ISO 8601
+    datetime with an explicit UTC offset, but Bridge sources carry bare
+    dates (``last_updated: 2026-07-02``). Exactly two shapes are accepted:
+
+    * a full calendar date -> widened to ``<date>T00:00:00Z``. Midnight is
+      the EARLIEST instant consistent with the stated date, so no consumer
+      ever reads the content as fresher than the evidence supports.
+    * a datetime that already carries an offset -> passed through verbatim.
+
+    Everything else returns None and the caller omits ``generated.at``
+    entirely: a partial date (``2026-03``) would require inventing a day,
+    ``work/templates/STATUS.md`` seeds new tasks with the literal
+    ``YYYY-MM-DD`` placeholder, and section 5.2 does not mark ``at``
+    required. Pure: reads only its argument, never the clock.
+    """
+    value = (value or "").strip()
+    if _BARE_DATE_RE.match(value):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return None  # calendar-impossible, e.g. 2026-02-30
+        return f"{value}T00:00:00Z"
+    if _OFFSET_DATETIME_RE.match(value):
+        return value
+    return None
+
+
 def build_concept(path: Path, root: Path) -> dict:
     """Read ``path`` and build its OKF concept dict (body left un-resolved)."""
     text = Path(path).read_text(encoding="utf-8")
@@ -255,7 +349,7 @@ def build_concept(path: Path, root: Path) -> dict:
     okf_type = concept_type_for(path, root)
     title = derive_title(fm, body, fallback=slug)
     description = derive_description(fm, body)
-    timestamp = fm.get("last_updated") or fm.get("created") or ""
+    generated_at = normalize_timestamp(fm.get("last_updated") or fm.get("created") or "")
     tags = [value for value in (fm.get("status"), fm.get("context")) if value]
     return {
         "slug": slug,
@@ -263,7 +357,11 @@ def build_concept(path: Path, root: Path) -> dict:
         "title": title,
         "description": description,
         "resource": Path(path).relative_to(root).as_posix(),
-        "timestamp": timestamp,
+        "generated_at": generated_at,
+        # A Bridge workflow state, NEVER OKF's `status`. The two vocabularies
+        # are orthogonal and `draft` is a homograph across them: see the
+        # module docstring.
+        "bridge_status": fm.get("status") or None,
         "tags": tags,
         "body": body,
     }
@@ -302,8 +400,9 @@ def build_memory_concept(path: Path) -> dict:
 
     Slug = the frontmatter ``name:`` (already kebab-case by convention),
     falling back to the filename stem with its ``<type>_`` prefix stripped
-    and underscores dashed. Memory facts carry no dates, so ``timestamp``
-    stays empty; ``resource`` points into the (out-of-repo) memory dir.
+    and underscores dashed. Memory facts carry no top-level date, so
+    ``generated_at`` stays None and the key is omitted rather than guessed;
+    ``resource`` points into the (out-of-repo) memory dir.
     """
     text = Path(path).read_text(encoding="utf-8")
     fm, body = parse_frontmatter(text)
@@ -314,7 +413,8 @@ def build_memory_concept(path: Path) -> dict:
         "title": derive_title(fm, body, fallback=slug),
         "description": derive_description(fm, body),
         "resource": f"memory/{path.name}",
-        "timestamp": "",
+        "generated_at": None,
+        "bridge_status": None,
         "tags": [],
         "body": body,
     }
@@ -348,24 +448,40 @@ def _yaml_quote(value: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-def _render_concept(concept: dict) -> str:
-    # Every tag is quoted individually: an unquoted flow sequence splits a
-    # tag on its own comma and is broken outright by a `]` inside a value.
-    tags = ", ".join(_yaml_quote(tag) for tag in concept["tags"])
-    header = "\n".join(
-        [
-            "---",
-            f"type: {concept['okf_type']}",
-            f"title: {_yaml_quote(concept['title'])}",
-            f"description: {_yaml_quote(concept['description'])}",
-            f"resource: {_yaml_quote(concept['resource'])}",
-            f"timestamp: {_yaml_quote(concept['timestamp'])}",
-            f"tags: [{tags}]",
-            "---",
-            "",
-        ]
-    )
-    return header + concept["body"]
+def _render_concept(concept: dict, generated_by: str | None = None) -> str:
+    """Render one OKF v0.2 concept file.
+
+    An empty optional field is OMITTED rather than written as ``""``/``[]``:
+    OKF section 5 states that absence carries meaning, so an empty string is
+    a different (and false) claim from "not recorded". Only ``type`` is
+    always required (section 4.1).
+    """
+    generated_by = generated_by or default_generated_by()
+    lines = [
+        "---",
+        f"type: {concept['okf_type']}",
+        f"title: {_yaml_quote(concept['title'])}",
+    ]
+    if concept["description"]:
+        lines.append(f"description: {_yaml_quote(concept['description'])}")
+    lines.append(f"resource: {_yaml_quote(concept['resource'])}")
+
+    # `by` is the only REQUIRED key inside `generated` (section 5.2); `at` is
+    # written only when the source date could be proven (see normalize_timestamp).
+    generated = f"{{ by: {generated_by}"
+    if concept.get("generated_at"):
+        generated += f", at: {concept['generated_at']}"
+    lines.append(f"generated: {generated} }}")
+
+    if concept.get("bridge_status"):
+        lines.append(f"bridge_status: {_yaml_quote(concept['bridge_status'])}")
+    if concept["tags"]:
+        # Every tag is quoted individually: an unquoted flow sequence splits a
+        # tag on its own comma and is broken outright by a `]` inside a value.
+        tags = ", ".join(_yaml_quote(tag) for tag in concept["tags"])
+        lines.append(f"tags: [{tags}]")
+    lines.extend(["---", ""])
+    return "\n".join(lines) + concept["body"]
 
 
 def _render_type_index(okf_type: str, concepts: list[dict]) -> str:
@@ -378,29 +494,37 @@ def _render_type_index(okf_type: str, concepts: list[dict]) -> str:
         f"{len(concepts)} concept(s).",
         "",
     ]
+    # `* [Title](relative-url) - short description` is the form OKF section 8
+    # shows for an index entry.
     for concept in sorted(concepts, key=lambda c: c["slug"]):
-        suffix = f" — {concept['description']}" if concept["description"] else ""
-        lines.append(f"- [{concept['title']}]({concept['slug']}.md){suffix}")
+        suffix = f" - {concept['description']}" if concept["description"] else ""
+        lines.append(f"* [{concept['title']}]({concept['slug']}.md){suffix}")
     lines.append("")
     return "\n".join(lines)
 
 
 def _render_root_index(scope: str, concepts: list[dict], types: list[str]) -> str:
+    """Render the bundle-root ``index.md``.
+
+    ``okf_version`` is the ONE key OKF permits in an index file's
+    frontmatter (sections 8 + 12), so scope and concept count are stated in
+    the body prose instead of the block. ``_is_bundle_dir`` keys off
+    ``okf_version`` alone, so the destructive ``--out`` guard still
+    recognises bundles written by earlier versions.
+    """
     lines = [
         "---",
         f"okf_version: {_yaml_quote(OKF_VERSION)}",
-        f"scope: {scope}",
-        f"concept_count: {len(concepts)}",
         "---",
         "",
         "# OKF Bundle",
         "",
-        f"Open Knowledge Format v{OKF_VERSION} export — scope: {scope}, "
+        f"Open Knowledge Format v{OKF_VERSION} export. Scope: {scope}. "
         f"{len(concepts)} concept(s).",
         "",
     ]
     for okf_type in types:
-        lines.append(f"- [{okf_type}]({okf_type}/index.md)")
+        lines.append(f"* [{okf_type}]({okf_type}/index.md)")
     lines.append("")
     return "\n".join(lines)
 
@@ -445,16 +569,26 @@ def dedupe_slugs(concepts: list[dict]) -> None:
 
 
 def write_bundle(
-    root: Path, out_dir: Path, scope: str, memory_dir: Path | None = None
+    root: Path,
+    out_dir: Path,
+    scope: str,
+    memory_dir: Path | None = None,
+    generated_by: str | None = None,
 ) -> dict:
     """Discover -> build -> resolve wikilinks -> write an OKF bundle at ``out_dir``.
 
     ``memory_dir`` (user scope only) adds the instance's auto-memory fact
     files as ``memory``-type concepts — the primary wikilink target.
 
+    ``generated_by`` is the run-wide OKF actor written into every concept's
+    ``generated.by``; it defaults to this exporter (see
+    ``default_generated_by``). Run-wide rather than per-concept on purpose,
+    so ``build_concept`` stays a pure function of the source file's bytes.
+
     Deterministic and idempotent: re-running against unchanged input produces
     a byte-identical file set (stable sort order, no wall-clock content).
     """
+    generated_by = generated_by or default_generated_by()
     root = Path(root).resolve()
     out_dir = Path(out_dir).resolve()
 
@@ -511,7 +645,7 @@ def write_bundle(
         type_dir.mkdir(parents=True, exist_ok=True)
         for concept in sorted(type_concepts, key=lambda c: c["slug"]):
             (type_dir / f"{concept['slug']}.md").write_text(
-                _render_concept(concept), encoding="utf-8"
+                _render_concept(concept, generated_by), encoding="utf-8"
             )
         (type_dir / "index.md").write_text(
             _render_type_index(okf_type, type_concepts), encoding="utf-8"
@@ -525,6 +659,12 @@ def write_bundle(
         "okf_version": OKF_VERSION,
         "scope": scope,
         "concept_count": len(concepts),
+        "generated_by": generated_by,
+        # A COUNT, never a list of paths: the manifest is printed, and a list
+        # would put instance-relative source paths into that output.
+        "concepts_without_generated_at": sum(
+            1 for c in concepts if not c.get("generated_at")
+        ),
         "unresolved_wikilinks": sorted(unresolved_all),
     }
 
@@ -532,7 +672,7 @@ def write_bundle(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="okf-export.py",
-        description="Export a Bridge instance as an Open Knowledge Format (OKF) v0.1 bundle.",
+        description="Export a Bridge instance as an Open Knowledge Format (OKF) v0.2 bundle.",
     )
     parser.add_argument("--root", default=".", help="Bridge instance root (default: .)")
     parser.add_argument("--out", required=True, help="output bundle directory")
@@ -550,12 +690,36 @@ def main(argv: list[str] | None = None) -> int:
         "only; default: derived as ~/.claude/projects/<encoded-root>/memory, "
         "silently skipped when absent)",
     )
+    parser.add_argument(
+        "--generated-by",
+        default=None,
+        metavar="ACTOR",
+        help="OKF actor written to every concept's generated.by; one of "
+        "'<producer>/<version>', 'human:<id>' or 'process:<id>' "
+        f"(default: {default_generated_by()})",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.root)
     if not root.is_dir():
         sys.stderr.write(f"ERROR: --root {root} does not exist or is not a directory\n")
         return 1
+
+    generated_by = args.generated_by or default_generated_by()
+    if not _ACTOR_RE.match(generated_by):
+        sys.stderr.write(
+            f"ERROR: --generated-by {generated_by!r} is not an OKF actor. Use "
+            "'<producer>/<version>', 'human:<id>' or 'process:<id>' — consumers "
+            "classify trust by the literal 'human:' prefix, so a malformed "
+            "actor mis-tiers the whole bundle.\n"
+        )
+        return 1
+    if generated_by.startswith("human:") and args.scope == "core":
+        sys.stderr.write(
+            f"WARNING: --scope core with a human actor ({generated_by}) writes a "
+            "personal identifier into every concept of a bundle whose whole "
+            "point is being publishable. Proceeding as requested.\n"
+        )
 
     memory_dir: Path | None = None
     if args.scope == "user":
@@ -566,13 +730,17 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(args.out)
     try:
-        manifest = write_bundle(root, out_dir, args.scope, memory_dir=memory_dir)
+        manifest = write_bundle(
+            root, out_dir, args.scope, memory_dir=memory_dir, generated_by=generated_by
+        )
     except BundleDestinationError as exc:
         sys.stderr.write(f"ERROR: {exc}\n")
         return 1
     print(
         f"okf-export: wrote {manifest['concept_count']} concept(s) to {out_dir} "
         f"(scope={manifest['scope']}, okf_version={manifest['okf_version']}, "
+        f"generated_by={manifest['generated_by']}, "
+        f"without_generated_at={manifest['concepts_without_generated_at']}, "
         f"unresolved_wikilinks={len(manifest['unresolved_wikilinks'])})"
     )
     return 0
