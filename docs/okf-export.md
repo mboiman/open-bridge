@@ -146,10 +146,14 @@ true claim about an exported Bridge write-up. The Bridge value travels under
 
 Frontmatter parsing is hand-rolled (no PyYAML dependency). It keeps
 `scripts/extract-frontmatter.py`'s `# yaml-language-server: $schema=...`
-comment-prolog skip and reads the same flat `key: value` scalars as
-`scripts/gen-board.py`'s `parse_status()`, but it deliberately diverges from
-that script on five points, because `gen-board.py` is lenient where YAML is
-not:
+comment-prolog skip and reads flat `key: value` scalars.
+
+`parse_frontmatter` is this repo's reference implementation of that job, and
+it has a second consumer: `scripts/gen-board.py` imports it rather than
+parsing frontmatter itself. That script used to carry its own copy, the two
+drifted, and the board silently rendered a YAML comment as a task's
+description. The five rules below are each a place a hand-rolled parser goes
+wrong, and each one cost real content before it was fixed:
 
 - **Quoting is resolved before inline comments**, the order YAML itself uses.
   A `#` inside a quoted scalar is a literal character, so
