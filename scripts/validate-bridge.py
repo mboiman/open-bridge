@@ -236,6 +236,143 @@ def tier_folder_of(rel) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Rule inventory (.bridge/rule-scope.md)
+# ---------------------------------------------------------------------------
+#
+# Same treatment as .bridge/skill-scope.md, and for the same reason: a table
+# generated from the LOCAL tree can never converge across instances, so it must
+# not live in a CORE file. `.bridge/` is gitignored and already classified
+# local-only by scripts/categorize-commits.py, so this needs no router literal.
+#
+# The column that earns the file is `state`. Frontmatter says which TIER a rule
+# belongs to; it cannot say whether a NEW rule may be authored at that path. In
+# an instance subscribed to an org overlay, `rules/org/` is a materialisation
+# target: gitignored, and skipped by scripts/overlay-export.py, which asks
+# `git check-ignore` and never looks at tracked state. A rule written there is
+# invisible to git and never reaches the overlay, with no error anywhere.
+
+RULE_MAP_REL = Path(".bridge") / "rule-scope.md"
+
+#: Printed as a legend above the table.
+STATE_MEANING = {
+    "authorable": "git will track a new rule here",
+    "legacy": "gitignored yet tracked, an existing exception rather than a place to add to",
+    "managed": "gitignored and untracked, so a new rule here never travels",
+    "unknown": "git could not be consulted",
+}
+
+
+def _git_read(repo_root: Path, args: list[str], stdin: str | None = None) -> list[str] | None:
+    """Read-only git call. Returns stdout lines, or None if git could not answer.
+
+    None is a DIFFERENT answer from "nothing matched". The caller must never
+    turn an unknown ignore state into a green light.
+    """
+    if not (repo_root / ".git").exists():
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=repo_root, input=stdin, capture_output=True, text=True
+        )
+    except OSError:
+        return None
+    # check-ignore exits 1 when nothing matched, which is a valid empty answer.
+    if proc.returncode not in (0, 1):
+        return None
+    return [ln for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def git_ignored(repo_root: Path, relpaths: list[str]) -> set[str] | None:
+    """The subset of `relpaths` the ignore RULES exclude, or None.
+
+    `--no-index` is load-bearing. Without it `check-ignore` consults the index
+    first and reports a tracked path as not-ignored, which answers "does this
+    file travel today" rather than "may I put a NEW file here". The second
+    question is the one this map exists for, and the two answers differ exactly
+    where it matters: a folder holding tracked leftovers under an ignore rule.
+    """
+    if not relpaths:
+        return set()
+    lines = _git_read(
+        repo_root, ["check-ignore", "--no-index", "--stdin"], stdin="\n".join(relpaths)
+    )
+    return None if lines is None else set(lines)
+
+
+def git_tracked(repo_root: Path) -> set[str] | None:
+    """Every path git currently tracks, or None."""
+    lines = _git_read(repo_root, ["ls-files"])
+    return None if lines is None else set(lines)
+
+
+def rule_state(rel: str, ignored: set[str] | None, tracked: set[str] | None) -> str:
+    """Whether a NEW rule may be authored at `rel`. See STATE_MEANING."""
+    if ignored is None or tracked is None:
+        return "unknown"
+    if rel not in ignored:
+        return "authorable"
+    return "legacy" if rel in tracked else "managed"
+
+
+def collect_rule_rows(repo_root) -> list[dict]:
+    """One row per `rules/**/*.md`, sorted by path so the map never churns."""
+    repo_root = Path(repo_root)
+    extract = _load_frontmatter_extractor()
+    pairs = sorted(
+        (p.relative_to(repo_root).as_posix(), p)
+        for p in repo_root.glob("rules/**/*.md")
+        if p.is_file() and not p.name.startswith("_")
+    )
+    rels = [rel for rel, _ in pairs]
+    ignored = git_ignored(repo_root, rels)
+    tracked = git_tracked(repo_root)
+    rows = []
+    for rel, path in pairs:
+        try:
+            fm = extract(path)
+        except SystemExit:
+            fm = None
+        scope = fm.get("scope") if isinstance(fm, dict) else None
+        tier = scope or tier_folder_of(path.relative_to(repo_root)) or "core"
+        rows.append({"path": rel, "tier": str(tier), "state": rule_state(rel, ignored, tracked)})
+    return rows
+
+
+def render_rule_map(rows: list[dict]) -> str:
+    """Deterministic markdown, no timestamp: it is rewritten on every run."""
+
+    def cell(value) -> str:
+        flat = " ".join(str(value).split())
+        return flat.replace("\\", "\\\\").replace("|", "\\|")
+
+    out = [
+        "# Rule scope map",
+        "",
+        "Derived from the local tree by `scripts/validate-bridge.py`, and never",
+        "committed. The authoritative tier is the `scope:` frontmatter in each rule;",
+        "this table is a view of it, plus the one thing frontmatter cannot express,",
+        "namely whether a NEW rule may be authored at that path.",
+        "",
+    ]
+    out += [f"- `{state}`: {meaning}" for state, meaning in STATE_MEANING.items()]
+    out += ["", "| rule | tier | state |", "|---|---|---|"]
+    out += [f"| {cell(r['path'])} | {cell(r['tier'])} | {cell(r['state'])} |" for r in rows]
+    if not rows:
+        out.append("| (no rules found) | | |")
+    out.append("")
+    return "\n".join(out)
+
+
+def write_rule_map(repo_root) -> Path:
+    """Refresh `.bridge/rule-scope.md` and return its path."""
+    repo_root = Path(repo_root)
+    out = repo_root / RULE_MAP_REL
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_rule_map(collect_rule_rows(repo_root)), encoding="utf-8")
+    return out
+
+
 def validate_md_scope_surface(surface: dict) -> tuple[int, int]:
     """Validate `scope:` frontmatter on a markdown surface. Returns (pass, fail)."""
     extract = _load_frontmatter_extractor()
@@ -279,6 +416,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Bridge configs against schemas")
     parser.add_argument("--surface", help="Validate only this surface (e.g. persona, rules)")
     parser.add_argument("--list", action="store_true", help="List discovered files and exit")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate only; do not refresh .bridge/rule-scope.md",
+    )
     args = parser.parse_args()
 
     json_surfaces = SURFACES
@@ -337,6 +479,12 @@ def main() -> int:
 
     print(f"\n{'─' * 50}")
     print(f"Total: {total_pass} passed, {total_fail} failed")
+
+    # Refreshed even on a failing run: the inventory answers "what exists and
+    # where may I author", which is independent of what currently passes.
+    if not args.check:
+        print(f"Rule map: {write_rule_map(REPO_ROOT).relative_to(REPO_ROOT)}")
+
     return 0 if total_fail == 0 else 1
 
 

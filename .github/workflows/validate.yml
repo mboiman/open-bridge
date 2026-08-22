@@ -77,7 +77,7 @@ jobs:
         run: bash scripts/tests/test-okf-export.sh
 
   script-suites:
-    name: Board Generator + Frontmatter
+    name: Board Generator + Frontmatter + Rule Map
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -90,6 +90,9 @@ jobs:
 
       - name: Run frontmatter extractor test suite
         run: bash scripts/tests/test-extract-frontmatter.sh
+
+      - name: Run rule-inventory test suite
+        run: bash scripts/tests/test-validate-bridge-rule-map.sh
 
   workspace-tests:
     name: Workspace Engine + Registry + Skill
