@@ -366,6 +366,21 @@ Each bridge layers its own rules under `rules/org/` (org) or `rules/user/` (pers
 additive, like nested AGENTS.md. Other tools: read `rules/*.md` plus whichever tier folders
 apply to your instance at session start.
 
+**Which rules an instance actually has is derived, never a table here.** Run the validator
+for the live map:
+
+```bash
+python3 scripts/validate-bridge.py     # validates, then writes .bridge/rule-scope.md
+```
+
+It lists every rule across every tier with its scope, plus whether git will track a **new**
+rule at that path. That second column is the one frontmatter cannot express and the reason
+the map exists: in an instance subscribed to an org overlay, `rules/org/` is a
+materialisation target, so a rule authored into it is invisible to git, skipped by
+`scripts/overlay-export.py`, and never reaches the overlay, with no error anywhere. Like
+`.bridge/skill-scope.md`, the map is derived and gitignored, because a table generated from
+the local tree cannot converge across instances.
+
 | Rule | Tier | Purpose |
 |------|------|---------|
 | `session-start.md` | core | **Phase 0 gate** — branch/config detection before ANY response at session start |
