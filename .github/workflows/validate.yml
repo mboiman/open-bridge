@@ -88,6 +88,9 @@ jobs:
       - name: Run board generator test suite
         run: bash scripts/tests/test-gen-board.sh
 
+      - name: Run frontmatter extractor test suite
+        run: bash scripts/tests/test-extract-frontmatter.sh
+
   workspace-tests:
     name: Workspace Engine + Registry + Skill
     runs-on: ubuntu-latest
