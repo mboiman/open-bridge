@@ -95,11 +95,19 @@ warn() { printf '%s\n' "$*" >&2; }
 warn "── bridge pre-commit · warn-only · --no-verify to skip ─────────────"
 
 # (a) LOG gate — per-event + touch-proof: count today's DATED rows, not mtime.
-commits_today=$(git log --since="$TODAY 00:00" --oneline 2>/dev/null | wc -l | tr -d ' ')
+# Count only THIS branch's own work units, or the gate can never be satisfied:
+#   --first-parent  commits merged in from an upstream are someone else's work,
+#                   not units this repo has to log
+#   --no-merges     the merge commit itself is bookkeeping, not a work unit
+#   grep -v log:    a `log:` commit exists to persist the row itself, so counting
+#                   it double-counts every logged unit (row + commit-to-save-row)
+commits_today=$(git log --since="$TODAY 00:00" --first-parent --no-merges \
+  --format='%s' 2>/dev/null | grep -cvE '^(log|chore\(log\)|docs\(log\)):')
+commits_today=${commits_today:-0}
 rows_today=$(grep -c "^| $TODAY " work/log.md 2>/dev/null || true)
 rows_today=${rows_today:-0}
 if [ "${rows_today:-0}" -le "${commits_today:-0}" ]; then
-  warn "⚠ LOG: $rows_today dated row(s) vs $commits_today commit(s) today — this unit likely has no work/log.md row."
+  warn "⚠ LOG: $rows_today dated row(s) vs $commits_today own work commit(s) today — this unit likely has no work/log.md row."
   warn "  append →  | $TODAY $(date +%H:%M) | <glyph> | <context> | <what + why> |"
 fi
 
