@@ -76,6 +76,21 @@ jobs:
       - name: Run OKF exporter test suite
         run: bash scripts/tests/test-okf-export.sh
 
+  script-suites:
+    name: Board Generator + Frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install PyYAML + pytest
+        run: pip install pyyaml pytest
+
+      - name: Run board generator test suite
+        run: bash scripts/tests/test-gen-board.sh
+
+      - name: Run frontmatter extractor test suite
+        run: bash scripts/tests/test-extract-frontmatter.sh
+
   workspace-tests:
     name: Workspace Engine + Registry + Skill
     runs-on: ubuntu-latest

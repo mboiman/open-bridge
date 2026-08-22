@@ -47,7 +47,12 @@ def extract(path: Path) -> dict | None:
         if not in_block:
             if line.lstrip().startswith("#"):
                 continue
-            if line.strip() == "---":
+            # Fences count at COLUMN 0 only. An indented `---` used to be
+            # accepted as one, and inside a `title: |` block that ended the
+            # frontmatter early: every key below it vanished, exit 0, nothing
+            # on stderr. A block scalar's continuation lines are indented by
+            # definition, so column 0 is exactly the right discriminator.
+            if line == "---":
                 in_block = True
                 continue
             if line.strip() == "":
@@ -55,7 +60,7 @@ def extract(path: Path) -> dict | None:
             # first non-empty non-comment non-fence line → no frontmatter
             return None
         else:
-            if line.strip() == "---":
+            if line == "---":
                 break
             buf.append(line)
     else:
