@@ -31,6 +31,12 @@ Projects, Azure Boards, etc.). See `trackers/README.md` for the contract.
 ## Phase 0: Smart Detection + Day Block
 
 ```bash
+# Archive cadence — drives the staleness threshold below. Never hardcode it:
+# a `scope: core` skill reads instance thresholds from config (AGENTS.md
+# § Generic CORE Skills). Missing/unrecognised → weekly (historical default).
+CADENCE=$(yq -r '.work.archive_cadence // "weekly"' bridge-config.yaml 2>/dev/null)
+case "$CADENCE" in weekly|bi-weekly|monthly|quarterly|yearly) ;; *) CADENCE=weekly ;; esac
+
 # Header KW — try German "KW <N>" first, fall back to English "Week <N>".
 LOG_KW=$(head -1 work/log.md | grep -oE '(KW|Week) [0-9]+' | grep -oE '[0-9]+')
 TODAY_KW=$(date +%V)
@@ -60,11 +66,11 @@ An instance with no `upstreams:` list (the OSS seed repo itself, or a fresh clon
 
 | Condition | Action |
 |-----------|--------|
-| `LOG_KW < TODAY_KW` AND day-blocks reach `TODAY_KW` (latest block in newer KW than header) | **Stale-header drift, archive overdue.** Loud warning: "log.md header says week {LOG_KW}, but {N} day blocks since Mon {DD.MM} belong to week {LATEST}. Archive week {LOG_KW} now?" → if y, run `/archive` inline (which handles oldest-week semantics, see archive workflow) |
-| `LOG_KW != TODAY_KW` (no day-block drift yet) | KW change: Offer "Archive week {old} and start a new week?" [y/n]. If yes: run `/archive` inline, then continue. |
+| Log spans **more than one `{CADENCE}` bucket** (oldest day-block's bucket < today's bucket) | **Archive overdue.** Loud warning: "log.md spans {N} {CADENCE} periods; oldest is {LABEL}. Archive it now?" → if y, run `/archive` inline (which handles oldest-period semantics, see archive workflow) |
+| Header label disagrees with the day-blocks, but all blocks sit in **one** bucket | Header drift only, no archive due: silently correct the header to the current period's label and continue. Do not prompt — there is nothing to archive. |
 | Day block missing for today | Append new day block (see format below) |
 | Weekend (Sat/Sun) | Warning: "Weekend. Check in anyway?" — proceed if user confirms |
-| 2+ weeks without archive | Warning: "log.md spans {N} weeks. Archiving recommended." |
+| Log spans 2+ buckets of the configured cadence | Covered by the overdue row above — do **not** raise a second, independent warning. Under `yearly` a 40-week log is not overdue, and a duplicate week-based check would contradict the user's own setting. |
 | `git log HEAD..origin/development --oneline` has results | **Origin-CORE drift.** Show count + first commit subject. Ask if `git merge development` desired (CORE/USER paths shouldn't conflict; CLAUDE.md edits sometimes do). |
 | `upstreams:` configured AND any channel past its `pull_interval_days` | Run the inbound status check, see `references/upstream-summary.md`. It covers CORE and overlays and is read-only; staleness is derived from git and `overlays.lock.yaml`, so there is no timestamp to write back. |
 | All current | Proceed to data collection |
@@ -616,11 +622,11 @@ cheaper.
 | Situation | Action |
 |-----------|--------|
 | Weekend | Warning in focus box, briefing still runs |
-| 2+ weeks without archive | Warning: "log.md covers X weeks" |
+| Log spans 2+ cadence buckets | Warning: "log.md covers X {cadence} periods" — bucket per `work.archive_cadence`, never a hardcoded week |
 | No tasks/ | Omit active section, suggest queue |
 | GitHub unreachable | Warning, local data only (Stream A) |
 | No meetings | Omit calendar section |
-| Week change | Offer, don't force |
+| Period change | Offer, don't force |
 | imports dir has files | Show import section with type breakdown |
 | imports dir has transcripts | Offer meeting processing |
 | First briefing (empty board) | Short version: focus box + "Board is empty. Create tasks?" |

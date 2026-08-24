@@ -1,7 +1,7 @@
 ---
 summary: "Task Management concept: log/board/tasks lifecycle, status enum, KIND-as-folder — the human-readable companion to AGENTS.md § Task Management."
 type: guide
-last_updated: 2026-06-21
+last_updated: 2026-08-22
 related:
   - AGENTS.md
   - docs/structure.md
@@ -121,12 +121,51 @@ Closing or reclassifying a task is three steps, in order:
    generated, never hand-edited).
 3. **Append a `log.md` row** with a timestamp.
 
-## Log format — weekly file, daily blocks
+## Log format — one file per period, daily blocks
 
-`log.md` is **one file per week**. The week header `# Week {CW} — {DATE_FROM} to {DATE_TO}`
-plus an `**Active Focus:**` line wrap a sequence of daily blocks. `/archive`
-rolls a finished week into `work/archive/weeks/` and resets `log.md` from
+`log.md` holds **one archive period at a time** — by default one week. The
+header `# Week {CW} — {DATE_FROM} to {DATE_TO}` plus an `**Active Focus:**`
+line wrap a sequence of daily blocks. `/archive` rolls a finished period into
+`work/archive/{bucket}/` and resets `log.md` from
 `work/templates/week-skeleton.md`.
+
+### Cadence — `work.archive_cadence`
+
+How often that roll happens is configurable:
+
+| Value | Bucket | Directory |
+|---|---|---|
+| `weekly` *(default)* | ISO week | `work/archive/weeks/` |
+| `bi-weekly` | ISO week pair | `work/archive/weeks/` |
+| `monthly` | calendar month | `work/archive/months/` |
+| `quarterly` | calendar quarter | `work/archive/quarters/` |
+| `yearly` | calendar year | `work/archive/years/` |
+
+The same key drives `/briefing`'s "archive overdue" warning, so the prompt and
+the archiver can never disagree. Leaving it unset behaves exactly as before.
+
+**Choosing one is a context trade, not a filing preference.** `log.md` is read
+in full at every session start, so the cadence sets how much history is loaded
+each time. A rough guide: at ~13 rows on an active day and ~250 bytes a row, a
+month of daily work is ~16k tokens per session, a year ~190k. Pick the longest
+cadence whose loaded size you are willing to pay for on every single session.
+
+### Distillation — archiving is not forgetting
+
+Nothing in the Bridge **reads** `work/archive/`. Session-start, `/briefing`
+and `bridge-curator` all load `log.md` and the memory index, never an archived
+summary. So archiving alone would discard working memory and keep only a
+backup nobody opens.
+
+`/archive` Phase 5 closes that gap: before the reset it distils the period's
+rows into durable facts for the **memory base**, whose `MEMORY.md` index *is*
+loaded every session. Bookkeeping (commits, PRs, status flips) is deliberately
+dropped — git already holds it. Decisions-with-rationale, hard-won diagnoses
+and discovered constraints are kept.
+
+It **proposes and never writes silently** — accepted candidates become memory
+files, deferred ones become `work/_learning/proposals/` entries reviewable via
+`/bridge-learn` ([`rules/learning-autonomy.md`](../rules/learning-autonomy.md)).
 
 Each day-block (template: `work/templates/day.md`):
 

@@ -1,7 +1,7 @@
 ---
 summary: "File-based memory model — one fact per file, MEMORY.md as a lean index"
 type: guide
-last_updated: 2026-06-19
+last_updated: 2026-08-22
 related:
   - ../rules/knowledge-growth.md
 ---
@@ -11,6 +11,26 @@ related:
 The Bridge keeps a persistent, file-based memory base — the experience store that
 survives across sessions. It is **not** a session log; it holds durable facts the
 agent should recall later.
+
+## Where memories come from
+
+Two routes, both human-gated:
+
+1. **In-session** — you or the agent notice a durable fact and save it.
+2. **Distilled at archive time** — `/archive` Phase 5 reads the period's
+   `work/log.md` rows before resetting them and proposes the few that carry
+   lasting knowledge (a decision *and its why*, a costly diagnosis, a
+   discovered constraint). Bookkeeping rows are dropped: git already records
+   commits and PRs permanently.
+
+Route 2 exists because `work/archive/` has **no reader** — no skill loads an
+archived summary back into context. The memory base is the only layer that is
+read every session, so distilling into it is what lets a short archive cadence
+stay safe instead of amnesiac. Neither route writes without confirmation
+(see [`../rules/learning-autonomy.md`](../rules/learning-autonomy.md)); a
+deferred candidate becomes a `work/_learning/proposals/` entry with
+`source.type: archive-distill` and `target.type: memory`, reviewed via
+`/bridge-learn`.
 
 ## Model
 

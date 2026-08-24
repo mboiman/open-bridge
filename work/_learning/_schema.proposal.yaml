@@ -47,7 +47,7 @@ properties:
     additionalProperties: false
     properties:
       type:
-        enum: [postmortem, audit-recurring, trigger-correction, manual, curator-suggestion]
+        enum: [postmortem, audit-recurring, trigger-correction, manual, curator-suggestion, archive-distill]
         description: |
           postmortem: from task-close-postmortem skill
           audit-recurring: from /bridge-audit Phase-3 trend detection
@@ -55,6 +55,10 @@ properties:
           manual: user wrote it directly via /bridge-learn
           curator-suggestion: from bridge-curator weekly consolidation pass
             (Library / Queue / User-Pattern phases — see skills/bridge-curator/)
+          archive-distill: from /archive Phase 5 — a durable fact distilled
+            out of the log rows for the period being archived, before log.md
+            is reset. Always target.type=memory. Proposed, never written
+            silently (rules/learning-autonomy.md).
       task_slug:
         type: string
         pattern: "^[a-z][a-z0-9-]*$"
