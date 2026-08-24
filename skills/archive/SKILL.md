@@ -1,24 +1,38 @@
 ---
 name: archive
 description: >-
-  Archive the current week — collect log entries, generate summary, reset
-  log.md, check upstream. Supports --force mode.
-  Trigger: "/archive", "archive", "archive week",
-  "week archive", "week wrap-up".
+  Archive the current period — collect log entries, generate summary, distil
+  durable facts into the memory base (propose-then-confirm), reset log.md,
+  check upstream. Period follows work.archive_cadence (weekly | bi-weekly |
+  monthly | quarterly | yearly). Supports --force mode.
+  Trigger: "/archive", "archive", "archive week", "archive month",
+  "week archive", "week wrap-up", "archive cadence".
 metadata:
   scope: core
 ---
 
 # Archive
 
-Weekly archive workflow. Read the referenced file ONLY when triggered.
+Periodic archive workflow. Read the referenced file ONLY when triggered.
+
+The period is **configurable** — `bridge-config.yaml` `work.archive_cadence`
+(`weekly` default, then `bi-weekly` / `monthly` / `quarterly` / `yearly`).
+The same key drives `/briefing`'s staleness warning, so the reminder and the
+archiver always agree on what "overdue" means.
+
+Archiving **distils before it resets**: `work/archive/` has no reader, so
+without a distil step archiving would be forgetting with a backup. Phase 5
+proposes durable facts for the memory base — which *is* loaded every session
+— and never writes one without confirmation
+([`rules/learning-autonomy.md`](../../rules/learning-autonomy.md)).
 
 ## Arguments
 
 | Argument | Effect | Default |
 |----------|--------|---------|
-| `(none)` | Archive with day-of-week detection | — |
-| `--force` | Archive without confirmation | false |
+| `(none)` | Archive the oldest closed period, per `work.archive_cadence` | — |
+| `--force` | Archive the current (in-progress) period too | false |
+| `--no-distil` | Skip Phase 5; archive without proposing memories | false |
 
 ## Prerequisites
 
@@ -28,7 +42,8 @@ Weekly archive workflow. Read the referenced file ONLY when triggered.
 
 ```
 User wants to...
-├── Archive the week                 → Read references/workflow.md
+├── Archive the period               → Read references/workflow.md
+├── Change how often it archives     → bridge-config.yaml work.archive_cadence
 ├── Are we behind on anything?       → Read skills/briefing/references/upstream-summary.md
 └── Questions about archiving        → Answer from this file
 ```

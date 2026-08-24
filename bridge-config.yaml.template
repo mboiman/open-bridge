@@ -88,6 +88,17 @@ work:
   logging_level: hybrid      # hybrid (auto-log on triggers + 30 min reminders)
                              # auto    (log on configured triggers only)
                              # manual  (only when you ask)
+  archive_cadence: weekly    # weekly | bi-weekly | monthly | quarterly | yearly
+                             # How often /archive rolls log.md into work/archive/
+                             # and resets it. Drives BOTH the archive period and
+                             # the staleness warning /briefing raises — the two
+                             # can no longer disagree. `weekly` is the historical
+                             # behaviour, so leaving this unset changes nothing.
+                             # NOTE: log.md is read in full at every session
+                             # start, so a long cadence trades recall breadth for
+                             # context cost. /archive distills durable facts into
+                             # the memory base before resetting (see docs/memory.md),
+                             # so a shorter cadence does not mean forgetting.
   max_active: 5              # max concurrent active tasks (0 = unlimited)
   max_daily_goals: 3
   import_rules: false        # enable work/import-rules.yaml
