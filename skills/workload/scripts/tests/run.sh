@@ -29,7 +29,13 @@ if [ "$PATTERN" = "--mutate" ]; then
   exec python3 "$DIR/mutate.py"
 fi
 
-RAW="$(mktemp -t workload-tests)"
+# The template carries its own X's and the whole path is given, because the
+# two mktemp implementations disagree about `-t` with a bare name: BSD
+# appends a suffix, GNU refuses with "too few X's in template". A suite
+# written on one of them collected zero tests on the other and said so in a
+# line nobody would connect to a temporary file. CI found this; a macOS run
+# never could.
+RAW="$(mktemp "${TMPDIR:-/tmp}/workload-tests.XXXXXXXX")"
 trap 'rm -f "$RAW"' EXIT
 
 if [ -n "$PATTERN" ]; then
