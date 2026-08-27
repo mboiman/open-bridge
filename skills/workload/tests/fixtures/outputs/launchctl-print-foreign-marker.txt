@@ -1,0 +1,9 @@
+gui/4242/bridge.calendar-export = {
+	active count = 1
+	path = /home/opuser/Library/LaunchAgents/bridge.calendar-export.plist
+	state = running
+	environment = {
+		BRIDGE_WORKLOAD => some-other-workload
+		BRIDGE_WORKLOAD_DIGEST => sha256:9999999999999999999999999999999999999999999999999999999999999999
+	}
+}

@@ -1,0 +1,6 @@
+schema_version: 1
+scope: user
+id: negative-retired-without-reason
+purpose: "Negative control: retiring without a reason must be rejected, a rename loses the why"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}
+retired: {at: "2026-08-06"}

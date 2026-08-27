@@ -1,0 +1,10 @@
+# Control for: `not` against Etc/GMT±N.
+# The same fixed offset, only with an IANA name: the Region/Place form is
+# satisfied, the content is an offset nonetheless, and the sign is inverted
+# there.
+schema_version: 1
+scope: user
+id: negative-offset-as-timezone-name
+purpose: "Control: a fixed offset as an IANA name (Etc/GMT+2) must be refused"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: human}
+schedule: {every_sec: 900, timezone: "Etc/GMT+2"}

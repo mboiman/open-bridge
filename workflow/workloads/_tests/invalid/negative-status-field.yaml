@@ -1,0 +1,12 @@
+# Representative of the "additionalProperties: false" class at the top level,
+# and at the same time the heaviest single rule in the file: doing without
+# `status:` is, by the header comment, the reason this schema exists. A
+# declared status is never the truth, the service manager is. Without this rule
+# the field comes back through the side door, in exactly the shape it already
+# drifted in once.
+schema_version: 1
+scope: user
+id: negative-status-field
+purpose: "Control: a declared status field must be refused"
+status: running
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}

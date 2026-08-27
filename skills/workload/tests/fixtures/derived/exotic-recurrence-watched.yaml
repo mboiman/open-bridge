@@ -1,0 +1,33 @@
+# A recurrence OUTSIDE the translated subset that nevertheless asks for missing
+# detection. The pair is the point: the refusal has to survive the arrival of
+# an answer for the ordinary case, or a rule the renderer refuses would be
+# approximated here and printed as a measurement.
+---
+schema_version: 1
+scope: user
+id: "exotic-recurrence-watched"
+title: "Last Friday of the month, and watched"
+purpose: "A recurrence this skill does not translate, asking to be missed"
+persona_ref: _shared
+placement:
+  host: "host-a"
+  kind: "recurring"
+  runtime: "launchd"
+  owner: "bridge"
+  provisioned_at: null
+  interpreter: /bin/bash
+schedule:
+  rrule: "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+  delivery_at: "09:00"
+  timezone: Europe/Berlin
+execution:
+  command: ["/bin/bash", "/opt/monthly.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  notify_on: [failure, missing]
+  notify_via: bridge-notify
+learned_from: "fixture: the refusal must survive the answer"

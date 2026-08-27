@@ -1,0 +1,5 @@
+schema_version: 1
+scope: user
+id: this-id-does-not-match-the-filename
+purpose: "Negative control: id and filename must match or the file is unfindable"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}

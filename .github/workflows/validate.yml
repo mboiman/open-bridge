@@ -114,6 +114,39 @@ jobs:
       - name: Run scope-router regression suite
         run: python3 -m pytest scripts/tests/test_scope_router.py -q
 
+  # The workload skill carries three suites of its own, and each answers a
+  # different question. The skill writes unit files onto machines: a contract it
+  # can break unnoticed is the one contract that ends up on a service manager.
+  #
+  #   * the engine suite    does the code still do what it says
+  #   * the schema contract is every rule still enforced, and does every negative
+  #                         control still name the rule it proves
+  #   * the mutation battery do those controls still BITE. Two needles had gone
+  #                         hollow before anyone noticed: one matched nothing
+  #                         after a rule was restructured, one matched twice
+  #                         after a second spelling appeared. A needle that
+  #                         matches nothing softens nothing, and the run still
+  #                         reported green for the rest.
+  workload-suites:
+    name: Workload Engine + Schema Contract + Mutations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install PyYAML + check-jsonschema
+        run: |
+          pip install pyyaml
+          pipx install check-jsonschema
+
+      - name: Run workload engine suite
+        run: bash skills/workload/run-tests.sh
+
+      - name: Run declaration schema contract
+        run: bash workflow/workloads/_tests/run.sh
+
+      - name: Prove every negative control still bites
+        run: bash workflow/workloads/_tests/run.sh --mutate
+
   workspace-tests:
     name: Workspace Engine + Registry + Skill
     runs-on: ubuntu-latest

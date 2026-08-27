@@ -1,0 +1,12 @@
+# Control for: persona_ref.pattern.
+# The same rule as the mandant, for the same reason: the field is a REFERENCE
+# to identity/personas/<slug>.yaml, not free text. A written out name carries a
+# person into the file, and the file travels through the scope router. A slug
+# has no space, no capital, no @ and no dot; the form alone rejects it without
+# guessing what a name is.
+schema_version: 1
+scope: user
+id: negative-persona-as-plaintext-name
+purpose: "Control: a written out person name in the persona reference must be refused"
+persona_ref: "Jane Doe"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}

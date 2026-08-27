@@ -1,0 +1,46 @@
+# Fixture: one run, two named appointments, two distribution lists.
+# Modelled on a real migration: the same analysis answers twice a day, and one
+# recipient is on the morning list only.
+---
+schema_version: 1
+scope: user
+id: "twice-daily-report"
+title: "Report at two times"
+purpose: "One analysis, answered twice a day, to two lists"
+persona_ref: _shared
+placement:
+  host: "host-a"
+  kind: "recurring"
+  runtime: "launchd"
+  owner: "bridge"
+  provisioned_at: null
+  interpreter: /bin/bash
+schedule:
+  timezone: Europe/Berlin
+  appointments:
+    - name: morning
+      at: "06:30"
+      rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA"
+      duration_estimate_min: 0
+    - name: midday
+      at: "12:30"
+      rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA"
+execution:
+  command:
+    - "/bin/bash"
+    - "/opt/report.sh"
+  timeout_sec: 1800
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  recipients:
+    - mandant: team
+      person: first_person
+    - mandant: team
+      person: second_person
+      only_at: [morning]
+  notify_on: [failure, missing]
+  notify_via: bridge-notify
+learned_from: "fixture for several appointments in one declaration"

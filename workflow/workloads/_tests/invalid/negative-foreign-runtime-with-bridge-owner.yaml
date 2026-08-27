@@ -1,0 +1,10 @@
+# Control for: runtime external implies owner foreign.
+# What stands here is a contradiction: a foreign platform carries the service,
+# and the declaration claims nonetheless that the Bridge provisions and
+# maintains it. That sentence lived only in the description until round 3.
+schema_version: 1
+scope: user
+id: negative-foreign-runtime-with-bridge-owner
+purpose: "Control: a foreign runtime with the Bridge as owner must be refused"
+placement: {host: host-a, kind: daemon, runtime: external, owner: bridge}
+reconcile: {probe: "curl -sS -o /dev/null -w '%{http_code}' https://example/health", expect: "200"}

@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: contract-review-reminder
+purpose: "Reminder to review the supplier contract before the cancellation deadline"
+placement: {host: host-a, kind: oneshot, runtime: dispatcher, owner: bridge}
+schedule: {at: "2026-10-15T09:00:00+02:00", timezone: Europe/Berlin}
+execution: {command: ["/opt/bridge/bin/assistant", "-p", "..."], timeout_sec: 900}
+response: {evidence: log-trace, recipients: [{mandant: example-org}], notify_on: [failure, missing], notify_via: bridge-notify}

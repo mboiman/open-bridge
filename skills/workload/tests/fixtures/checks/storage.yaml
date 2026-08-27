@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+group: storage
+checks:
+  - id: disk-free
+    description: "Same bare id as in the sample group, which is what makes it ambiguous"
+    run_on: host-b
+    kind: compare
+    probe: "df -BG /srv | tail -1 | awk '{print $4}'"
+    expect: ">=50"
+    severity: medium
+    hint: "prune the archive volume"

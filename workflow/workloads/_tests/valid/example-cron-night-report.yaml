@@ -1,0 +1,26 @@
+# Coverage case: runtime cron. An appointment with a deadline: rrule plus
+# delivery_at, and no second trigger.
+schema_version: 1
+scope: core
+id: example-cron-night-report
+title: Example cron night report
+purpose: "Example nightly report under cron, the result is due at the delivery time"
+placement: {host: example-linux-host, kind: recurring, runtime: cron, owner: bridge}
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+  delivery_at: "05:00"
+  duration_estimate_min: 15
+  timezone: Europe/Berlin
+execution:
+  command: ["/usr/local/bin/example-night-report", "--format", "text"]
+  timeout_sec: 900
+  on_timeout: report
+response:
+  evidence: log-trace
+  recipients: [{mandant: example-team}]
+  notify_on: [failure, timeout, missing]
+  notify_via: example-notify
+reconcile:
+  probe: "crontab -l | grep -c example-night-report"
+  expect: "1"
+  hint: "write the entry again from this declaration"

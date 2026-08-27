@@ -1,0 +1,9 @@
+# Control for: schedule.at needs a date AND a time.
+# `at` is the ONLY trigger a one-shot has. No backend can read prose, and the
+# run would silently never happen.
+schema_version: 1
+scope: user
+id: negative-oneshot-at-as-prose
+purpose: "Control: a one-shot instant written as prose instead of ISO 8601 must be refused"
+placement: {host: host-a, kind: oneshot, runtime: dispatcher, owner: human}
+schedule: {at: "sometime next week", timezone: Europe/Berlin}

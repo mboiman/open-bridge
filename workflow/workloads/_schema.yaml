@@ -1,0 +1,770 @@
+# Workloads Schema — JSON Schema Draft 2020-12 in YAML
+#
+# Validates `workflow/workloads/<slug>.yaml`. A workload file declares ONE thing
+# that runs on ONE machine: a scheduled job, an interval job, a daemon, a path
+# watcher, an inbound agent, or a one-shot. The `workload` skill provisions it
+# from this declaration, stamps ownership, and can retire it again.
+#
+# Validation:
+#   check-jsonschema --schemafile workflow/workloads/_schema.yaml \
+#                    workflow/workloads/<slug>.yaml
+#
+# IDE hint:
+#   # yaml-language-server: $schema=./_schema.yaml
+#
+# WHY THERE IS NO `status:` FIELD — this is deliberate, not an omission.
+# A declared status is never the truth (rules/deploy-reconciliation.md); the
+# service manager is. State comes from `reconcile:` asking the live source. The
+# existing inventory proves the point: 52 of 74 service entries on one host carry
+# no status at all, and the ones that do drift.
+#
+# WHY `kind` AND `runtime` ARE SEPARATE — the current inventory conflates them in
+# a single `type:` field, which is why `scheduled` (44 entries) covers both a
+# 06:30 weekday report and a "every 900 seconds" poller. Those are different
+# things: one has appointments, the other only has a cadence. Splitting them is
+# what lets a calendar view draw appointment ticks for one and a cadence band for
+# the other without inventing times that never existed.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://bks-lab.github.io/open-bridge/schemas/workload.yaml"
+title: Workload
+description: |
+  One declared unit of work on one host. Provisioned from this file, never the
+  other way round: what lives on the machine is an artifact and may be recreated
+  from this declaration at any time.
+
+type: object
+required: [schema_version, scope, id, purpose, placement]
+additionalProperties: false   # no status:, which is the whole reason this file exists
+
+properties:
+
+  schema_version:
+    type: integer
+    const: 1
+
+  scope:
+    enum: [core, org, personal, user]
+    description: |
+      Three-tier routing scope. A declaration naming concrete hosts, paths or
+      recipients is `user`. Only a generic example ships as `core`.
+
+  id:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: "Stable slug, unique across all workloads. Matches the filename."
+
+  title:
+    type: string
+    description: "Human-readable name. Falls back to id."
+
+  purpose:
+    type: string
+    minLength: 8   # four characters would be the shape without the content
+    description: |
+      One sentence: what this exists for, in the reader's language. Required —
+      an undocumented run is how 74 services end up with nobody knowing why.
+
+  persona_ref:
+    type: string
+    pattern: "^(_shared|_infrastructure|[a-z][a-z0-9-]*)$"
+    description: |
+      WHOSE HAT this run wears: the slug of a persona under identity/personas/,
+      or one of two reserved answers. Optional, and absent means UNDECIDED, a
+      third state that is deliberately not the same as either reserved answer.
+
+      A machine that carries work for more than one sphere needs this, and the
+      need is not cosmetic: an operator who cannot see which runs belong to
+      which sphere cannot separate them for billing, for a handover, or when
+      one sphere ends. On a fleet where a private household job, a company
+      customer's report and a freelance client's bot all run under the same
+      login, the login is not the answer to whose work it is.
+
+      The two reserved answers exist because forcing a persona on every run
+      would make the field a lie in exactly the cases where it matters most:
+
+        _shared          serves more than one sphere on purpose. A transport
+                         (chat, mail, tunnel) usually is one. Write the reason
+                         on the line; a bare `_shared` decays into "nobody
+                         looked".
+        _infrastructure  serves the machine or the Bridge itself and no sphere
+                         at all: an ssh watchdog, a puller, a health guard.
+
+      Both are reserved by their leading underscore, which is what makes them
+      structurally impossible to confuse with a persona: the persona schema
+      requires `^[a-z][a-z0-9-]*$`, so no persona can ever be named `_shared`,
+      and the collision cannot be introduced later by accident.
+
+      Like `recipients.mandant`, the pattern is a SHAPE rule and not a
+      detector. It does not check that identity/personas/<slug>.yaml exists;
+      only a read can answer that.
+
+  placement:
+    type: object
+    required: [host, kind, runtime, owner]
+    additionalProperties: false
+    description: "1 of 4 — how it is provisioned."
+    properties:
+      host:
+        type: string
+        description: |
+          Machine slug, resolved against infra/remotes/<host>.yaml. `local` = the
+          machine running the skill.
+      kind:
+        enum: [recurring, interval, daemon, watch, agent, oneshot]
+        description: |
+          What triggers it.
+            recurring — appointments (a weekday report at 06:30)
+            interval  — a cadence with no appointment (every 900 s)
+            daemon    — runs continuously
+            watch     — a path change
+            agent     — an inbound request
+            oneshot   — once, at a date, then done
+      runtime:
+        enum: [launchd, launchd-system, systemd, cron, dispatcher, manual, external]
+        description: |
+          Which backend actually carries it. `dispatcher` = the Bridge's own
+          five-minute run dispatcher. `manual` = started by hand (tmux, nohup);
+          declarable so it is visible, never provisioned. `external` = a platform
+          manages it (e.g. a mesh daemon) — always pair with owner: foreign.
+      owner:
+        enum: [bridge, human, foreign]
+        description: |
+          THE field this whole schema exists for. `bridge` = provisioned from this
+          declaration and maintained by it. `human` = a person created it by hand;
+          documented, never touched by the skill. `foreign` = third-party software;
+          seen in the inventory, never touched.
+      provisioned_at:
+        type: [string, "null"]
+        pattern: "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$"   # same shape as schedule.at; null passes a pattern untouched
+        description: |
+          ISO-8601 instant, written by `workload provision`. null = declared but
+          not provisioned, and `pattern` only ever applies to strings, so the null
+          case passes it untouched. Same shape as schedule.at: a stamp that cannot
+          be ordered against another stamp does not answer the one question it
+          exists for, which is what ran before what.
+      interpreter:
+        type: string
+        pattern: "^/"   # absolute, because a relative interpreter is a different TCC client
+        not: {pattern: '(?:^|/)(v?\d+(?:\.\d+)+(?:[._-][A-Za-z0-9]+)?)(?:/|$)'}   # a version segment is a path with an expiry date
+        description: |
+          Absolute path of the interpreter, when one is involved. This is the
+          TCC client path on macOS, so it must be the literal path the unit
+          names — a 'more stable' path is a DIFFERENT client with no grant.
+
+          The pattern is what enforces the first word, and this is the field
+          where a relative path fails most quietly of the three. A relative
+          interpreter is not a start failure: the service manager resolves it
+          against its own PATH, finds A binary, and starts it. What is missing
+          is the privacy grant, because the grant was issued to the literal path
+          the unit named. Nothing errors. The run simply cannot see the data it
+          was written for, and it looks like an empty inbox rather than a denial.
+
+          The `not` is the OTHER half, and the two are easy to confuse. Once a
+          path is chosen it is emitted verbatim and never resolved, because a
+          resolved path is a different client. But CHOOSING one that carries a
+          version number, at declaration time, picks a file that is meant to be
+          replaced. Two silent failures follow, and neither raises anything:
+          the upgrade that installs the successor deletes this file, so the unit
+          starts nothing, and the new path is a client nobody ever granted
+          anything to, so even a surviving file reads an empty result instead of
+          being denied.
+
+          Measured, not assumed. A real user TCC database holds six consecutive
+          rows for the same tool under `.../versions/<version>`, five of them
+          granting nothing, because every update wrote a path whose prompt had
+          never been answered. The same database carries one binary twice, once
+          under a package manager path that moves with every upgrade and once
+          under a stable path that does not, which is exactly the difference
+          this rule asks for.
+
+          A segment with no dot is not a version: `report2` and `python3` pass
+          untouched, because a digit inside a name is not a version number and
+          refusing one would be a guess.
+      privacy_grants:
+        type: array
+        items:
+          enum: [full-disk-access, calendar, contacts, reminders, photos,
+                 automation, accessibility, screen-recording, microphone,
+                 camera, files-and-folders, bluetooth, local-network]
+        description: |
+          macOS privacy grants this run DEPENDS on, named after the pane a human
+          opens to give one. Declaring one changes two things and claims nothing.
+
+          What it claims: nothing about the machine. macOS lets no program read
+          or write the grant database, so a declaration can only ever say what a
+          run NEEDS, never what it HAS. Anything that told you a grant is alive
+          would be guessing, and a guessed all-clear is worse than silence.
+
+          What it changes: the interpreter stops being free. A grant is issued
+          to a PATH, so the path becomes an identity, and the allOf rule below
+          demands one and refuses the interpreters the whole machine shares. It
+          also gives a human the exact pane name when a grant has to be given
+          again, which is the only repair anybody can actually perform.
+
+          The list is closed, because the value's whole job is to send a person
+          to the right place. A typo would send them to a pane that does not
+          exist, they would find nothing, and they would conclude the grant is
+          fine.
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "For daemon/agent: the port it listens on."
+      label_prefix:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*(\\.[A-Za-z0-9][A-Za-z0-9_-]*)*$"
+        description: |
+          The unit label prefix for THIS run, when the unit already exists on
+          the machine under a hand made name. Omit it and the instance default
+          from the configuration applies (`bridge` unless set otherwise), which
+          is what a run created from this declaration should carry.
+
+          A PREFIX and not a whole label, deliberately. Everything downstream
+          relies on the declaration id being the tail of the label: inventory
+          matching, the ownership stamp key, the trace file, the guard script
+          name. A free form label breaks that relationship for all of them at
+          once and does it silently. Measured against a live machine carrying
+          55 hand made units: every one of them decomposed into
+          <prefix>.<id>[.<appointment>], including three-segment prefixes and
+          units whose last segment is an appointment name. A prefix is enough,
+          and enough is the point.
+
+          This is what makes `adopt` usable at all: without it the skill could
+          only take over a unit that already carries this instance's own
+          prefix, which is exactly the unit nobody creates by hand.
+
+          Two declarations must not resolve to the same label; `validate`
+          refuses that, because the second would silently claim the first
+          one's unit, stamp and trace.
+
+  schedule:
+    type: object
+    additionalProperties: false
+    description: |
+      2 of 4 — WHEN. Required for kind recurring/interval/watch/oneshot and
+      FORBIDDEN for daemon/agent. Both are enforced by the allOf rules below,
+      not merely stated here. A daemon that carries a delivery_at would hand the
+      calendar view an appointment tick for something that never had an
+      appointment, which is the exact confusion kind and runtime were split to
+      end.
+
+      Exactly ONE trigger, and it must match the kind: rrule for recurring,
+      every_sec for interval, watch_paths for watch, at for oneshot. Two
+      triggers in one declaration means the backend decides which one fires, and
+      the file no longer says what runs.
+
+      ONE named exception, also enforced: kind watch may add every_sec as a
+      fallback cadence. A path watcher can fire before the file it watches has
+      finished materialising, so the cadence is what catches the run the watch
+      missed. That pairing is a launchd unit with WatchPaths AND StartInterval:
+      one trigger plus its safety net, not two competing triggers.
+    properties:
+      rrule:
+        type: string
+        pattern: "^FREQ=(SECONDLY|MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)"   # shorthand: one appointment
+        description: |
+          RFC 5545 recurrence for kind: recurring. Must be evaluated by a real
+          RRULE library — a hand-rolled parser that silently supports only
+          FREQ=DAILY turns every weekly entry into a single fire.
+      every_sec:
+        type: integer
+        minimum: 1
+        description: |
+          Cadence for kind: interval, and the ONLY trigger a kind: watch may
+          add alongside watch_paths (the fallback cadence). An interval job has
+          NO appointment: its phase is anchored at load time, which nobody
+          records. Never render it as a clock time.
+      watch_paths:
+        type: array
+        minItems: 1
+        items: {type: string}
+        description: "Paths for kind: watch."
+      at:
+        type: string
+        pattern: "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$"   # date AND time; at is the only thing that fires a oneshot
+        description: |
+          ISO-8601 instant for kind: oneshot. Date AND time, because `at` is the
+          ONLY thing that fires a oneshot: a bare day does not say when, and prose
+          ('sometime next week') says nothing a backend can read. The
+          offset is optional; without one the instant is read in `timezone`. Shape
+          check, like delivery_at's: it holds the calendar fields to their ranges,
+          it does not know that February has no 31st.
+      delivery_at:
+        type: string
+        pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        description: |
+          Local wall-clock time the RESULT is due, not the start. With
+          duration_estimate_min the start is derived. Migrating a job that used
+          a start time shifts its arrival earlier — say so before migrating.
+      duration_estimate_min:
+        type: integer
+        minimum: 0
+        description: "Expected runtime. start = delivery_at − this."
+      appointments:
+        type: array
+        minItems: 2
+        items:
+          type: object
+          additionalProperties: false
+          required: [name, at, rrule]
+          properties:
+            name:
+              type: string
+              pattern: "^[a-z][a-z0-9-]{0,31}$"
+              description: |
+                The appointment's own name, and it is DECLARED rather than
+                derived from its time. A name built from the clock changes when
+                the time changes, and the unit on the machine is named after it:
+                moving a report by ten minutes would silently orphan its unit,
+                its stamp and its trace.
+            at:
+              type: string
+              pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+              description: "Same meaning as delivery_at: when the RESULT is due."
+            rrule:
+              type: string
+              pattern: "^FREQ=(SECONDLY|MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)"   # per declared appointment
+              description: |
+                Per appointment, because two times of day need not share a day
+                set. Written out for each one rather than inherited: an
+                inherited recurrence is read as "the same" and is the first
+                thing to drift when one of the two changes.
+            duration_estimate_min:
+              type: integer
+              minimum: 0
+        description: |
+          SEVERAL appointments for one run, when the same work answers at more
+          than one time of day. Mutually exclusive with rrule/delivery_at, and
+          at least TWO entries: exactly one appointment is spelled with
+          rrule + delivery_at, and allowing a second spelling for the same thing
+          is how two shapes of the truth start disagreeing.
+
+          Each appointment becomes its own unit on the machine, named
+          <label>.<name>. That is not an implementation detail leaking upward,
+          it is the runtime's own constraint stated honestly: a launchd unit has
+          exactly one command and one environment, so two appointments that
+          answer different recipients cannot share one. The declaration stays
+          ONE file, which is what a reader maintains; the units are artifacts
+          rebuilt from it.
+
+          Each unit keeps its OWN stamp, trace and captured output, because
+          "did the midday run happen" is a different question from "did the
+          morning run happen" and one shared history cannot answer both.
+      timezone:
+        type: string
+        pattern: "^[A-Za-z][A-Za-z0-9_+-]*/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$"
+        not: {pattern: "^Etc/GMT[+-]?[0-9]"}   # the same fixed offset, spelled as an IANA name
+        description: |
+          IANA zone (Europe/Berlin), never a fixed offset. A stored '+02:00'
+          silently shifts every occurrence by an hour at the DST change.
+
+          Two rules, because a fixed offset has two spellings. The pattern demands
+          the SHAPE of a zone name, Area/Location or Area/Region/Location, which
+          '+02:00' and 'Mittagszeit' both fail. The `not` catches the same offset
+          wearing an IANA name: Etc/GMT+2 IS a fixed offset, with an inverted sign
+          on top. Bare 'UTC' is spelled 'Etc/UTC' here, so one shape rule covers
+          every value.
+
+          What this does NOT check: that the zone exists in the tzdata of the host
+          that will run it. A pattern cannot know that, and claiming otherwise
+          would be the same hollow promise this round was called to end. Only the
+          running host can answer it, which is what `reconcile:` is for.
+
+  execution:
+    type: object
+    additionalProperties: false
+    description: "3 of 4 — how it runs. Every default here is a scar."
+    properties:
+      command:
+        type: array
+        minItems: 1   # an empty argv is not a command
+        prefixItems:
+          - type: string
+            pattern: "^/"   # argv[0] absolute; PATH under a service manager is not a login PATH
+        items: {type: string}
+        description: |
+          argv. argv[0] is held to an absolute path, which is what the second
+          half of this line used to only assert: a service manager starts a unit
+          with a bare, short PATH and no login shell, so `claude` or
+          `./report.sh` resolves to something else than it does in a terminal,
+          or to nothing. The arguments after argv[0] are free text — they carry
+          flags and values, and a rule over them would be a guess.
+
+          The `~` case is covered by the same pattern rather than by a rule of
+          its own: no backend expands a tilde, so `~/bin/x` is a relative path
+          with a character in front of it.
+      working_dir:
+        type: string
+        pattern: "^/"   # absolute; there is no login shell here to expand a ~ or a relative path
+        description: |
+          Absolute. A service manager starts the unit with no login shell, so a
+          tilde is a literal character and a relative path is resolved against
+          whatever directory the manager happened to start in — usually `/`.
+      env:
+        type: object
+        propertyNames:
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"   # the hand-written gate's ENV_NAME_PATTERN, character for character
+        additionalProperties:
+          type: string
+          pattern: '^(azure-keyvault|keychain|1password|op|vault|file)://\S+$'   # a locator, never a value
+        description: |
+          A map of environment NAME to a REFERENCE. Never a value.
+
+          This field said "literal values only. Secrets by reference, never
+          inline" and enforced neither half. A key pasted here went through both
+          gates and then travelled twice: verbatim into the unit on the machine
+          (`Environment=` under systemd, `EnvironmentVariables` under launchd)
+          and, because the declaration is a tracked file, into git and through
+          the scope router along with it.
+
+          The rule is a SHAPE rule on purpose, and the shape is the reference,
+          not the secret. A detector that decides whether a string is a secret
+          has to guess, and one that claims it does not is worse than none —
+          every value it misses arrives as a clean bill of health. So nothing is
+          classified here: no value at all may be written, only a locator into a
+          named store, and the schemes are a closed list so a typo is refused
+          rather than waved through.
+
+          `propertyNames` is the one rule here that is a COPY: the hand-written
+          gate in the engine already refuses a name that is not a name, and a
+          declaration is validated by both gates. This file did not, so the two
+          gates disagreed and `--strict` reported clean on something the plain
+          run refuses. The pattern is therefore taken from the engine character
+          for character; if one of them ever changes, they must change together.
+
+          What this DOES hold:
+            · a literal in `env` is refused, secret-looking or not, with no
+              wordlist and no judgement call
+            · the unit file and the declaration carry a locator, so neither one
+              is worth stealing
+
+          What it does NOT hold, stated plainly because the last version of this
+          line promised more than it kept:
+            · a secret pasted as the LOCATOR (`keychain://` followed by the key
+              itself) is well-formed and passes. The shape cannot see that.
+            · `command`, `working_dir`, `reconcile.probe`, `purpose` and every
+              other free-text field are untouched by this rule. A secret in argv
+              lands in the unit file exactly as one in `env` would.
+            · nothing here resolves the reference or checks the store holds it.
+              The process receives the LOCATOR and resolves it itself; a program
+              that expects the raw value will read a URI and must be adapted.
+      timeout_sec:
+        type: integer
+        minimum: 1   # a deadline of zero is not a deadline
+        description: |
+          Hard deadline for every outbound call. REQUIRED exactly where the Bridge
+          owns a run that is supposed to END: owner bridge with kind recurring,
+          interval, watch or oneshot. That, and no more, is what the allOf rule at
+          the bottom enforces. daemon and agent are exempt on purpose, because
+          they are supposed to keep running; a deadline on the unit itself would
+          be the bug there, and the deadline that matters for them belongs on the
+          calls they make. Allowed everywhere, required there. A run without one
+          hung for three and a half hours on 2026-08-21.
+      isolation:
+        enum: [process-group, process]
+        description: |
+          Default process-group. Killing only the direct child leaves grandchildren
+          holding the output pipe, and the cleanup then blocks forever — which is
+          the exact shape of that three-and-a-half-hour hang.
+      single_flight:
+        type: boolean
+        description: |
+          Default true. Never start what is still running. One job lost 53 of 181
+          runs silently to overlapping starts.
+      on_timeout:
+        enum: [report, kill-silent]
+        description: "Default report. A deadline that expires is a reported error, never silence."
+
+  response:
+    type: object
+    additionalProperties: false
+    description: "4 of 4 — how anyone learns what happened. Silence is the normal case."
+    properties:
+      evidence:
+        enum: [exit-code, log-trace, delivery-receipt]
+        description: |
+          What counts as proof this ran and landed. `exit-code` is the weakest:
+          osascript reports success even when nothing was delivered. Do not claim
+          delivery-receipt unless the command actually returns one.
+
+          COUPLED TO `notify_on`, and the declaration gate enforces it. The
+          guard writes the trace line only where `notify_on` asks about
+          `missing` or `failure`. Naming `log-trace` or `delivery-receipt`
+          with neither is naming a proof that nothing will produce, and it is
+          refused.
+
+          The silent version of this happened: a run declared `log-trace` with
+          an empty `notify_on` on purpose, passed both gates, was provisioned,
+          ran, exited zero and wrote nothing. `reconcile` then called it in
+          sync, because a trace that was never written looks exactly like one
+          nobody has read yet.
+
+          Two ways out, and they are different answers rather than a
+          preference: add `missing` to `notify_on` if an absent run should
+          really be reported, or say `exit-code` if the service manager's exit
+          status really is the proof.
+
+          What a run SAID is a separate question and needs no declaration: the
+          guard captures stdout and stderr of every run into `<id>.out` beside
+          the trace, truncated per run and capped, unless the evidence is a
+          receipt (then the receipt file is that capture).
+      recipients:
+        type: array
+        items:
+          type: object
+          required: [mandant]
+          additionalProperties: false   # never a plaintext address, only a slug
+          properties:
+            mandant:
+              type: string
+              pattern: "^[a-z0-9][a-z0-9-]*$"   # slug shape; an address, a number or a written-out name cannot have it
+              description: |
+                Slug under identity/mandants/, and the pattern above is what makes
+                that sentence true rather than merely stated.
+
+                Until this round only the KEY NAMES here were guarded. A plaintext
+                address in the VALUE went through untouched, so a recipient could
+                be spelled out in full and the file still validated clean — while
+                `additionalProperties: false` right above claimed to keep exactly
+                that out. A file with a plain address in it is not promotable: it
+                carries a person into whatever tier the file reaches, and the scope
+                router cannot take that back.
+
+                The pattern is a shape rule, not a detector: a slug has no `@`, no
+                dot, no space and no capital, so an address, a phone number and a
+                name are refused by the form itself and nothing has to guess what
+                a person looks like.
+
+                What it does NOT do: check that the slug exists. Only a read of
+                identity/mandants/<slug>.yaml can answer that, which is the
+                declaration gate's job, not this file's.
+            person:
+              type: string
+              pattern: "^[a-z0-9][a-z0-9_-]*$"   # the same shape, plus the underscore person keys use
+              description: |
+                Optional person key within that mandant — the `id:` of an entry
+                under its `persons:` list, never a name, never a number, never an
+                address. Same reasoning and same shape as mandant above; person
+                keys are written with underscores, so the pattern allows one.
+            only_at:
+              type: array
+              minItems: 1
+              items:
+                type: string
+                pattern: "^[a-z][a-z0-9-]{0,31}$"
+              description: |
+                Names from schedule.appointments, for a recipient who gets only
+                SOME of them. Absent means every appointment, which is what
+                almost every recipient is.
+
+                It exists because leaving it out would make the file lie. A run
+                that answers at two times to two different distribution lists
+                has one recipient list in this file; without a way to say which
+                appointment a name belongs to, the list either claims somebody
+                gets a report they never see, or drops somebody who does.
+
+                A name here that no appointment carries is refused by the
+                declaration gate, not by this file: a pattern cannot know which
+                names exist.
+      notify_on:
+        type: array
+        items: {enum: [failure, timeout, missing]}
+        description: |
+          `missing` = the run did not happen. It is the one nobody has today and
+          the one that loses runs quietly.
+      notify_via:
+        type: string
+        description: "Channel slug under infra/channels/. One notification path, not a second one per workload."
+
+  reconcile:
+    type: object
+    additionalProperties: false
+    description: |
+      How the skill proves it is still there. Replaces a declared status field:
+      ask the live source, never the declaration.
+    properties:
+      probe:
+        type: string
+        description: "Shell command asking the LIVE source (launchctl, systemctl, curl, the dispatcher registry)."
+      expect:
+        type: string
+        description: "What a healthy answer looks like."
+      check_ref:
+        type: string
+        description: "Alternatively, an existing check id under workflow/checks/ — reuse instead of restating."
+      hint:
+        type: string
+        description: "Repair action surfaced on drift — WHAT to do, not what broke."
+
+  retired:
+    type: object
+    required: [at, reason]
+    additionalProperties: false
+    description: |
+      Present = retired. Retiring means disable PLUS a reason, never renaming a
+      file: only disable survives a reboot, and a renamed file loses the why.
+      Generalises the hand-written parked-since / parked-reason pairs the
+      existing inventory carries under a dozen different spellings.
+    properties:
+      at:
+        type: string
+        pattern: "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])(T([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?)?$"
+        description: |
+          ISO-8601. The day alone is enough, because a retirement is dated rather
+          than timed, and a full instant is accepted too. This is the one
+          deliberate difference from schedule.at, which must carry a time because
+          it is what fires the run.
+      reason: {type: string, minLength: 8}
+      superseded_by:
+        type: string
+        description: "Workload id that took over, when this was a migration."
+
+  learned_from:
+    type: string
+    description: "Provenance — the incident or decision that seeded this declaration."
+
+# ── Conditional requirements: WHEN must match WHAT triggers it. ────────────────
+#
+# Every claim the `schedule` description makes is enforced HERE. A rule that
+# lives only in a description is a rule nobody runs: for a while this file said
+# "forbidden for daemon/agent" and "exactly one of rrule / every_sec /
+# watch_paths / at" while accepting both violations without a word.
+#
+# The exclusions are written as one `not` per key, each with the reason on the
+# line. One key per line is what lets the negative controls in _tests/invalid/
+# name the exact rule they prove, and what lets `_tests/run.sh --mutate` soften
+# exactly one rule at a time and watch exactly one control go hollow.
+allOf:
+  # kind recurring: appointments. rrule, and nothing else that triggers.
+  - if:
+      properties: {placement: {properties: {kind: {const: recurring}}}}
+      required: [placement]
+    then:
+      properties:
+        schedule:
+          allOf:
+            - not: {required: [every_sec]}         # recurring has appointments, not a cadence
+            - not: {required: [watch_paths]}       # recurring is not a path watcher
+            - not: {required: [at]}                # recurring is not a one-shot
+            # ONE spelling per shape, and a recurring run must carry one of them.
+            # Either the shorthand for a single appointment (rrule + delivery_at)
+            # or the list for several, never both and never neither: a file with
+            # both says two different things about when it fires, and a backend
+            # would pick one silently.
+            - oneOf:
+                - allOf:
+                    - required: [rrule]
+                    - not: {required: [appointments]}
+                - allOf:
+                    - required: [appointments]
+                    - not: {required: [rrule]}
+                    - not: {required: [delivery_at]}
+                    - not: {required: [duration_estimate_min]}
+      required: [schedule]                     # an appointment needs a schedule block
+
+  # kind interval: a cadence, never an appointment.
+  - if:
+      properties: {placement: {properties: {kind: {const: interval}}}}
+      required: [placement]
+    then:
+      properties:
+        schedule:
+          required: [every_sec]                # interval without a cadence has no WHEN
+          not: {required: [delivery_at]}   # an interval job has no appointment
+          allOf:
+            - not: {required: [rrule]}             # interval is not a recurrence
+            - not: {required: [appointments]}      # interval has no appointments either
+            - not: {required: [watch_paths]}       # interval is not a path watcher
+            - not: {required: [at]}                # interval is not a one-shot
+      required: [schedule]                     # a cadence needs a schedule block
+
+  # kind watch: paths. every_sec stays allowed on purpose: it is the fallback
+  # cadence that catches the run a too-early WatchPaths fire missed.
+  - if:
+      properties: {placement: {properties: {kind: {const: watch}}}}
+      required: [placement]
+    then:
+      properties:
+        schedule:
+          required: [watch_paths]              # watch without paths listens to nothing
+          allOf:
+            - not: {required: [rrule]}             # watch is not a recurrence
+            - not: {required: [appointments]}      # watch has no appointments either
+            - not: {required: [at]}                # watch is not a one-shot
+      required: [schedule]                     # a watcher needs a schedule block
+
+  # kind oneshot: one instant, then done.
+  - if:
+      properties: {placement: {properties: {kind: {const: oneshot}}}}
+      required: [placement]
+    then:
+      properties:
+        schedule:
+          required: [at]                       # oneshot without an instant never fires
+          allOf:
+            - not: {required: [rrule]}             # oneshot is not a recurrence
+            - not: {required: [appointments]}      # oneshot has no appointments either
+            - not: {required: [every_sec]}         # oneshot has no cadence
+            - not: {required: [watch_paths]}       # oneshot is not a path watcher
+      required: [schedule]                     # a one-shot needs a schedule block
+
+  # kind daemon / agent: no trigger at all. A continuously running unit has no
+  # WHEN: it has a start and an end. Letting it carry rrule/delivery_at is how a
+  # calendar view ends up drawing appointment ticks for something that never had
+  # an appointment.
+  - if:
+      properties: {placement: {properties: {kind: {enum: [daemon, agent]}}}}
+      required: [placement]
+    then:
+      not: {required: [schedule]}
+
+  # runtime external means owner foreign. The runtime description has said
+  # "always pair with owner: foreign" since the first draft; until this round
+  # nothing made it true, so `runtime: external, owner: bridge` passed: a
+  # declaration claiming the Bridge provisions and maintains something a foreign
+  # platform actually carries. That is the contradiction this schema can least
+  # afford, because `owner` is THE field it exists for, and the engine keys off
+  # runtime alone (INERT_RUNTIMES), so nothing downstream would ever notice.
+  - if:
+      properties: {placement: {properties: {runtime: {const: external}}, required: [runtime]}}
+      required: [placement]
+    then:
+      properties: {placement: {properties: {owner: {const: foreign}}}}
+
+  # Anything the Bridge owns and actually executes needs a deadline and evidence.
+  - if:
+      properties:
+        placement:
+          properties:
+            owner: {const: bridge}
+            kind: {enum: [recurring, interval, watch, oneshot]}
+          required: [owner, kind]
+      required: [placement]
+    then:
+      properties:
+        execution: {required: [command, timeout_sec]}
+        response: {required: [evidence]}
+      required: [execution, response]
+
+  # A privacy grant is issued to a PATH, so the path is an identity, not a
+  # detail. Both halves below are the same sentence read twice: a grant needs a
+  # client, and that client is this workload's own program.
+  #
+  # The shared list is spelled out in the engine's hand written gate too, in the
+  # same order, deliberately. Both gates hold this rule and fail differently; if
+  # one moves, the other moves with it.
+  - if:
+      properties:
+        placement:
+          properties: {privacy_grants: {minItems: 1}}
+          required: [privacy_grants]
+      required: [placement]
+    then:
+      properties:
+        placement:
+          required: [interpreter]              # a grant with no client path is issued to nothing
+          properties:
+            interpreter:
+              not: {enum: [/bin/sh, /bin/bash, /bin/zsh, /bin/dash, /bin/ksh, /usr/bin/env, /usr/bin/python3, /usr/bin/perl, /usr/bin/ruby, /usr/bin/osascript, /usr/bin/swift, /opt/homebrew/bin/python3, /opt/homebrew/bin/bash, /opt/homebrew/bin/zsh, /usr/local/bin/python3, /usr/local/bin/bash]}   # a shared interpreter holds the grant for every caller on the machine
+      required: [placement]

@@ -1,0 +1,21 @@
+# Stand-in for a Linux box. Same schema, different platform, so the support
+# matrix is exercised rather than asserted.
+name: host-b
+scope: user
+type: linux
+os: "Debian 13"
+
+ssh:
+  user: opuser
+  host: host-b
+  port: 22
+
+capabilities:
+  - ssh
+  - services
+
+services:
+  - slug: linux-timer-report
+    label: linux-timer-report.timer
+    type: systemd
+    status: running

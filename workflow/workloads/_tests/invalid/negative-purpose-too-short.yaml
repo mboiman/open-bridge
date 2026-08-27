@@ -1,0 +1,8 @@
+# Representative of the "minLength" class (purpose, retired.reason). A purpose
+# of four characters is the shape without the content, and undocumented runs
+# are exactly the state this file grew out of.
+schema_version: 1
+scope: user
+id: negative-purpose-too-short
+purpose: "tiny"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}

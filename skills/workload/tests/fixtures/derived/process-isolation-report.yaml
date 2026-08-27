@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+id: process-isolation-report
+purpose: "Opts out of process group isolation, so that guarantee must not be demanded"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 300, timezone: Europe/Berlin}
+execution:
+  command: ["/opt/bridge/scripts/lonely.sh"]
+  timeout_sec: 60
+  isolation: process
+  single_flight: false
+response: {evidence: exit-code, notify_on: [failure]}

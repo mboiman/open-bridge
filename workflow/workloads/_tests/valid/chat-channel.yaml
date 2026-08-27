@@ -1,0 +1,5 @@
+schema_version: 1
+scope: user
+id: chat-channel
+purpose: "Chat channel, runs inside a terminal multiplexer session and is started by hand"
+placement: {host: host-a, kind: daemon, runtime: manual, owner: human}

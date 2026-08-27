@@ -1,0 +1,5 @@
+schema_version: 1
+scope: user
+id: negative-broken-yaml
+purpose: "Negative control: unparseable YAML must fail the call, never be skipped silently"
+placement: {host: host-a, kind: daemon,, runtime: launchd, owner: bridge}

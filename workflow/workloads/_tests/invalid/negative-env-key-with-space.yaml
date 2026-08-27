@@ -1,0 +1,21 @@
+# Control for: execution.env, propertyNames.
+#
+# The only case in this round where the two gates CONTRADICTED each other
+# instead of both staying quiet. The hand written gate in the engine has always
+# refused a name that is not a name (ENV_NAME_PATTERN); this schema accepted it.
+# A declaration is deliberately checked twice, and when --strict reports clean
+# on what the plain run rejects, the second check is no longer a second opinion.
+#
+# The damage behind it: the name is never quoted anywhere. systemd writes all
+# pairs into ONE Environment= line, separated by spaces; a space inside a name
+# cuts the line in half. The pattern here is therefore the engine's own,
+# character for character, and not a stricter invention.
+schema_version: 1
+scope: user
+id: negative-env-key-with-space
+purpose: "Control: an environment name containing a space must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+execution:
+  command: ["/bin/true"]
+  timeout_sec: 60
+  env: {"API KEY": "keychain://example-key"}

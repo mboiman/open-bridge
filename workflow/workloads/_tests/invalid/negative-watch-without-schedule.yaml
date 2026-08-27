@@ -1,0 +1,6 @@
+# Control for: kind watch requires a schedule block.
+schema_version: 1
+scope: user
+id: negative-watch-without-schedule
+purpose: "Control: a path watcher with no schedule block must be refused"
+placement: {host: host-a, kind: watch, runtime: launchd, owner: human}

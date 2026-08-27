@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-oneshot-with-rrule
+purpose: "Control: a one-shot is not a recurrence, rrule must be refused"
+placement: {host: example-host, kind: oneshot, runtime: dispatcher, owner: bridge}
+schedule: {at: "2026-10-15T09:00:00+02:00", rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

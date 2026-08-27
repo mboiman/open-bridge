@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: umlaut-report
+purpose: "Prüfung der Zeichenkodierung: Umlaute ä ö ü ß und das Euro-Zeichen € müssen tragen"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 3600, timezone: Europe/Berlin}
+execution: {command: ["/opt/bridge/scripts/prüfung.sh"], timeout_sec: 60}
+response: {evidence: log-trace}

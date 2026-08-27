@@ -1,0 +1,21 @@
+# Coverage case: runtime systemd. A cadence without an appointment: every_sec,
+# and no delivery_at.
+schema_version: 1
+scope: core
+id: example-systemd-interval
+title: Example systemd interval
+purpose: "Example interval run under systemd, polls a state on a fixed cadence"
+placement: {host: example-linux-host, kind: interval, runtime: systemd, owner: bridge}
+schedule: {every_sec: 300, timezone: Europe/Berlin}
+execution:
+  command: ["/usr/local/bin/example-poll", "--once"]
+  working_dir: /var/lib/example
+  timeout_sec: 60
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response: {evidence: exit-code, notify_on: [failure, missing], notify_via: example-notify}
+reconcile:
+  probe: "systemctl --user show example-poll.timer --property=ActiveState"
+  expect: "ActiveState=active"
+  hint: "reload the timer and enable it again"

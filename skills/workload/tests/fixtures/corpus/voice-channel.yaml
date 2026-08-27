@@ -1,0 +1,7 @@
+schema_version: 1
+scope: user
+id: voice-channel
+purpose: "Voice channel of the appointment bot, deliberately kept shut"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge, port: 8820}
+retired: {at: "2026-08-06", reason: "Security bar, a start would be a security incident"}
+reconcile: {probe: "launchctl print gui/4242/bridge.voice-channel", expect: "no match, the label must stay absent", hint: "must stay disabled"}

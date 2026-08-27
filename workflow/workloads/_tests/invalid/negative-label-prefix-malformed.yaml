@@ -1,0 +1,11 @@
+schema_version: 1
+scope: user
+id: negative-label-prefix-malformed
+purpose: "Control: a label prefix is a dotted name and nothing else"
+# A leading dot produces a label with an empty segment. launchd accepts it and
+# the service is not addressable afterwards, because every later call with the
+# same name means a different target. The pattern catches it before the file
+# ever sees a machine.
+placement: {host: example-host, kind: daemon, runtime: launchd, owner: bridge, label_prefix: ".leading.dot"}
+execution: {command: ["/opt/example/bin/service"], timeout_sec: 30}
+response: {evidence: exit-code}

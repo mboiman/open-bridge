@@ -1,0 +1,17 @@
+# A run that never ends, on the user domain of a service manager. It exists
+# because every daemon fixture before it was either retired, foreign, carried no
+# command at all, or declared a deadline, so no test ever reached the plan of a
+# daemon the bridge both owns and executes.
+#
+# DERIVED and not corpus, deliberately: the corpus is the seven cases taken from
+# a real inventory, and its size is an assertion about that inventory. This one
+# was built for a question, which is what this folder is for.
+schema_version: 1
+scope: user
+id: long-running-poller
+purpose: "A run that never ends, so nothing about it can be measured in returns"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}
+execution:
+  command: ["/opt/example/bin/poller", "--follow"]
+  single_flight: true
+response: {evidence: log-trace, notify_on: [failure], notify_via: example-notify}

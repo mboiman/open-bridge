@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+id: foreign-timezone-report
+purpose: "Declared in a zone the host does not run in, which launchd cannot express"
+placement: {host: host-a, kind: recurring, runtime: launchd, owner: bridge}
+schedule:
+  rrule: "FREQ=DAILY"
+  delivery_at: "09:00"
+  duration_estimate_min: 0
+  timezone: Pacific/Auckland
+execution: {command: ["/opt/bridge/scripts/tz.sh"], timeout_sec: 60}
+response: {evidence: log-trace}

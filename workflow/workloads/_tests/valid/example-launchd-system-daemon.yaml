@@ -1,0 +1,23 @@
+# Coverage case: runtime launchd-system. A system wide daemon runs continuously
+# and therefore carries no `schedule` block.
+schema_version: 1
+scope: core
+id: example-launchd-system-daemon
+title: Example system wide daemon
+purpose: "Example system wide daemon under launchd, runs continuously from boot"
+placement:
+  host: example-host
+  kind: daemon
+  runtime: launchd-system
+  owner: bridge
+  port: 9090
+  interpreter: /usr/bin/python3
+execution:
+  command: ["/usr/bin/python3", "/opt/example/daemon.py", "--port", "9090"]
+  timeout_sec: 30
+  isolation: process-group
+response: {evidence: log-trace, notify_on: [failure], notify_via: example-notify}
+reconcile:
+  probe: "launchctl print system/com.example.daemon"
+  expect: "state = running"
+  hint: "bootout, then bootstrap from this declaration"

@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=./_schema.yaml
+---
+# Copy to workflow/workloads/<id>.yaml. Validate with:
+#   check-jsonschema --schemafile workflow/workloads/_schema.yaml workflow/workloads/<id>.yaml
+#
+# ONE declaration = ONE thing running on ONE machine. The machine holds an
+# artifact created FROM this file; this file is never derived from the machine.
+
+schema_version: 1
+scope: user                     # core | org | personal | user
+
+id: <slug-matches-filename>
+title: <Human-readable name>
+purpose: "<One sentence: what this exists for. Required.>"
+
+# Optional. WHOSE HAT this run wears: a slug under identity/personas/, or one of
+# two reserved answers. Absent means UNDECIDED, which is a third state and not a
+# quiet synonym for either answer.
+#   _shared          serves more than one sphere on purpose, e.g. a transport.
+#                    Put the reason on the line; a bare `_shared` decays into
+#                    "nobody looked".
+#   _infrastructure  serves the machine or the Bridge itself and no sphere.
+# The leading underscore is what makes a collision with a persona impossible:
+# a persona slug must match ^[a-z][a-z0-9-]*$.
+# persona_ref: <persona-slug>
+
+# ── 1 · HOW IT IS PROVISIONED ────────────────────────────────────────────────
+placement:
+  host: <host>                  # slug under infra/remotes/ (e.g. my-server), or `local`
+  kind: recurring               # recurring | interval | daemon | watch | agent | oneshot
+  runtime: dispatcher           # launchd | launchd-system | systemd | cron | dispatcher | manual | external
+  owner: bridge                 # bridge | human | foreign
+  provisioned_at: null          # written by `workload provision`
+  # interpreter: /usr/bin/python3   # the LITERAL path the unit names (TCC client path)
+  # port: <port>                    # daemon/agent only
+
+# ── 2 · WHEN ─────────────────────────────────────────────────────────────────
+# Match the block to the kind. Omit entirely for daemon/agent.
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"   # kind: recurring
+  delivery_at: "06:30"          # when the RESULT is due, NOT the start
+  duration_estimate_min: 20     # start = delivery_at − this
+  timezone: Europe/Berlin       # IANA zone, never a fixed offset
+  # every_sec: 900              # kind: interval — a cadence has NO delivery_at
+  # watch_paths: ["/absolute/path/to/inbox"]   # kind: watch — no shell expands a ~ here
+  # at: "2026-10-15T09:00:00+02:00"   # kind: oneshot
+
+# ── 3 · HOW IT RUNS ──────────────────────────────────────────────────────────
+execution:
+  command: ["/absolute/path/to/script.sh"]
+  # working_dir: /path
+  # env: {KEY: "keychain://item"}   # a locator, never a value (this file is in git)
+  timeout_sec: 600              # required for anything the Bridge owns and runs
+  isolation: process-group      # default; `process` leaves grandchildren alive
+  single_flight: true           # never start what is still running
+  on_timeout: report            # a expired deadline is reported, never silent
+
+# ── 4 · HOW ANYONE LEARNS WHAT HAPPENED ──────────────────────────────────────
+response:
+  evidence: log-trace           # exit-code | log-trace | delivery-receipt
+  recipients:
+    - mandant: <mandant-slug>   # reference only — never a plaintext address
+      person: <person-key>
+  notify_on: [failure, timeout, missing]
+  notify_via: <channel-slug>    # infra/channels/<slug>.yaml
+  # Silence is the normal case. A run that lands notifies nobody.
+
+# ── PROOF THAT IT IS STILL THERE ─────────────────────────────────────────────
+reconcile:
+  probe: "launchctl print gui/<uid>/<label>"   # ask the LIVE source
+  expect: "state = running"
+  # check_ref: <existing check id under workflow/checks/>
+  hint: "bootout + bootstrap, never kickstart"
+
+# ── WHEN IT IS RETIRED ───────────────────────────────────────────────────────
+# Presence = retired. Disable PLUS a reason; never rename a file.
+# retired:
+#   at: "2026-08-06"
+#   reason: "<why — this outlives everyone's memory>"
+#   superseded_by: <workload id>
+
+# learned_from: "<the incident or decision that seeded this>"

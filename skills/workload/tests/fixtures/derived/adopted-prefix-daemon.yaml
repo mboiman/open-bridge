@@ -1,0 +1,10 @@
+schema_version: 1
+scope: user
+id: legacy-poller
+purpose: "A daemon that already exists on the machine under a hand made label"
+# label_prefix carries the FOREIGN prefix, so the rendered label is exactly the
+# one the machine already uses. The declaration id stays the tail of the label,
+# which is what inventory matching and the ownership stamp key rely on.
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge, label_prefix: org.example.scheduler}
+execution: {command: ["/opt/bridge/bin/poller"], timeout_sec: 30}
+response: {evidence: exit-code}

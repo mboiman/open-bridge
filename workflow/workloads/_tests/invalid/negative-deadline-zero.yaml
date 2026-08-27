@@ -1,0 +1,9 @@
+# Representative of the "minimum" class (port, every_sec, timeout_sec,
+# duration_estimate_min). A deadline of zero is not a deadline, it is the
+# absence of one with a field in front of it.
+schema_version: 1
+scope: user
+id: negative-deadline-zero
+purpose: "Control: timeout_sec 0 must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+execution: {command: ["/bin/true"], timeout_sec: 0}

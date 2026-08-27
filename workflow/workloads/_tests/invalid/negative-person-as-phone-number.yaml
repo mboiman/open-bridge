@@ -1,0 +1,12 @@
+# Control for: response.recipients[].person, the pattern.
+#
+# The same hole as the mandant, one line further down: person accepted any
+# string, so a phone number or a written out name went through. A person key is
+# the id value of an entry under persons:, nothing else, and it contains
+# neither spaces nor a plus sign.
+schema_version: 1
+scope: user
+id: negative-person-as-phone-number
+purpose: "Control: a phone number in the person field must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+response: {evidence: exit-code, recipients: [{mandant: example-team, person: "+1 555 0123456"}]}

@@ -1,0 +1,10 @@
+# Control for: execution.required[command] on a bridge owned run.
+# A deadline without a command caps nothing: there is nothing to cap.
+schema_version: 1
+scope: user
+id: negative-bridge-owned-without-command
+purpose: "Control: a bridge owned run with no command must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {timeout_sec: 60}
+response: {evidence: exit-code}

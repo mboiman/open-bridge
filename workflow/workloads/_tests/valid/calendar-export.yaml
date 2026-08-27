@@ -1,0 +1,11 @@
+schema_version: 1
+scope: user
+id: calendar-export
+purpose: "Pulls free/busy times out of the calendar store for the public agent"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge, interpreter: /opt/example/bin/runner}
+schedule: {every_sec: 900, timezone: Europe/Berlin}
+execution:
+  command: ["/opt/example/bin/runner", "run", "python", "tools/freebusy_export.py", "--horizon-days", "30"]
+  working_dir: /opt/example/agents
+  timeout_sec: 120
+response: {evidence: log-trace, notify_on: [failure, missing], notify_via: example-notify}

@@ -1,0 +1,8 @@
+# Control for: kind recurring requires a schedule block.
+# Without it the file only says THAT something recurs, never WHEN. Until round
+# 3 this requirement could be deleted outright and no test noticed.
+schema_version: 1
+scope: user
+id: negative-recurring-without-schedule
+purpose: "Control: a recurring run with no schedule block must be refused"
+placement: {host: host-a, kind: recurring, runtime: cron, owner: human}

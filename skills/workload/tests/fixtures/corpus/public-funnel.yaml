@@ -1,0 +1,6 @@
+schema_version: 1
+scope: user
+id: public-funnel
+purpose: "Public funnel path for the voice channel, managed by the mesh daemon"
+placement: {host: host-a, kind: daemon, runtime: external, owner: foreign}
+reconcile: {probe: "curl -sS -o /dev/null -w '%{http_code}' https://<funnel>/health", expect: "200"}

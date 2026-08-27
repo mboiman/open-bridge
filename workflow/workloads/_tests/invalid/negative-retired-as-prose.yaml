@@ -1,0 +1,9 @@
+# Control for: retired.at needs at least a day in ISO 8601.
+# The day form is deliberately allowed here, because a retirement is dated and
+# not scheduled. "last year" is still not a date.
+schema_version: 1
+scope: user
+id: negative-retired-as-prose
+purpose: "Control: a retirement date written as prose must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+retired: {at: "last year", reason: "reason long enough for the minimum length"}

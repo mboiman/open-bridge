@@ -1,0 +1,23 @@
+schema_version: 1
+scope: user
+id: daily-health-report
+title: Daily health report
+purpose: "Daily operations report built from the log store, sent to two people"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge, provisioned_at: null}
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA"
+  delivery_at: "06:30"
+  duration_estimate_min: 20
+  timezone: Europe/Berlin
+execution:
+  command: ["/opt/example/bin/daily-health-report.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  recipients: [{mandant: example-team, person: first_person}, {mandant: example-team, person: second_person}]
+  notify_on: [failure, timeout, missing]
+  notify_via: example-notify
+reconcile: {probe: "launchctl print gui/501/com.example.dispatcher", expect: "state = running", hint: "bootout + bootstrap"}

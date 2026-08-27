@@ -382,7 +382,11 @@ CLUSTER_WRAPPER_FALLBACK = re.compile(
 # describes what it depicts, never where it lives, and only an enumerated
 # family may claim that exemption, which is why the set above is a list and not
 # a shape.
-WRAPPER_TESTS_CORE = re.compile(r"^(?:infra/remotes)/_tests/")
+WRAPPER_TESTS_CORE = re.compile(r"^(?:infra/remotes|workflow/workloads)/_tests/")
+# workflow/workloads joined on 2026-08-27, when its 69 fixtures were rewritten
+# generic and in English for exactly this step. Before that they named real
+# hosts, real customers and one real person, so the family stayed out and its
+# CI guard stayed red, which is the shape this list is meant to have.
 
 
 def _unquote(path: str) -> str:

@@ -1,0 +1,10 @@
+schema_version: 1
+scope: user
+id: voicememo-notify
+purpose: "Reports new voice memo transcripts, a path watcher with an interval fallback"
+placement: {host: host-a, kind: watch, runtime: launchd, owner: bridge}
+schedule:
+  watch_paths: ["/opt/example/transcripts/voicememo"]
+  every_sec: 120
+execution: {command: ["/opt/example/bin/voicememo-notify.sh"], timeout_sec: 300}
+response: {evidence: log-trace, notify_on: [failure], notify_via: example-notify}

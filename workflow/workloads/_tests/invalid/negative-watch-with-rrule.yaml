@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-watch-with-rrule
+purpose: "Control: a path watcher is not a recurrence, rrule must be refused"
+placement: {host: example-host, kind: watch, runtime: launchd, owner: bridge}
+schedule: {watch_paths: ["/tmp/example"], rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

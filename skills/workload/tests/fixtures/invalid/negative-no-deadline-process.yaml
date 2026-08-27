@@ -1,0 +1,20 @@
+# Negative control for the ONE case the layers downstream of `validate` cannot
+# see. A bridge owned run without `execution.timeout_sec` is invalid, and the
+# hand written gate plus the JSON schema both say so. Nothing after them does:
+# `required_guarantees` derives the deadline demand FROM timeout_sec, so a
+# missing deadline demands nothing at all, the wrapper writes no guard script,
+# and the unmet set that feeds the degraded refusal is empty.
+#
+# `isolation: process` is the point of this file. With the default
+# `process-group` the process-group demand catches the case by accident, which
+# hides the hole. Here it is taken away, so what is measured is the gate itself.
+schema_version: 1
+scope: user
+id: negative-no-deadline-process
+purpose: "Negative control: no deadline and no guarantee that would demand one"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 300, timezone: Europe/Berlin}
+execution:
+  command: ["/opt/bridge/scripts/lonely.sh"]
+  isolation: process
+response: {evidence: exit-code, notify_on: [failure]}

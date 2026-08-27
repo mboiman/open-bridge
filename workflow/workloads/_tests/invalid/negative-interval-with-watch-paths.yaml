@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-interval-with-watch-paths
+purpose: "Control: an interval job is not a path watcher, watch_paths must be refused"
+placement: {host: example-host, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 900, watch_paths: ["/tmp/example"], timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

@@ -1,0 +1,16 @@
+# Coverage case: kind agent. An inbound endpoint has no trigger in time, it
+# waits. That is exactly why `schedule` is forbidden for it.
+schema_version: 1
+scope: core
+id: example-agent-endpoint
+title: Example agent endpoint
+purpose: "Example inbound agent endpoint, triggered by requests and never by the clock"
+placement: {host: example-host, kind: agent, runtime: launchd, owner: bridge, port: 8080}
+execution:
+  command: ["/opt/example/bin/agent-serve", "--listen", "127.0.0.1:8080"]
+  timeout_sec: 30
+response: {evidence: log-trace, notify_on: [failure], notify_via: example-notify}
+reconcile:
+  probe: "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health"
+  expect: "200"
+  hint: "reload the service, then ask /health again"

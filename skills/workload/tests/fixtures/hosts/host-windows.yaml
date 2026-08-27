@@ -1,0 +1,12 @@
+# A platform no backend supports. Exists so the support matrix has a case that
+# must refuse rather than fall through to a default.
+name: host-windows
+scope: user
+type: windows
+
+ssh:
+  user: opuser
+  host: host-windows
+  port: 22
+
+services: []

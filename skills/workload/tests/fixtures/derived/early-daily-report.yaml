@@ -1,0 +1,37 @@
+# A DAILY appointment just after midnight, local time. It exists for one
+# question: the date boundary.
+#
+# Between 00:00 and 02:00 Europe/Berlin the local date is already tomorrow
+# while the UTC date is still today. A weekly appointment hides that, because
+# shifting the search window by a day still finds the same weekday; only a
+# daily one, where the specific DATE decides, makes the difference visible.
+---
+schema_version: 1
+scope: user
+id: "early-daily-report"
+title: "Just after midnight, every day"
+purpose: "A daily appointment at the date boundary"
+persona_ref: _shared
+placement:
+  host: "host-a"
+  kind: "recurring"
+  runtime: "launchd"
+  owner: "bridge"
+  provisioned_at: null
+  interpreter: /bin/bash
+schedule:
+  rrule: "FREQ=DAILY"
+  delivery_at: "00:30"
+  duration_estimate_min: 0
+  timezone: Europe/Berlin
+execution:
+  command: ["/bin/bash", "/opt/early.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  notify_on: [failure, missing]
+  notify_via: bridge-notify
+learned_from: "fixture: only a daily appointment shows the date boundary"

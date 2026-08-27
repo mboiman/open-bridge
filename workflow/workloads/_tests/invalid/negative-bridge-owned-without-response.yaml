@@ -1,0 +1,10 @@
+# Control for: required[response] on a bridge owned run.
+# With no response block nobody ever learns whether the run happened at all.
+# Silence is the normal case, which is why the block has to be there.
+schema_version: 1
+scope: user
+id: negative-bridge-owned-without-response
+purpose: "Control: a bridge owned run with no response block must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}

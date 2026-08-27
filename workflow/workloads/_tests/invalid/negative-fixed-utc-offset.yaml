@@ -1,0 +1,9 @@
+# Control for: timezone has to take the Region/Place form.
+# A stored offset moves every repetition by an hour the moment daylight saving
+# changes. Prose ("around noon") fails on the same rule.
+schema_version: 1
+scope: user
+id: negative-fixed-utc-offset
+purpose: "Control: a fixed UTC offset instead of an IANA zone must be refused"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: human}
+schedule: {every_sec: 900, timezone: "+02:00"}

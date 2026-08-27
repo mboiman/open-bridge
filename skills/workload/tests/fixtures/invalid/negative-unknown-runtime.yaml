@@ -1,0 +1,5 @@
+schema_version: 1
+scope: user
+id: negative-unknown-runtime
+purpose: "Negative control: an unknown runtime must be rejected, never silently ignored"
+placement: {host: host-a, kind: daemon, runtime: podman, owner: bridge}

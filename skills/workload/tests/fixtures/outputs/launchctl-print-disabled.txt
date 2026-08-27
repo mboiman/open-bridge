@@ -1,0 +1,4 @@
+disabled services = {
+	"bridge.voice-channel" => disabled
+	"com.example.mesh" => enabled
+}

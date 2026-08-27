@@ -1,0 +1,5 @@
+schema_version: 1
+scope: user
+id: cron-daemon-refused
+purpose: "Negative control: crontab cannot carry a continuously running process"
+placement: {host: host-b, kind: daemon, runtime: cron, owner: bridge}

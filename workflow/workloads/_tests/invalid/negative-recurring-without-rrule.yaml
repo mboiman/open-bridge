@@ -1,0 +1,9 @@
+# Control for: schedule.required[rrule] on kind recurring.
+# A delivery time on its own is not an appointment: it says when the result
+# would be due, not on which days the run happens at all.
+schema_version: 1
+scope: user
+id: negative-recurring-without-rrule
+purpose: "Control: a recurring run with no rrule must be refused"
+placement: {host: host-a, kind: recurring, runtime: cron, owner: human}
+schedule: {delivery_at: "06:30", duration_estimate_min: 20, timezone: Europe/Berlin}

@@ -1,0 +1,8 @@
+Id=linux-timer-report.service
+ActiveState=active
+SubState=running
+UnitFileState=enabled
+FragmentPath=/home/opuser/.config/systemd/user/linux-timer-report.service
+Environment=BRIDGE_WORKLOAD=linux-timer-report BRIDGE_WORKLOAD_DIGEST=sha256:2222222222222222222222222222222222222222222222222222222222222222
+RuntimeMaxUSec=10min
+KillMode=control-group

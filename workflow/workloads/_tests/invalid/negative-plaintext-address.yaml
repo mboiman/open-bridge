@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-plaintext-address
+purpose: "Control: a recipient given as a plaintext address must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code, recipients: [{mandant: example-team, address: "a.person@example.com"}]}

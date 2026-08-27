@@ -1,0 +1,7 @@
+# a hand written line that predates the bridge and must survive every rewrite
+17 3 * * * /opt/local/bin/rotate-logs.sh
+# >>> bridge-workload cron-cadence sha256:3333333333333333333333333333333333333333333333333333333333333333
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+*/15 * * * * /bin/sh /home/opuser/.bridge/workloads/cron-cadence.guard.sh
+# <<< bridge-workload cron-cadence
+@reboot /opt/local/bin/another-hand-written-one.sh

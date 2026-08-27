@@ -1,0 +1,8 @@
+# Control for: schedule.required[every_sec] on kind interval.
+# An interval run without a cadence has no trigger, only a timezone.
+schema_version: 1
+scope: user
+id: negative-interval-without-every-sec
+purpose: "Control: an interval run with no every_sec must be refused"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: human}
+schedule: {timezone: Europe/Berlin}

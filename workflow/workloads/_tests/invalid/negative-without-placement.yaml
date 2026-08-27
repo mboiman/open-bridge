@@ -1,0 +1,9 @@
+# Representative of the "required at the top level" class (5 rules).
+# placement carries host, kind, runtime and owner. With the block missing not a
+# single one of the if/then rules below fires, because all of them key on
+# placement: the file drops out of every check without a sound.
+schema_version: 1
+scope: user
+id: negative-without-placement
+purpose: "Control: a declaration with no placement block must be refused"
+learned_from: "round 3, coverage review"

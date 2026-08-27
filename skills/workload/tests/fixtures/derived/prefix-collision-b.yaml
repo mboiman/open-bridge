@@ -1,0 +1,7 @@
+schema_version: 1
+scope: user
+id: poller
+purpose: "A daemon whose prefix swallows the other declaration's id"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge, label_prefix: org.example.legacy}
+execution: {command: ["/opt/bridge/bin/poller"], timeout_sec: 30}
+response: {evidence: exit-code}

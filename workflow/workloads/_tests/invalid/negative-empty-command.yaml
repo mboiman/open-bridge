@@ -1,0 +1,9 @@
+# Representative of the "minItems" class (command, watch_paths). An empty argv
+# is not a command, and a service manager then starts nothing at all, or
+# something else entirely.
+schema_version: 1
+scope: user
+id: negative-empty-command
+purpose: "Control: an empty command array must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+execution: {command: [], timeout_sec: 60}

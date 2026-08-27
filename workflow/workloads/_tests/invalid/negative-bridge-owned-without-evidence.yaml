@@ -1,0 +1,13 @@
+# Control for: response.required[evidence] on a bridge owned run.
+# The one place that forces a bridge owned run to state WHAT counts as proof.
+# Without it a file may name a channel and leave open how anybody would know
+# that something arrived. That is exactly how a send call reports success while
+# nothing was delivered.
+schema_version: 1
+scope: user
+id: negative-bridge-owned-without-evidence
+purpose: "Control: a bridge owned run with no evidence must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {notify_on: [failure], notify_via: example-notify}
