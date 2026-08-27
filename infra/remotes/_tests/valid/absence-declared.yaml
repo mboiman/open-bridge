@@ -1,0 +1,13 @@
+# A service the inventory keeps listing although the machine no longer has it,
+# because a person decided so. Both keys are present, which is the whole point.
+name: examplebox
+scope: user
+type: macos
+status: online
+services:
+  - slug: nightly-digest
+    label: com.example.nightly-digest
+    type: scheduled
+    intentionally_absent:
+      since: 2026-06-04
+      reason: "Superseded by the weekly report; kept listed so its absence is not rediscovered as a fault every quarter."

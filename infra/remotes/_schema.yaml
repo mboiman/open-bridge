@@ -239,6 +239,66 @@ properties:
         check:
           type: string
           description: "Truth-probe shell command. Empty = derive from label+type."
+        intentionally_absent:
+          type: object
+          additionalProperties: false
+          required: [since, reason]
+          description: |
+            Why this service is deliberately NOT on the machine. Presence of
+            the block is the statement; the two keys carry it.
+
+            This is the one question a probe cannot answer. `check` asks the
+            machine whether the service runs, and the machine always knows.
+            Nothing on the machine knows whether an absence was WANTED. So this
+            block declares an INTENT, never a state. It is not an exception to
+            "a declared status is never the truth"; it is the complement, the
+            half no probe can measure.
+
+            What a consumer that reconciles this inventory against a live
+            machine should do with it:
+
+              absent and declared here
+                Expected. Report it as such, never as a stale bookkeeping
+                entry. Never silently either: an absence nobody re-reads is
+                exactly how a forgotten leftover survives for months.
+
+              present on the machine and declared here
+                A contradiction, and the loud one. Somebody decided this must
+                stay off and it is running. Nothing else in this file can
+                surface that, because every other field describes a service
+                that is supposed to be there.
+
+            Both keys are required, and `since` is the one that is easy to
+            skip. Without it there is no way to tell a decision taken
+            yesterday from one taken two years ago, and an undated note is
+            re-litigated every time somebody reads the file.
+          properties:
+            since:
+              type: string
+              format: date
+              pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              description: |
+                Date the decision was taken, ISO.
+
+                Both a `pattern` and a `format`, and the redundancy is
+                deliberate. `format` is annotation only in draft 2020-12
+                unless the validator opts into checking it; check-jsonschema
+                does, and it then rejects a date shaped non date such as
+                2026-13-45, which no regex over four-two-two digits can catch.
+                The `pattern` is the half that still bites where `format` is
+                not checked, and a CORE schema is validated by whatever
+                tooling a downstream fork happens to run.
+
+                An unquoted YAML date is fine either way: the validator
+                normalises it to this shape before matching.
+            reason:
+              type: string
+              minLength: 1
+              description: |
+                Why it is off, in the words of whoever decided. No minimum
+                length is imposed beyond non-empty: a character count teaches
+                authors to pad, and whether a reason is a real one is a
+                judgement the next reader makes, not a machine.
         log:
           type: string
           description: "Log path (absolute or relative to ~)"

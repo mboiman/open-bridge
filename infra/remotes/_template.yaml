@@ -48,5 +48,15 @@ services: []
   #     path: "~/output/**/*.ext"
   #     within_minutes: 60
   #     expected_after: "trigger description"
+  #
+  #   # Optional. Only when the service is deliberately NOT on the machine.
+  #   # `check:` asks the machine whether it runs and the machine always knows;
+  #   # nothing on the machine knows whether an absence was WANTED. This block
+  #   # is that missing half, so an entry kept on purpose stops reading like a
+  #   # forgotten one. Both keys are required: an undated decision is
+  #   # re-litigated by every later reader.
+  #   intentionally_absent:
+  #     since: 2026-06-04
+  #     reason: "Superseded by the weekly report; kept listed so its absence is not rediscovered as a fault."
 
 status: pending          # online | offline | pending

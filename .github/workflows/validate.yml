@@ -64,6 +64,18 @@ jobs:
       - name: Validate all schema-bearing surfaces
         run: python3 scripts/validate-bridge.py
 
+      # validate-bridge.py holds the LIVE inventories against the schema. It
+      # cannot tell whether a rule is still enforced, because a rule nobody
+      # violates and a rule that was deleted look identical from a green run.
+      # These two do: the first asserts every negative control fails for its
+      # own reason, the second removes each rule in turn and proves the right
+      # control goes hollow.
+      - name: Run remote inventory schema contract
+        run: bash infra/remotes/_tests/run.sh
+
+      - name: Prove every remote-inventory control still bites
+        run: bash infra/remotes/_tests/run.sh --mutate
+
   okf-export:
     name: OKF Export
     runs-on: ubuntu-latest
