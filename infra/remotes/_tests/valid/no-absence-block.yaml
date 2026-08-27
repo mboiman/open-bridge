@@ -1,0 +1,10 @@
+# The ordinary case: a running service says nothing about intent. The field is
+# optional and its absence must stay silent.
+name: examplebox
+scope: user
+type: macos
+status: online
+services:
+  - slug: nightly-digest
+    label: com.example.nightly-digest
+    type: scheduled

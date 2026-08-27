@@ -239,6 +239,38 @@ properties:
         check:
           type: string
           description: "Truth-probe shell command. Empty = derive from label+type."
+        intentionally_absent:
+          type: object
+          additionalProperties: false
+          required: [since, reason]
+          description: |
+            Why this service is deliberately NOT on the machine. `check` asks
+            the machine whether it runs and the machine always knows; nothing
+            on the machine knows whether an absence was WANTED. This block is
+            that half, so it declares an intent and never a state.
+
+            For a consumer reconciling against a live machine: absent and
+            declared here is expected, reported quietly but never silently;
+            present on the machine and declared here is a contradiction, and
+            the loud one.
+
+            Negative controls and the reasoning behind each rule:
+            infra/remotes/_tests/.
+          properties:
+            since:
+              type: string
+              format: date
+              pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              description: |
+                Date the decision was taken, ISO. Required so the decision
+                ages visibly. `pattern` and `format` are both here on purpose
+                and neither is redundant: `format` is annotation only in draft
+                2020-12 unless a validator opts in, and only `format` rejects
+                a date shaped non date such as 2026-13-45.
+            reason:
+              type: string
+              minLength: 1
+              description: "Why it is off, in the words of whoever decided."
         log:
           type: string
           description: "Log path (absolute or relative to ~)"

@@ -1,0 +1,13 @@
+# The same statement with the date written as a quoted string. YAML parses the
+# two forms into different types, so both shapes are held against the contract.
+name: examplebox
+scope: user
+type: macos
+status: online
+services:
+  - slug: nightly-digest
+    label: com.example.nightly-digest
+    type: scheduled
+    intentionally_absent:
+      since: "2026-06-04"
+      reason: "Superseded by the weekly report."
