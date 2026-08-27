@@ -141,6 +141,9 @@ jobs:
       - name: Run workload engine suite
         run: bash skills/workload/run-tests.sh
 
+      - name: Prove every engine test still bites
+        run: bash skills/workload/run-tests.sh --mutate
+
       - name: Run declaration schema contract
         run: bash workflow/workloads/_tests/run.sh
 
