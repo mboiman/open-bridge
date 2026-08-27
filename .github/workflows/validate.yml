@@ -106,6 +106,14 @@ jobs:
       - name: Run rule-inventory test suite
         run: bash scripts/tests/test-validate-bridge-rule-map.sh
 
+      # The scope router decides which files may reach a PUBLIC repo, and its
+      # 551-line regression suite ran nowhere until 2026-08-27. Two of its
+      # guards re-derive their answer from the tree instead of a hand-kept list,
+      # so a family added next to a registered one can no longer go stale in
+      # silence. Both were red when they were written.
+      - name: Run scope-router regression suite
+        run: python3 -m pytest scripts/tests/test_scope_router.py -q
+
   workspace-tests:
     name: Workspace Engine + Registry + Skill
     runs-on: ubuntu-latest
