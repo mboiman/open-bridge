@@ -39,6 +39,7 @@ self-contained. Skim the index, jump to what you need, ignore the rest.
 | workflow | [calendars](#workflowcalendars) | scheduled outbound: emails, reports, digests, with recipients |
 | workflow | [contexts](#workflowcontexts) | per-domain routing rules (document intake, mail attachments) |
 | workflow | [projects](#workflowprojects) | GitHub/ADO project-board configs (fields, governance) |
+| workflow | [workloads](#workflowworkloads) | one declared run on one machine: report, poller, daemon, watcher, agent |
 
 Validation note: every wrapper that ships a `_schema.yaml` is enforced
 by `scripts/validate-bridge.py` (JSON Schema Draft 2020-12 via
@@ -216,6 +217,27 @@ skill (governance), `/dashboard` and `/briefing` (reads).
 `workflow/projects/<slug>.yaml` for valid field values. Don't use raw
 `gh issue create` — go through `github-projects-manager` so fields stay
 in sync with the project config.
+
+---
+
+## workflow/workloads/
+
+One declared run on one machine, in one file: a scheduled report, an interval
+poller, a daemon, a path watcher, an inbound agent, a one-shot. The declaration
+is the truth; the unit the service manager holds is an artifact rendered from
+it and may be rebuilt at any time.
+
+**Create:** `workload declare <id> --kind K --runtime R --host H`, or
+`cp workflow/workloads/_template.yaml workflow/workloads/<id>.yaml`
+
+**Used by:** the `workload` skill (`provision`, `reconcile`, `view`, `retire`),
+which reads hosts from `infra/remotes/` and paths from the `workloads:` block
+of `bridge-config.yaml`.
+
+**Workflow rule:** there is no `status:` field, deliberately. A declared status
+is never the truth; the service manager is. State comes from `reconcile` asking
+the live source ([`rules/deploy-reconciliation.md`](../rules/deploy-reconciliation.md)).
+Full model: [`docs/workloads.md`](workloads.md).
 
 ---
 
