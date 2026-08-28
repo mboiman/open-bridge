@@ -596,6 +596,22 @@ def _upstream_ref():
     return None
 
 
+def _governed_by_a_declared_skill_scope(path: str) -> bool:
+    """True when this file's tier was DECLARED rather than fallen into.
+
+    A skill takes its tier from its own SKILL.md, and the whole directory goes
+    with it. An instance that forks a core skill down to `user` (this tree has
+    done that with skills/remote/, which carries machine specifics) drags along
+    files that never diverged, and calling those a defect would be calling a
+    decision a defect. The guard exists for tiers nobody chose.
+    """
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "skills":
+        return False
+    declared = cc.read_frontmatter_scope(f"skills/{parts[1]}/SKILL.md")
+    return bool(declared) and cc._SCOPE_MAP.get(declared) not in (None, "core")
+
+
 def test_every_file_upstream_ships_stays_core():
     ref = _upstream_ref()
     if ref is None:
@@ -608,11 +624,22 @@ def test_every_file_upstream_ships_stays_core():
     tracked = [f for f in listing.stdout.split("\n") if f]
     assert len(tracked) > 100, f"{ref} listed only {len(tracked)} files, wrong ref?"
 
+    # In a DOWNSTREAM instance the invariant holds only for files that are still
+    # byte identical to upstream. An instance may legitimately fork a core skill
+    # down to `user` (this tree has done exactly that with skills/remote/, which
+    # carries machine specifics), and calling that a defect would make the guard
+    # permanently red and therefore ignored. A file that has NOT diverged and
+    # still classifies non-core is the real case: an update channel closed in
+    # silence. In a CORE-only checkout there is nothing to diverge from, so every
+    # tracked file is asserted.
+    instance = (REPO / "bridge-config.yaml").exists()
     offenders = sorted(
         f for f in tracked
         if tier(f) != "core"
         and f not in UPSTREAM_NON_CORE_BY_DESIGN
         and not f.startswith(UPSTREAM_NON_CORE_PREFIXES)
+        and not (instance and not _identical_to_upstream(f))
+        and not _governed_by_a_declared_skill_scope(f)
     )
     assert not offenders, (
         f"{len(offenders)} file(s) ship on {ref} but classify non-core, so the next "
