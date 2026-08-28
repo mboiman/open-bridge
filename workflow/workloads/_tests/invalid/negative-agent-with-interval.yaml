@@ -1,0 +1,6 @@
+schema_version: 1
+scope: user
+id: negative-agent-with-interval
+purpose: "Control: an agent waits for requests and may not carry a cadence"
+placement: {host: example-host, kind: agent, runtime: launchd, owner: bridge, port: 8080}
+schedule: {every_sec: 900, timezone: Europe/Berlin}

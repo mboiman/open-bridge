@@ -1,0 +1,12 @@
+# Declared, reachable on paper, dead in practice. Every probe against it must
+# yield unknown, never absent.
+name: host-c
+scope: user
+type: linux
+
+ssh:
+  user: opuser
+  host: host-c
+  port: 22
+
+services: []

@@ -21,3 +21,8 @@ rules:
 ignore:
   - work/
   - .claude/
+  # Deliberately unparseable. It is the negative control proving that a
+  # broken declaration fails the call instead of being skipped in silence,
+  # so a linter that could parse it would mean the control had stopped
+  # being one.
+  - skills/workload/tests/fixtures/invalid/negative-broken-yaml.yaml

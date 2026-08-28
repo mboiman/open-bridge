@@ -1,0 +1,11 @@
+# Control for: execution.working_dir, the pattern.
+#
+# No backend expands the tilde: neither launchd nor systemd has a login shell
+# here. "~/projects/example" is therefore a relative path with one character in
+# front of it, and the working directory becomes something other than intended.
+schema_version: 1
+scope: user
+id: negative-relative-working-dir
+purpose: "Control: a relative working directory must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+execution: {command: ["/bin/true"], timeout_sec: 60, working_dir: "~/projects/example"}

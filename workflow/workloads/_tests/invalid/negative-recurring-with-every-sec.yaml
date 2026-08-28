@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-recurring-with-every-sec
+purpose: "Control: recurring has appointments, an extra cadence must be refused"
+placement: {host: example-host, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", every_sec: 900, timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

@@ -112,6 +112,10 @@ Every config type lives in **`<wrapper>/<types>/`** — a plural folder with tem
 | `workflow/contexts/<id>.yaml` | USER | Context bundle (routing rules, persona refs) |
 | `workflow/contexts/<id>.README.md` | USER | Optional: context maintenance doc (companion) |
 | `workflow/projects/_template.yaml` | CORE | Project template |
+| `workflow/workloads/_schema.yaml` | CORE | Workload contract (one declared run on one machine) |
+| `workflow/workloads/_template.yaml` | CORE | Workload template |
+| `workflow/workloads/_tests/**` | CORE | The contract's own regression suite (see docs/workloads.md) |
+| `workflow/workloads/<id>.yaml` | USER | One declared run: host, kind, runtime, owner, schedule, command |
 | `workflow/projects/<slug>.yaml` | USER | GitHub/ADO project config (fields, governance, state mappings) |
 
 ## Top-level (own lifecycle, no cluster wrapper)

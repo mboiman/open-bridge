@@ -1,0 +1,19 @@
+gui/4242/bridge.calendar-export = {
+	active count = 1
+	path = /home/opuser/Library/LaunchAgents/bridge.calendar-export.plist
+	state = running
+	program = /bin/sh
+	arguments = {
+		/bin/sh
+		/home/opuser/Library/Application Support/bridge/workloads/calendar-export.guard.sh
+	}
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+	environment = {
+		BRIDGE_WORKLOAD => calendar-export
+		BRIDGE_WORKLOAD_DIGEST => sha256:1111111111111111111111111111111111111111111111111111111111111111
+	}
+	runs = 12
+	pid = 5511
+}

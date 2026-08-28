@@ -1,0 +1,13 @@
+# Control for: execution.command, prefixItems[0].
+#
+# The description said "Absolute paths" and the schema took any string. Under a
+# service manager PATH is short and is not a login environment, so a bare name
+# resolves to something else than it does in a terminal, or to nothing. Only
+# argv[0] is checked: what follows are flags and values, and a rule about those
+# would be a guess.
+schema_version: 1
+scope: user
+id: negative-relative-command
+purpose: "Control: a relative argv[0] must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+execution: {command: ["assistant", "-p", "..."], timeout_sec: 60}

@@ -1,0 +1,9 @@
+schema_version: 1
+scope: user
+id: checked-report
+purpose: "Reuses an existing check instead of restating its probe, via a qualified ref"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 600, timezone: Europe/Berlin}
+execution: {command: ["/opt/bridge/scripts/checked.sh"], timeout_sec: 60}
+response: {evidence: log-trace}
+reconcile: {check_ref: "sample/agent-reachable", hint: "bootout + bootstrap, never kickstart"}

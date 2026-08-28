@@ -287,7 +287,7 @@ The canonical location remains `skills/` — edit there, the symlinks follow.
 | **Bridge setup + sync** | `bridge-onboard`, `bridge-promote`, `bridge-sync` (sprint-level batch sync to upstreams), `bridge-contribute` (fork-based upstream PRs), `bridge-overlay` (subscribe to org overlays), `knowledge-repo-init` (pair a knowledge repo), `workspace` (bind repos + config overlays into a project container) |
 | **Communication / meetings** | `debrief` (full / `--quick` / `--all` / `--date`), `meeting-transcription` (recording → transcript pipeline feeding `/debrief`) |
 | **Messaging + scheduling** | `channel`, `schedule`, `calendar`, `mandants` |
-| **Infrastructure** | `remote` |
+| **Infrastructure** | `remote`, `workload` (declared runs: one file per run, provisioned and reconciled against the live service manager) |
 | **Projects** | `dashboard`, `project-advisor`, `github-projects-manager`, `tracker-sync`, `task-close-postmortem` |
 | **Documents** | `doc-system` |
 | **Authoring / visuals** | `html-canvas` (single-file HTML deliverables), `bridge-dashboard` (Bridge Control Center) |
@@ -670,6 +670,7 @@ Cursor) load the skill from `skills/` directly.
 | `/bridge-onboard` | `bridge-onboard` | New user setup or reconfiguration |
 | `/channel` | `channel` | Channel management: list, health, deploy, start/stop |
 | `/remote` | `remote` | Remote management: status, health, logs, restart, sync |
+| `/workload` | `workload` | Declared runs: `declare`, `validate`, `render`, `provision`, `list`, `show`, `reconcile`, `view`, `publish`, `adopt`, `retire` |
 | `/schedule` | `schedule` | Scheduled tasks: list, create, deploy, disable |
 | `/promote` | `bridge-promote` | Promote CORE changes upstream (scope:core → `bks-lab/open-bridge`, scope:org → your optional org overlay) |
 | `/overlay` | `bridge-overlay` | Subscribe to org overlays + materialize scope:org content into the live tree (downstream inverse of `/promote`) |
@@ -698,6 +699,39 @@ Schema in `infra/remotes/_template.yaml`; per-box setup notes in `<name>-setup.m
 - **Deploy/bootstrap:** declared `status:` is never trusted, the remote's service manager is — [`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md) (launchd, systemd, watch-path)
 
 ---
+
+## Workloads — Declared Runs
+
+A **workload** is one thing that runs on one machine: a scheduled report, an
+interval poller, a daemon, an agent, a path watcher, a one-shot. It lives as a
+single declaration in **`workflow/workloads/<id>.yaml`**, and the `workload`
+skill renders the unit from it, provisions it, reconciles it against the live
+service manager, and can draw the result as one self-contained page.
+
+The declaration is the source of truth; the unit on the machine is an artifact
+and may be rebuilt from it at any time. The contract has four parts: WHERE it
+sits (`placement`), WHEN it fires (`schedule`), HOW it runs (`execution`), HOW
+it answers (`response`), plus an optional `reconcile` probe.
+
+### Hard rules
+
+- **There is no `status:` field, and that is deliberate.** A declared status is
+  never the truth; the service manager is
+  ([`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md)).
+- **Recipients are references** (`mandant:` / `person:`), never plaintext
+  addresses: a declaration is a tracked file and travels with the scope router.
+- **`execution.env` carries locators, never values** (`keychain://…`), and the
+  locator is what reaches the unit. The program resolves its own at run time.
+- **Running one by hand proves nothing about the job.** The honest probe runs in
+  the service manager's context, which has its own identity and its own grants.
+
+**The rest, and where:** the data model, the remaining contract rules (two
+ownership signals; a deadline, evidence and `owner: bridge` are mandatory) and
+the case behind each one in [`docs/workloads.md`](docs/workloads.md) · schema,
+template and the contract's regression suite under `workflow/workloads/` · the
+skill's mechanics, `view` and `publish` included, in `skills/workload/SKILL.md`
+· what a drawing may assert in
+[`rules/visual-output.md`](rules/visual-output.md) § Gate 3.
 
 ## Channels — Messaging & Outbound Transports
 

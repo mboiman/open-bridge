@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-recurring-with-watch-paths
+purpose: "Control: recurring is not a path watcher, watch_paths must be refused"
+placement: {host: example-host, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", watch_paths: ["/tmp/example"], timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

@@ -1,0 +1,10 @@
+# Control for: schedule.required[watch_paths] on kind watch.
+# The fallback cadence alone does not make a watcher: every_sec is explicitly
+# the safety net for a path change that fired too early, not the trigger.
+# Without paths this watcher listens to nothing.
+schema_version: 1
+scope: user
+id: negative-watch-without-watch-paths
+purpose: "Control: a path watcher with no watch_paths must be refused"
+placement: {host: host-a, kind: watch, runtime: launchd, owner: human}
+schedule: {every_sec: 120, timezone: Europe/Berlin}

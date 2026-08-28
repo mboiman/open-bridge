@@ -275,6 +275,26 @@ remotes:
 # ─── Calendar + Mandants ──────────────────────────────────────────────
 # Scheduled outbound + recipient groups. See workflow/calendars/ + identity/mandants/.
 # Activate via:  /bridge-onboard --add calendar  (typically pairs with mandants)
+# ─── Declared Runs (workload skill) ───────────────────────────────────
+# One file per run under workflow/workloads/. Absent block means defaults;
+# `enabled: false` refuses every subcommand with exit 3. Full model:
+# docs/workloads.md
+workloads:
+  enabled: true
+  # dir: workflow/workloads          # where declarations live
+  # stamp_dir: "$HOME/.bridge/workloads"
+  # label_prefix: bridge             # the first segment of every unit label
+  #
+  # The alarm path `reconcile --notify` speaks through. The program is yours,
+  # the placeholders are substituted per argv element, and the detail segment
+  # is appended only when there is detail. With no notify_via nothing is sent
+  # and the run says so: a program named in this skill would be a dependency
+  # the repository does not ship.
+  # notify_via:
+  #   command: ["~/bin/my-notifier", "--subject", "{what}", "--host", "{where}",
+  #             "--action", "{todo}"]
+  #   detail:  ["--body", "{detail}"]
+
 calendar:
   enabled: false
 mandants:

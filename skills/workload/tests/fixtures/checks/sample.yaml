@@ -1,0 +1,19 @@
+schema_version: 1
+scope: user
+group: sample
+checks:
+  - id: agent-reachable
+    description: "The agent answers on its port"
+    run_on: host-a
+    kind: exit
+    probe: "curl -sS -o /dev/null http://127.0.0.1:8013/health"
+    severity: high
+    hint: "bootout + bootstrap, never kickstart"
+  - id: disk-free
+    description: "Free space on the data volume, in gigabytes"
+    run_on: host-a
+    kind: compare
+    probe: "df -g /opt | tail -1 | awk '{print $4}'"
+    expect: ">=20"
+    severity: medium
+    hint: "prune the archive volume"

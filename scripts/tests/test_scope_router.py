@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -545,6 +546,120 @@ def test_unknown_path_default_is_pinned():
         pytest.xfail(
             "router still fails OPEN: an unregistered path ships to the public repo by default"
         )
+
+
+# ---------------------------------------------------------------------------
+# The generalisation of test_files_identical_to_upstream_stay_core above.
+#
+# That test names four paths by hand and has therefore only ever proved four
+# things. The invariant behind it is total: a tree that carries NO user tier is
+# CORE by construction, so every file tracked in it must classify core. Anything
+# else is an update channel closed in silence: the file ships upstream, and the
+# router refuses to carry the next change to it, with no error anywhere.
+#
+# Run against the whole upstream tree it found 23 such files at once, in three
+# families that each went stale the same way: a hand-maintained enumeration that
+# nobody re-generated when a file was added next to it.
+# ---------------------------------------------------------------------------
+
+#: Tracked upstream AND deliberately not core. Each entry is a divergence that
+#: must never be copied in either direction, so `user` is the correct answer.
+UPSTREAM_NON_CORE_BY_DESIGN = frozenset({
+    # Per-tier INVERTED; see test_inverted_root_files_never_ship.
+    ".gitignore",
+    ".bridge-origin",
+})
+
+#: Same, by prefix. `work/` is whole-folder USER (AGENTS.md § Scope): upstream
+#: ships the empty scaffolding, and promote must never carry what a downstream
+#: puts into it. Shipping the seed and refusing the content is the point.
+UPSTREAM_NON_CORE_PREFIXES = ("work/",)
+
+
+def _upstream_ref():
+    """The ref whose tree is CORE-only by definition, or None.
+
+    Two shapes of checkout ask this. In a downstream Bridge the OSS upstream is
+    a remote, so `open-bridge/main` is the tree to read. In open-bridge itself
+    there is no such remote and none is needed: a checkout without
+    `bridge-config.yaml` has no user tier at all, so its own HEAD is the tree.
+    Anything else skips rather than guesses.
+    """
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "open-bridge/main"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if probe.returncode == 0:
+        return "open-bridge/main"
+    if not (REPO / "bridge-config.yaml").exists():
+        return "HEAD"
+    return None
+
+
+def test_every_file_upstream_ships_stays_core():
+    ref = _upstream_ref()
+    if ref is None:
+        pytest.skip("no CORE-only tree reachable from here")
+    listing = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", ref],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    assert listing.returncode == 0, f"cannot read {ref}: {listing.stderr.strip()}"
+    tracked = [f for f in listing.stdout.split("\n") if f]
+    assert len(tracked) > 100, f"{ref} listed only {len(tracked)} files, wrong ref?"
+
+    offenders = sorted(
+        f for f in tracked
+        if tier(f) != "core"
+        and f not in UPSTREAM_NON_CORE_BY_DESIGN
+        and not f.startswith(UPSTREAM_NON_CORE_PREFIXES)
+    )
+    assert not offenders, (
+        f"{len(offenders)} file(s) ship on {ref} but classify non-core, so the next "
+        "change to each one silently fails to promote:\n  " + "\n  ".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------------------
+# A CORE CI job may only execute CORE files.
+#
+# `.github/workflows/validate.yml` is named in the rules/operations.md core
+# allowlist, so it promotes. A script it runs that classifies non-core does not
+# travel with it, and upstream then runs a step pointing at a file that never
+# arrived. This is not hypothetical: the remote-inventory contract was merged
+# upstream with its CI step and its suite classified `user` on the same day.
+# ---------------------------------------------------------------------------
+_RUNNABLE_IN_CI = re.compile(r"(?:scripts|skills|infra|workflow|bin)/[\w./-]+\.(?:sh|py)")
+
+
+def test_paths_a_core_ci_workflow_runs_are_core():
+    workflow = REPO / ".github" / "workflows" / "validate.yml"
+    if not workflow.exists():
+        pytest.skip("no validate.yml in this checkout")
+    assert tier(".github/workflows/validate.yml") == "core", (
+        "premise gone: validate.yml no longer promotes, so this guard proves nothing"
+    )
+    named = sorted(set(_RUNNABLE_IN_CI.findall(workflow.read_text(encoding="utf-8"))))
+    executed = [p for p in named if (REPO / p).exists()]
+    assert executed, "found no runnable path in validate.yml, so the regex stopped matching"
+    offenders = sorted(p for p in executed if tier(p) != "core")
+    assert not offenders, (
+        "validate.yml promotes and runs these, but they classify non-core and stay "
+        "behind, so upstream CI would call a file that never shipped:\n  "
+        + "\n  ".join(f"{p} -> {tier(p)}" for p in offenders)
+    )
+
+
+def test_a_user_surface_keeps_its_tests_local():
+    """The `_tests` rule must not over-reach into a whole-folder USER surface.
+
+    `workflow/checks/` is USER end to end by decision (see above), companions
+    included. The `_tests` rule runs FIRST in classify_file, so ordering is not
+    what holds this out. The enumeration in WRAPPER_TESTS_CORE does. This pins
+    that: widening it to a shape would route an instance's own probe fixtures at
+    the public repo, and nothing downstream would object.
+    """
+    assert tier("workflow/checks/_tests/probe.yaml") == "user"
 
 
 if __name__ == "__main__":

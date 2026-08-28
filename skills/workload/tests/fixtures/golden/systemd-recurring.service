@@ -1,0 +1,13 @@
+[Unit]
+Description=linux-timer-report
+X-BridgeWorkload=linux-timer-report
+X-BridgeWorkloadDigest=sha256:8b2c5ae8321d390fa012217e86f068902a4de7f055e4156ab2b72d27552f402e
+
+[Service]
+Type=oneshot
+ExecStart=/opt/bridge/scripts/daily-health-report.sh
+Environment="BRIDGE_WORKLOAD=linux-timer-report"
+Environment="BRIDGE_WORKLOAD_DIGEST=sha256:8b2c5ae8321d390fa012217e86f068902a4de7f055e4156ab2b72d27552f402e"
+RuntimeMaxSec=600
+KillMode=control-group
+KillSignal=SIGTERM

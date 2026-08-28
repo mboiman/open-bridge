@@ -1,0 +1,8 @@
+# A grant is issued to a PATH. Full disk access on /usr/bin/python3 does not
+# give it to this run, it gives it to every python script on the machine.
+schema_version: 1
+scope: user
+id: negative-shared-interpreter-with-grant
+purpose: "Control: a shared interpreter may not hold a grant"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human, interpreter: /usr/bin/python3, privacy_grants: [full-disk-access]}
+execution: {command: ["/usr/bin/python3", "/opt/example/run.py"], timeout_sec: 30}

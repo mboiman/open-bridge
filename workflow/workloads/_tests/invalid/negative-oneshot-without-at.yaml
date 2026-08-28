@@ -1,0 +1,9 @@
+# Control for: schedule.required[at] on kind oneshot.
+# `at` is the only trigger a one-shot has. Without it nothing ever fires, and
+# the file still says something runs here.
+schema_version: 1
+scope: user
+id: negative-oneshot-without-at
+purpose: "Control: a one-shot with no at must be refused"
+placement: {host: host-a, kind: oneshot, runtime: dispatcher, owner: human}
+schedule: {timezone: Europe/Berlin}

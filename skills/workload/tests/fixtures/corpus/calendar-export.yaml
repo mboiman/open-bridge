@@ -1,0 +1,11 @@
+schema_version: 1
+scope: user
+id: calendar-export
+purpose: "Pulls free-busy windows out of the calendar store for the public agent"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge, interpreter: /opt/bridge/bin/uv-calendar}
+schedule: {every_sec: 900, timezone: Europe/Berlin}
+execution:
+  command: ["/opt/bridge/bin/uv-calendar", "run", "python", "agent/tools/freebusy_export.py", "--horizon-days", "30"]
+  working_dir: /opt/bridge/agents
+  timeout_sec: 120
+response: {evidence: log-trace, notify_on: [failure, missing], notify_via: bridge-notify}

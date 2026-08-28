@@ -1,0 +1,6 @@
+schema_version: 1
+scope: user
+id: negative-daemon-with-schedule
+purpose: "Control: a daemon runs continuously and may not carry an appointment"
+placement: {host: example-host, kind: daemon, runtime: launchd, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", delivery_at: "06:30", timezone: Europe/Berlin}

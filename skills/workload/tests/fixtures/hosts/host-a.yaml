@@ -1,0 +1,59 @@
+# Stand-in for infra/remotes/<host>.yaml, macOS side. Shaped after a real
+# inventory file: the same keys, none of the content.
+name: host-a
+scope: user
+type: macos
+os: "macOS 26.5.1"
+
+ssh:
+  user: opuser
+  host: host-a
+  port: 22
+
+capabilities:
+  - ssh
+  - services
+
+services:
+  - slug: dispatcher
+    label: bridge.dispatcher
+    command: /opt/bridge/bin/dispatcher.sh
+    zweck: "German key from the live inventory, kept so an unknown key cannot crash the reader"
+    type: launchd
+    status: running
+    schedule: "every 300 s"
+  - slug: calendar-export
+    label: bridge.calendar-export
+    type: launchd
+    status: running
+    schedule: "every 900 s"
+  - slug: voice-channel
+    label: bridge.voice-channel
+    type: keepalive
+    status: parked
+    geparkt_seit: 2026-08-06
+    geparkt_grund: "Security bar, must stay disabled"
+    port: 8820
+  - slug: chat-channel
+    label: null
+    type: manual-tmux
+    zweck: "Started by hand, no unit file"
+  - slug: mesh-daemon
+    label: com.example.mesh
+    type: launchd-system
+    status: running
+    zweck: "Third party software, seen and never touched"
+  - slug: stale-entry
+    label: bridge.long-gone
+    type: launchd
+    zweck: "Inventory remembers it, neither declaration nor machine does"
+  - slug: parked-on-purpose
+    label: bridge.parked-on-purpose
+    type: launchd
+    intentionally_absent:
+      since: 2026-08-06
+      reason: "Stopped deliberately, and the reason a reader needs is written right here."
+  - slug: broken-absence
+    label: bridge.broken-absence
+    type: launchd
+    intentionally_absent: "parkiert"

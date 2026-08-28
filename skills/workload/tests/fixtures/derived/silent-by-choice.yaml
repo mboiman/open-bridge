@@ -1,0 +1,36 @@
+# A run that asks for NOTHING, on purpose. It exists so the alarm layer can be
+# measured against the declared default, which is silence: a laptop-bound run
+# that fails half-hourly while travelling would otherwise become the loudest
+# thing on the machine.
+#
+# It carries `exit-code` because the declaration gate refuses `log-trace` where
+# `notify_on` asks about neither `missing` nor `failure`: naming a proof that
+# nothing will produce is refused.
+---
+schema_version: 1
+scope: user
+id: "silent-by-choice"
+title: "Refreshes a page, and says nothing about it"
+purpose: "A run whose silence is a decision, not an omission"
+persona_ref: _infrastructure
+placement:
+  host: "host-a"
+  kind: "interval"
+  runtime: "launchd"
+  owner: "bridge"
+  provisioned_at: null
+  interpreter: /bin/bash
+schedule:
+  every_sec: 1800
+  timezone: Europe/Berlin
+execution:
+  command: ["/bin/bash", "/opt/refresh.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: exit-code
+  notify_on: []
+  notify_via: bridge-notify
+learned_from: "fixture: silence is the declared default and has to be measurable"

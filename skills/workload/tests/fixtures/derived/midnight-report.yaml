@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+id: midnight-report
+purpose: "Delivery at 00:10 with a 20 minute lead, so the start falls on the previous day"
+placement: {host: host-a, kind: recurring, runtime: launchd, owner: bridge}
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO"
+  delivery_at: "00:10"
+  duration_estimate_min: 20
+  timezone: Europe/Berlin
+execution: {command: ["/opt/bridge/scripts/midnight.sh"], timeout_sec: 60}
+response: {evidence: log-trace}

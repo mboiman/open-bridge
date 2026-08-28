@@ -1,0 +1,6 @@
+schema_version: 1
+scope: user
+id: negative-unknown-top-level-key
+purpose: "Negative control: an unknown top level key must be rejected, a typo is not a feature"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}
+statuss: running

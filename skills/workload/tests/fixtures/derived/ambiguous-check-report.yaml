@@ -1,0 +1,9 @@
+schema_version: 1
+scope: user
+id: ambiguous-check-report
+purpose: "Bare check id that exists in two groups, which must raise instead of picking one"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 600, timezone: Europe/Berlin}
+execution: {command: ["/opt/bridge/scripts/checked.sh"], timeout_sec: 60}
+response: {evidence: log-trace}
+reconcile: {check_ref: "disk-free"}

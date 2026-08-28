@@ -1,0 +1,10 @@
+schema_version: 1
+scope: user
+id: label-prefix-adopted
+purpose: "A run that already exists on the machine under somebody else's label"
+# Only an own prefix makes it possible to adopt a hand made unit. The id stays
+# the tail of the label, which is what the inventory match and the ownership
+# stamp both rest on.
+placement: {host: example-host, kind: daemon, runtime: launchd, owner: bridge, label_prefix: org.example.services}
+execution: {command: ["/opt/example/bin/service"], timeout_sec: 30}
+response: {evidence: exit-code}

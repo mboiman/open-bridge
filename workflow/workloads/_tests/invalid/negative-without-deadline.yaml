@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-without-deadline
+purpose: "Control: a bridge owned run with no timeout_sec must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", delivery_at: "08:00", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"]}
+response: {evidence: exit-code}

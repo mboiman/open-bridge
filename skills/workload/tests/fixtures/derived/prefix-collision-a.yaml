@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+id: legacy
+purpose: "Two appointments, one of them named so the label gains a tail segment"
+placement: {host: host-a, kind: recurring, runtime: launchd, owner: bridge, label_prefix: org.example}
+schedule:
+  timezone: Europe/Berlin
+  appointments:
+    - {name: poller, at: "07:00", rrule: "FREQ=DAILY", duration_estimate_min: 0}
+    - {name: other, at: "19:00", rrule: "FREQ=DAILY", duration_estimate_min: 0}
+execution: {command: ["/opt/bridge/bin/legacy"], timeout_sec: 30}
+response: {evidence: exit-code}

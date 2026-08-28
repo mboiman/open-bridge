@@ -1,0 +1,23 @@
+schema_version: 1
+scope: user
+id: daily-health-report
+title: Daily Health Report
+purpose: "Daily operations report built from the log store for two recipients"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge, provisioned_at: null}
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA"
+  delivery_at: "06:30"
+  duration_estimate_min: 20
+  timezone: Europe/Berlin
+execution:
+  command: ["/opt/bridge/scripts/daily-health-report.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  recipients: [{mandant: example-org, person: person_a}, {mandant: example-org, person: person_b}]
+  notify_on: [failure, timeout, missing]
+  notify_via: bridge-notify
+reconcile: {probe: "launchctl print gui/4242/bridge.dispatcher", expect: "state = running", hint: "bootout + bootstrap"}

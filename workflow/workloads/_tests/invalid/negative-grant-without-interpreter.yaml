@@ -1,0 +1,8 @@
+# A grant with no client path is issued to nothing. The declaration names a
+# need nobody can meet, because the target is missing.
+schema_version: 1
+scope: user
+id: negative-grant-without-interpreter
+purpose: "Control: a grant with no interpreter path must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human, privacy_grants: [calendar]}
+execution: {command: ["/opt/example/run"], timeout_sec: 30}

@@ -1,0 +1,9 @@
+# Control for: required[execution] on a bridge owned run.
+# The Bridge is meant to run this itself and the file does not say what.
+schema_version: 1
+scope: user
+id: negative-bridge-owned-without-execution
+purpose: "Control: a bridge owned run with no execution block must be refused"
+placement: {host: host-a, kind: recurring, runtime: dispatcher, owner: bridge}
+schedule: {rrule: "FREQ=DAILY", timezone: Europe/Berlin}
+response: {evidence: exit-code}

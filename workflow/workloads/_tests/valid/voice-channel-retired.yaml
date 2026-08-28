@@ -1,0 +1,11 @@
+# Also holds the exception the timeout_sec sentence names: owner bridge, kind
+# daemon, NO execution block and no response block, and valid nonetheless. Take
+# daemon/agent out of that exception and this file drops out of the run, so the
+# sentence stops being an unchecked claim.
+schema_version: 1
+scope: user
+id: voice-channel-retired
+purpose: "Voice channel of the chat bot, deliberately taken out of service"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge, port: 8820}
+retired: {at: "2026-08-06", reason: "security bolt, a start would be a security incident"}
+reconcile: {probe: "launchctl print gui/501/com.example.voice", expect: "no match", hint: "must stay disabled"}

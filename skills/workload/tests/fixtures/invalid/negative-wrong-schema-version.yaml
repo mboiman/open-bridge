@@ -1,0 +1,5 @@
+schema_version: 2
+scope: user
+id: negative-wrong-schema-version
+purpose: "Negative control: an unsupported schema_version must be rejected"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}

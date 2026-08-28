@@ -1,0 +1,12 @@
+gui/4242/bridge.calendar-export = {
+	active count = 0
+	path = /home/opuser/Library/LaunchAgents/bridge.calendar-export.plist
+	state = not running
+	program = /bin/sh
+	environment = {
+		BRIDGE_WORKLOAD => calendar-export
+		BRIDGE_WORKLOAD_DIGEST => sha256:1111111111111111111111111111111111111111111111111111111111111111
+	}
+	runs = 12
+	last exit code = 0
+}

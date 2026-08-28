@@ -1,0 +1,7 @@
+schema_version: 1
+scope: user
+id: elevated-daemon
+purpose: "A system domain daemon, which the skill may plan but never install itself"
+placement: {host: host-a, kind: daemon, runtime: launchd-system, owner: bridge, port: 2222}
+execution: {command: ["/opt/bridge/bin/watchdog"], timeout_sec: 30}
+response: {evidence: exit-code}

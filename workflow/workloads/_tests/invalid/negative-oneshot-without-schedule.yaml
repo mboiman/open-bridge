@@ -1,0 +1,6 @@
+# Control for: kind oneshot requires a schedule block.
+schema_version: 1
+scope: user
+id: negative-oneshot-without-schedule
+purpose: "Control: a one-shot with no schedule block must be refused"
+placement: {host: host-a, kind: oneshot, runtime: dispatcher, owner: human}

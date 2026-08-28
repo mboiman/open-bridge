@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: cron-cadence
+purpose: "A cadence carried by crontab, the backend that guarantees nothing on its own"
+placement: {host: host-b, kind: interval, runtime: cron, owner: bridge}
+schedule: {every_sec: 900, timezone: Europe/Berlin}
+execution: {command: ["/opt/bridge/scripts/poll.sh", "--pct", "90%"], timeout_sec: 120}
+response: {evidence: log-trace, notify_on: [failure, missing]}

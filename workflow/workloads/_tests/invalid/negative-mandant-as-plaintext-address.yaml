@@ -1,0 +1,16 @@
+# Control for: response.recipients[].mandant, the pattern.
+#
+# Until round 4 only the KEY NAME was guarded here. A plaintext address IN the
+# mandant field went through both gates and validate reported clean. The file
+# then carried a person into every tier it reaches, and the scope router cannot
+# take that back (references/declare.md, section 8).
+#
+# The address here is invented; the case on record was a real customer address.
+# A slug has no @, no dot, no space and no capitals, so the form rejects it
+# without anything having to guess.
+schema_version: 1
+scope: user
+id: negative-mandant-as-plaintext-address
+purpose: "Control: a plaintext address in the mandant field must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+response: {evidence: exit-code, recipients: [{mandant: "a.person@example.com"}]}

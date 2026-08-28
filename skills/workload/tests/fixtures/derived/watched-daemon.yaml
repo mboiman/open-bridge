@@ -1,0 +1,16 @@
+# A daemon that asks to be told when it falls over. It exists for the ONE
+# verdict in the alarm layer that waits for a second pass: `stopped` reads a
+# live measurement (running is False, or a probe verdict) and that flickers
+# around a restart. Everything else the layer reports is a line already written
+# to disk, which does not become truer by being read twice.
+schema_version: 1
+scope: user
+id: watched-daemon
+purpose: "The one verdict that waits for a second look"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: bridge}
+execution: {command: ["/opt/daemon.sh"], timeout_sec: 30}
+response:
+  evidence: log-trace
+  notify_on: [failure]
+  notify_via: bridge-notify
+learned_from: "fixture: a live reading flickers, so stopped waits one pass"

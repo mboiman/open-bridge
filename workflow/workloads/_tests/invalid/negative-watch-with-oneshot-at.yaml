@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-watch-with-oneshot-at
+purpose: "Control: a path watcher is not a one-shot, at must be refused"
+placement: {host: example-host, kind: watch, runtime: launchd, owner: bridge}
+schedule: {watch_paths: ["/tmp/example"], at: "2026-10-15T09:00:00+02:00", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+     BKS open-bridge — workloads.html  (feature page)
+     Built on the shared shell used by index.html / concepts.html.
+     Self-contained single file, GitHub-Pages-ready, fully offline, native UTF-8.
+     Bilingual EN/DE (data-lang spans + L toggle), tool-neutral, no external assets.
+     ============================================================================ -->
+<html lang="en" data-active-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BKS open-bridge — Workloads</title>
+<meta name="description" content="Workloads in BKS open-bridge: one declared run on one machine, in one file. The four part contract, why there is deliberately no status field, ownership proved on both sides, and four test suites of which two exist to test the other two.">
+<!-- Social / Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="BKS open-bridge — Workloads">
+<meta property="og:description" content="One declared run on one machine, in one file. The declaration is the truth; the unit on the machine is an artifact.">
+<meta property="og:url" content="https://bks-lab.github.io/open-bridge/workloads.html">
+<meta property="og:image" content="https://bks-lab.github.io/open-bridge/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="BKS open-bridge — Workloads">
+<meta name="twitter:description" content="One declared run on one machine, in one file.">
+
+<!-- Anti-FOUC pre-paint: theme + language set BEFORE the stylesheet paints. -->
+<script>
+(function(){
+  var r = document.documentElement;
+  try{
+    var t = localStorage.getItem("ob-theme");
+    if(t === "dark" || (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)){
+      r.classList.add("dark");
+    }
+  }catch(e){}
+  try{
+    var l = localStorage.getItem("ob-lang");
+    var lang = (l === "de") ? "de" : (r.getAttribute("lang") || "en");
+    r.setAttribute("data-active-lang", lang); r.setAttribute("lang", lang);
+  }catch(e){ r.setAttribute("data-active-lang","en"); }
+})();
+</script>
+
+<link rel="stylesheet" href="assets/brand.css">
+<style>
+/* ============================================================
+   BKS open-bridge shared shell — single file, fully offline.
+   Colour / type / space tokens lifted from DESIGN.md (Editorial
+   Minimalism). No external fonts, no CDN, no network calls.
+   ============================================================ */
+
+:root{
+  --ink:#111827; --muted:#6B7280;
+  --surface:#FFFFFF; --surface-subtle:#F9FAFB; --surface-muted:#F3F4F6;
+  --on-primary:#FFFFFF; --on-surface:#374151;
+  --line:#E5E7EB; --line-subtle:#F3F4F6;
+  --accent-from:#667EEA; --accent-to:#764BA2;
+  --accent:#6366F1; --accent-secondary:#8B5CF6;
+  --ok:#10B981; --info:#3B82F6;
+  --font-sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:"SF Mono",Monaco,"Cascadia Code","Roboto Mono",Consolas,"Liberation Mono",monospace;
+
+  --accent-text:#4F46E5;
+  --accent-soft:#EEF2FF;
+  --ok-text:#047857;
+  --info-text:#1D4ED8;
+  --attention-text:#7C3AED;
+  --code-bg:#F9FAFB;
+
+  --primary:var(--ink); --secondary:var(--muted);
+  --border:var(--line); --border-subtle:var(--line-subtle);
+  --on-surface-muted:var(--muted);
+  --success:var(--ok); --attention:var(--accent-secondary);
+  --mono:var(--font-mono);
+
+  --shadow-soft:0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03);
+  --shadow-hover:0 20px 25px -5px rgba(0,0,0,.08),0 10px 10px -5px rgba(0,0,0,.04);
+
+  --section-y:96px;
+  --container:80rem; --hero-w:72rem; --prose-w:48rem;
+  --r-sm:4px; --r-md:8px; --r-lg:12px; --r-xl:16px; --r-full:9999px;
+}
+
+/* ---- Header ---- */
+header.nav{
+  position:sticky;top:0;z-index:50;height:auto;min-height:64px;
+  display:flex;align-items:center;
+  background:color-mix(in srgb,var(--surface) 82%,transparent);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+
+/* ---- Footer ---- */
+
+@media (max-width:860px){ .foot-grid>*{min-width:0} }
+@media (prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none}
+}
+@media print{
+  header.nav,.icon-btn,.seg{display:none!important}
+  .reveal{opacity:1!important;transform:none!important}
+}
+</style>
+
+<!-- ============ page-specific styles (workloads.html) ============ -->
+<style>
+:target{scroll-margin-top:84px}
+[id]{scroll-margin-top:84px}
+
+code, .mono{
+  font-family:var(--mono);font-size:0.86em;background:var(--code-bg);
+  border:1px solid var(--border-subtle);border-radius:var(--r-sm);padding:1px 6px;color:var(--on-surface);
+}
+.prose p code{white-space:nowrap}
+
+.page-hero{padding-block:64px 40px}
+.page-hero .eyebrow{margin-bottom:14px}
+.page-hero p.lede{margin-top:18px;font-size:18px;font-weight:300;color:var(--on-surface)}
+
+.lead-def{
+  margin-top:40px;max-width:var(--prose-w);margin-inline:auto;
+  border:1px solid var(--border);border-left:3px solid var(--accent-text);
+  border-radius:var(--r-lg);background:var(--surface-subtle);
+  padding:30px 34px;box-shadow:var(--shadow-soft);
+}
+.lead-def .k{font-size:13px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--accent-text)}
+.lead-def .def{margin-top:12px;font-size:22px;font-weight:300;line-height:1.45;color:var(--primary)}
+.lead-def .more{margin-top:16px;font-size:15px}
+.lead-def .more a{font-weight:500;text-decoration:none}
+.lead-def .more a:hover{text-decoration:underline}
+
+.grp{max-width:var(--prose-w);margin:0 auto 8px;padding-top:8px}
+.grp .eyebrow{color:var(--accent-text)}
+.grp .h2{margin-top:8px}
+
+.block{max-width:var(--prose-w);margin:0 auto 28px}
+.block h3.h3{font-size:24px;font-weight:600;line-height:1.25;color:var(--primary);margin-bottom:10px}
+.block p{font-size:16px;line-height:1.7;color:var(--on-surface);margin-bottom:14px}
+
+/* split cards for the identity / materialization halves */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:22px;max-width:var(--prose-w);margin:0 auto 8px}
+.split .card{padding:26px 28px}
+.split .card h4{font-size:13px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--accent-text);margin-bottom:10px}
+.split .card p{font-size:15px;line-height:1.65;color:var(--on-surface);margin-bottom:0}
+.split .card .tag{display:inline-block;margin-bottom:12px;font-size:12px;font-weight:600;letter-spacing:0.03em;
+  padding:4px 10px;border-radius:var(--r-full);border:1px solid var(--border);background:var(--surface-subtle);color:var(--secondary)}
+@media (max-width:640px){ .split{grid-template-columns:1fr} }
+
+/* use-case grid ("When to use it") */
+.uses{max-width:var(--container);margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.use{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);box-shadow:var(--shadow-soft);
+  padding:28px 30px;display:flex;flex-direction:column;
+  transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;
+}
+.use:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover);
+  border-color:color-mix(in srgb,var(--accent-text) 30%,var(--border))}
+.use .n{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--accent-text);letter-spacing:0.04em;margin-bottom:8px}
+.use h3{font-size:19px;font-weight:600;line-height:1.3;color:var(--primary);margin-bottom:12px}
+.use p{font-size:15px;line-height:1.65;color:var(--on-surface);margin-bottom:0}
+.use code{font-family:var(--mono);font-size:0.85em;background:var(--code-bg);
+  border:1px solid var(--border-subtle);border-radius:var(--r-sm);padding:1px 6px;color:var(--on-surface);white-space:nowrap}
+.use.flagship{grid-column:1 / -1;border-left:3px solid var(--accent-text);
+  background:linear-gradient(180deg,var(--accent-soft),var(--surface) 62%)}
+.use.flagship h3{font-size:22px}
+.use .caveat{
+  margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);
+  font-size:13.5px;line-height:1.6;color:var(--on-surface);
+}
+.use .caveat strong{color:var(--attention-text);font-weight:600}
+@media (max-width:780px){ .uses{grid-template-columns:1fr} .use.flagship{grid-column:auto} }
+
+/* verb table */
+.verbs{max-width:var(--prose-w);margin:0 auto;overflow-x:auto}
+.verbs table{border-collapse:collapse;width:100%;font-size:15px}
+.verbs th,.verbs td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+.verbs th{font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--secondary);font-weight:600}
+.verbs td.v{white-space:nowrap}
+.verbs td.v code{background:var(--accent-soft);border-color:transparent;color:var(--accent-text);font-weight:600}
+
+/* quickstart terminal (reuses the .code grammar from index.html) */
+.term{max-width:var(--prose-w);margin:0 auto}
+.code-label{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-family:var(--mono);font-size:12px;color:var(--secondary);padding:0 4px 8px;
+}
+.code{
+  font-family:var(--mono);font-size:13.5px;line-height:1.7;
+  background:var(--surface-subtle);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:20px 22px;overflow-x:auto;color:var(--on-surface);
+  white-space:pre;
+}
+html.dark .code{background:var(--code-bg)}
+.code .cmt{color:var(--secondary)}
+.code .k{color:var(--accent-text);font-weight:600}
+.code .ok{color:var(--ok-text)}
+.code .dir{color:var(--accent-secondary);font-weight:500}
+.term .after{max-width:var(--prose-w);margin:16px auto 0;font-size:14px;line-height:1.6;color:var(--secondary)}
+.term .after a{color:var(--accent-text);text-decoration:none;font-weight:500}
+.term .after a:hover{text-decoration:underline}
+
+/* callout */
+.note{
+  max-width:var(--prose-w);margin:0 auto 28px;
+  border:1px solid var(--border);border-left:3px solid var(--info);
+  border-radius:var(--r-lg);background:var(--surface);
+  padding:22px 26px;box-shadow:var(--shadow-soft);
+}
+.note .k{font-size:12px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--info-text);margin-bottom:8px}
+.note p{font-size:15px;line-height:1.65;color:var(--on-surface);margin:0}
+
+/* limits list */
+.limits{max-width:var(--prose-w);margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.limit{
+  border:1px solid var(--border);border-left:3px solid var(--attention);
+  border-radius:var(--r-lg);background:var(--surface);
+  padding:20px 24px;box-shadow:var(--shadow-soft);
+}
+.limit h4{font-size:16px;font-weight:600;color:var(--primary);margin-bottom:8px}
+.limit p{font-size:15px;line-height:1.65;color:var(--on-surface);margin:0}
+
+/* pointer chips */
+.pointers{max-width:var(--prose-w);margin:0 auto;display:flex;flex-wrap:wrap;gap:10px}
+.pointers a{
+  text-decoration:none;color:var(--accent-text);
+  padding:8px 14px;border-radius:var(--r-full);
+  border:1px solid var(--border);background:var(--surface-subtle);
+  font-size:14px;font-weight:500;
+}
+.pointers a:hover{background:var(--accent-soft)}
+.pointers-sub{max-width:var(--prose-w);margin:18px auto 0;display:flex;flex-wrap:wrap;align-items:center;gap:9px;
+  font-size:13px;color:var(--secondary)}
+.pointers-sub .lab{font-weight:600;color:var(--secondary);text-transform:uppercase;letter-spacing:0.05em;font-size:12px}
+.pointers-sub a{
+  text-decoration:none;color:var(--accent-text);
+  padding:5px 11px;border-radius:var(--r-full);
+  border:1px solid var(--border);background:var(--surface-subtle);font-weight:500;
+}
+.pointers-sub a:hover{background:var(--accent-soft)}
+
+@media (max-width:560px){ .lead-def{padding:24px 22px} .split .card{padding:22px 20px} .use{padding:24px 22px} }
+</style>
+</head>
+<body>
+
+<!-- ======================= STICKY HEADER (shared) ======================= -->
+<header class="nav">
+  <div class="nav-inner">
+    <a class="wordmark" href="index.html">open<span class="text-gradient">-bridge</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="index.html"><span data-lang="en">Home</span><span data-lang="de">Start</span></a>
+      <a href="demo.html"><span data-lang="en">Demo</span><span data-lang="de">Demo</span></a>
+      <a href="use-cases.html"><span data-lang="en">Use Cases</span><span data-lang="de">Anwendungsfälle</span></a>
+      <a href="concepts.html"><span data-lang="en">Concepts</span><span data-lang="de">Konzepte</span></a>
+      <a href="workspaces.html"><span data-lang="en">Workspaces</span><span data-lang="de">Workspaces</span></a>
+      <a class="active" aria-current="page" href="workloads.html"><span data-lang="en">Workloads</span><span data-lang="de">Workloads</span></a>
+      <a href="agents.html"><span data-lang="en">Agents</span><span data-lang="de">Agents</span></a>
+      <a href="explore.html"><span data-lang="en">Explore</span><span data-lang="de">Erkunden</span></a>
+      <a href="changelog.html"><span data-lang="en">Changelog</span><span data-lang="de">Changelog</span></a>
+    </nav>
+    <div class="nav-spacer"></div>
+    <div class="nav-chips">
+      <a class="chip" href="https://github.com/bks-lab/open-bridge" target="_blank" rel="noopener" aria-label="GitHub repository">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <a class="chip" href="index.html#license" aria-label="MIT license">MIT</a>
+      <div class="seg" role="group" aria-label="Language / Sprache">
+        <button id="lang-en" type="button" aria-pressed="true" title="Toggle language — press L">EN</button>
+        <button id="lang-de" type="button" aria-pressed="false" title="Sprache umschalten — Taste L">DE</button>
+      </div>
+      <button class="icon-btn" id="theme-toggle" aria-label="Toggle light / dark theme (T)" title="Toggle theme — press T">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ PAGE CONTENT ============================ -->
+<main id="top">
+
+  <!-- ---- intro + lead definition ---- -->
+  <section class="page-hero">
+    <div class="container">
+      <div class="prose">
+        <p class="eyebrow" data-lang="en">Feature</p>
+        <p class="eyebrow" data-lang="de">Feature</p>
+        <h1 class="h1">Workloads</h1>
+        <p class="lede" data-lang="en">Every machine accumulates things that run: a report at 06:30, a poller every fifteen minutes, a daemon, a tunnel, an agent waiting for requests. They are usually spread across a service manager, a crontab, a note in a wiki and somebody's memory. A workload is one of those things, written down once, in one file, with an owner.</p>
+        <p class="lede" data-lang="de">Auf jeder Maschine sammelt sich an, was läuft: ein Bericht um 06:30, ein Poller alle fünfzehn Minuten, ein Daemon, ein Tunnel, ein Agent, der auf Anfragen wartet. Verteilt ist das üblicherweise über einen Dienstverwalter, eine Crontab, eine Notiz im Wiki und jemandes Gedächtnis. Ein Workload ist eines dieser Dinge, einmal aufgeschrieben, in einer Datei, mit einem Eigentümer.</p>
+      </div>
+
+      <div class="lead-def">
+        <div class="k" data-lang="en">What is a workload?</div>
+        <div class="k" data-lang="de">Was ist ein Workload?</div>
+        <p class="def" data-lang="en"><strong>One declared run on one machine.</strong> It lives in <code>workflow/workloads/&lt;id&gt;.yaml</code>, and that file is the truth. The unit the service manager holds is an artifact rendered from it, and may be rebuilt at any time.</p>
+        <p class="def" data-lang="de"><strong>Ein deklarierter Lauf auf einer Maschine.</strong> Er liegt in <code>workflow/workloads/&lt;id&gt;.yaml</code>, und diese Datei ist die Wahrheit. Die Einheit beim Dienstverwalter ist ein daraus gerendertes Artefakt und kann jederzeit neu gebaut werden.</p>
+        <p class="more">
+          <a href="https://github.com/bks-lab/open-bridge/blob/main/docs/workloads.md" target="_blank" rel="noopener"><span data-lang="en">Read the full workloads guide →</span><span data-lang="de">Den vollständigen Workloads-Guide lesen →</span></a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- the problem ---- -->
+  <section class="alt" style="padding-block:56px 72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">The state it grew out of</p>
+        <p class="eyebrow" data-lang="de">Der Zustand, aus dem es entstand</p>
+        <h2 class="h2" data-lang="en">Five places to register a run, and no ownership anywhere</h2>
+        <h2 class="h2" data-lang="de">Fünf Anmeldeflächen, und nirgends ein Eigentümer</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">This is not a hypothetical. It is what one real machine looked like after a few years of use, measured rather than remembered: <strong>74 service entries</strong> in an inventory that describes runs and creates none. A scheduling skill that promised to create, deploy and disable them, whose registry file <strong>did not exist</strong>. A calendar with eight entries, <strong>all of which had never fired</strong>. And an executor whose registry lived <strong>outside the repository</strong>, on the machine.</p>
+        <p data-lang="de">Das ist kein gedachtes Beispiel. So sah eine echte Maschine nach einigen Jahren Gebrauch aus, gemessen statt erinnert: <strong>74 Diensteinträge</strong> in einem Inventar, das Läufe beschreibt und keinen anlegt. Ein Skill, der versprach anzulegen, auszurollen und abzuschalten, dessen Registry-Datei <strong>nicht existierte</strong>. Ein Kalender mit acht Einträgen, von denen <strong>keiner je gefeuert hatte</strong>. Und ein Ausführer, dessen Registry <strong>außerhalb des Repositories</strong> lag, auf der Maschine.</p>
+        <p data-lang="en">The missing thing was not a scheduler. Of everything running on that host, <em>nothing recorded which runs the Bridge had created, which a person had made by hand, and which a tool had left behind.</em> The visible consequences were eleven backup copies of one registry file in five naming schemes, a <code>launchd.broken-&lt;date&gt;</code> directory nobody had touched in months, and 1428 log files with no rotation.</p>
+        <p data-lang="de">Was fehlte, war kein Planer. Von allem, was auf diesem Wirt lief, hielt <em>nichts fest, welche Läufe die Bridge angelegt hatte, welche ein Mensch von Hand und welche ein Werkzeug hinterlassen hatte.</em> Sichtbare Folgen: elf Sicherungskopien einer Registry-Datei in fünf Namensschemata, ein Verzeichnis <code>launchd.broken-&lt;datum&gt;</code>, das seit Monaten niemand angefasst hatte, und 1428 Logdateien ohne Rotation.</p>
+        <p data-lang="en">Everything in the contract below except one field is the union of what already existed, scattered: the appointment comes from the calendar, the probe from the health checks, the host from the machine inventory. The one field none of the five had is <code>owner</code>.</p>
+        <p data-lang="de">Alles im Vertrag unten außer einem Feld ist die Vereinigung dessen, was verstreut schon existierte: der Termin aus dem Kalender, die Sonde aus den Gesundheitsprüfungen, der Wirt aus dem Maschineninventar. Das eine Feld, das keine der fünf Flächen hatte, ist <code>owner</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- the contract ---- -->
+  <section style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">The contract</p>
+        <p class="eyebrow" data-lang="de">Der Vertrag</p>
+        <h2 class="h2" data-lang="en">Four parts, and one optional probe</h2>
+        <h2 class="h2" data-lang="de">Vier Teile, und eine optionale Sonde</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">A declaration answers four questions and nothing else: where it sits, when it fires, how it runs, and how it answers. A fifth block says how you would know it is still there.</p>
+        <p data-lang="de">Eine Deklaration beantwortet vier Fragen und sonst nichts: wo sie sitzt, wann sie feuert, wie sie läuft, wie sie antwortet. Ein fünfter Block sagt, woran man erkennt, dass sie noch da ist.</p>
+      </div>
+      <div class="block reveal">
+<pre class="code">schema_version: 1
+scope: user                    <span class="cmt"># core | org | personal | user</span>
+id: daily-health-report
+purpose: "Daily operations report, due before the morning stand-up"
+
+placement:                     <span class="cmt"># 1. WHERE IT SITS</span>
+  host: host-a                 <span class="cmt"># a slug under infra/remotes/, or `local`</span>
+  kind: recurring              <span class="cmt"># recurring | interval | daemon | watch | agent | oneshot</span>
+  runtime: launchd             <span class="cmt"># launchd | launchd-system | systemd | cron | dispatcher | manual | external</span>
+  owner: bridge                <span class="cmt"># bridge | human | foreign</span>
+
+schedule:                      <span class="cmt"># 2. WHEN IT FIRES</span>
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+  delivery_at: "06:30"         <span class="cmt"># DELIVERY, not start</span>
+  duration_estimate_min: 20    <span class="cmt"># start = delivery_at minus this</span>
+  timezone: Europe/Berlin      <span class="cmt"># a zone, never a fixed offset</span>
+
+execution:                     <span class="cmt"># 3. HOW IT RUNS</span>
+  command: ["/opt/example/bin/report.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+
+response:                      <span class="cmt"># 4. HOW IT ANSWERS</span>
+  evidence: log-trace          <span class="cmt"># exit-code | log-trace | delivery-receipt</span>
+  recipients: [{mandant: example-team, person: first_person}]
+  notify_on: [failure, timeout, missing]
+
+reconcile:                     <span class="cmt"># optional: how you know it is still there</span>
+  probe: "launchctl print gui/501/com.example.dispatcher"
+  expect: "state = running"</pre>
+      </div>
+      <div class="split reveal">
+        <div class="card">
+          <span class="tag" data-lang="en">kind ≠ runtime</span>
+          <span class="tag" data-lang="de">kind ≠ runtime</span>
+          <h4 data-lang="en">What it is, and what carries it</h4>
+          <h4 data-lang="de">Was es ist, und was es trägt</h4>
+          <p data-lang="en">An inventory that folds these into one <code>type:</code> field ends up with a single word covering both a 06:30 weekday report and a poller firing every 900 seconds. One has appointments, the other only a cadence. Keeping them apart is what lets a calendar draw appointment ticks for the first and a cadence band for the second without inventing times that never existed.</p>
+          <p data-lang="de">Ein Inventar, das beides in ein <code>type:</code>-Feld faltet, hat am Ende ein Wort für den Wochenbericht um 06:30 und für den Poller alle 900 Sekunden. Das eine hat Termine, das andere nur einen Takt. Die Trennung ist das, was einen Kalender Terminmarken für das eine und ein Taktband für das andere zeichnen lässt, ohne Zeiten zu erfinden, die es nie gab.</p>
+        </div>
+        <div class="card">
+          <span class="tag" data-lang="en">delivery, not start</span>
+          <span class="tag" data-lang="de">Zustellung, nicht Start</span>
+          <h4 data-lang="en">The appointment is when the result is due</h4>
+          <h4 data-lang="de">Der Termin ist, wann das Ergebnis fällig ist</h4>
+          <p data-lang="en"><code>delivery_at</code> is the moment somebody expects the answer, and <code>duration_estimate_min</code> is how long the run needs. The start time is derived, so making a report slower moves its start and never its deadline. A declaration that stated the start instead would silently deliver late the day the job grew.</p>
+          <p data-lang="de"><code>delivery_at</code> ist der Moment, zu dem jemand die Antwort erwartet, und <code>duration_estimate_min</code> ist, wie lange der Lauf braucht. Die Startzeit wird abgeleitet, ein langsamer gewordener Bericht verschiebt also seinen Start und nie seine Frist. Eine Deklaration, die stattdessen den Start nennt, liefert am Tag des Wachstums still zu spät.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- no status field ---- -->
+  <section class="alt" style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">The deliberate absence</p>
+        <p class="eyebrow" data-lang="de">Die bewusste Abwesenheit</p>
+        <h2 class="h2" data-lang="en">There is no <code>status:</code> field</h2>
+        <h2 class="h2" data-lang="de">Es gibt kein <code>status:</code>-Feld</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">This is the reason the schema exists, not an omission. A declared status is never the truth; the service manager is. State comes from asking the live source, every time.</p>
+        <p data-lang="de">Das ist der Daseinsgrund des Schemas, kein Versehen. Ein deklarierter Status ist nie die Wahrheit, der Dienstverwalter ist es. Der Zustand kommt jedes Mal daher, dass die lebende Quelle gefragt wird.</p>
+        <p data-lang="en">The inventory this replaced proves the point without argument: <strong>52 of its 74 entries carried no status at all</strong>, and the ones that did had drifted. A field that half the entries skip and the other half get wrong is not a source of truth, it is a second thing to maintain. <code>additionalProperties: false</code> at the top level is what keeps it from coming back through the side door, and it is the single heaviest rule in the file.</p>
+        <p data-lang="de">Das abgelöste Inventar beweist es ohne Argument: <strong>52 seiner 74 Einträge trugen überhaupt keinen Status</strong>, und die übrigen waren gedriftet. Ein Feld, das die Hälfte auslässt und die andere Hälfte falsch hat, ist keine Quelle der Wahrheit, sondern eine zweite Sache zum Pflegen. <code>additionalProperties: false</code> auf oberster Ebene hält es von der Hintertür fern und ist die schwerste Einzelregel der Datei.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- lifecycle ---- -->
+  <section style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">The life of a run</p>
+        <p class="eyebrow" data-lang="de">Das Leben eines Laufs</p>
+        <h2 class="h2" data-lang="en">Declare, provision, reconcile, retire</h2>
+        <h2 class="h2" data-lang="de">Deklarieren, einrichten, abgleichen, stilllegen</h2>
+      </div>
+      <div class="split reveal">
+        <div class="card">
+          <span class="tag">declare · validate · render</span>
+          <h4 data-lang="en">Write it down, before anything is touched</h4>
+          <h4 data-lang="de">Aufschreiben, bevor etwas angefasst wird</h4>
+          <p data-lang="en"><code>declare</code> builds a declaration from the template and checks it against the contract. <code>render</code> prints the exact bytes that would land on the machine, and it is <em>pure</em>: no filesystem, no child process, no clock. The same declaration renders the same bytes forever, which is what makes a second provisioning run a no-op instead of a hope, and a difference on disk mean drift instead of noise.</p>
+          <p data-lang="de"><code>declare</code> baut eine Deklaration aus der Vorlage und prüft sie gegen den Vertrag. <code>render</code> druckt die exakten Bytes, die auf der Maschine landen würden, und ist <em>rein</em>: kein Dateisystem, kein Kindprozess, keine Uhr. Dieselbe Deklaration rendert für immer dieselben Bytes, und genau das macht ein zweites Einrichten zu einem No-op statt zu einer Hoffnung, und einen Unterschied auf der Platte zu Drift statt zu Rauschen.</p>
+        </div>
+        <div class="card">
+          <span class="tag">provision · adopt</span>
+          <h4 data-lang="en">Put it there, then prove it at the live object</h4>
+          <h4 data-lang="de">Hinstellen, dann am lebenden Objekt beweisen</h4>
+          <p data-lang="en"><code>provision</code> writes the unit, stamps ownership, and then asks the service manager whether it is really loaded. Applied and verified are two answers, and the command distinguishes them. <code>adopt</code> takes over a unit somebody made by hand without any downtime, and never overwrites it.</p>
+          <p data-lang="de"><code>provision</code> schreibt die Einheit, stempelt den Besitz und fragt danach den Dienstverwalter, ob sie wirklich geladen ist. Angewandt und bewiesen sind zwei Antworten, und der Befehl unterscheidet sie. <code>adopt</code> übernimmt eine von Hand angelegte Einheit ohne Ausfallzeit und überschreibt sie nie.</p>
+        </div>
+        <div class="card">
+          <span class="tag">reconcile</span>
+          <h4 data-lang="en">Ask three sources, and never a declared field</h4>
+          <h4 data-lang="de">Drei Quellen fragen, und nie ein deklariertes Feld</h4>
+          <p data-lang="en">What should be there (the declarations), what is there (the machine, asked live), and what the inventory believes. The verdicts are a closed set, and <code>unknown</code> never collapses into <code>absent</code>: a host that did not answer means nobody answered, not that the run is gone. One closed laptop lid would otherwise report every job on every host as missing.</p>
+          <p data-lang="de">Was da sein soll (die Deklarationen), was da ist (die Maschine, live gefragt), und was das Inventar glaubt. Die Urteile sind eine geschlossene Menge, und <code>unknown</code> fällt nie in <code>absent</code>: ein Wirt, der nicht geantwortet hat, heißt niemand hat geantwortet, nicht der Lauf ist weg. Sonst meldete ein zugeklappter Laptop jeden Job auf jedem Wirt als verschwunden.</p>
+        </div>
+        <div class="card">
+          <span class="tag">retire</span>
+          <h4 data-lang="en">Switching off is switching off plus a reason</h4>
+          <h4 data-lang="de">Abschalten heißt abschalten plus Grund</h4>
+          <p data-lang="en">A retirement carries a date and a written reason, and the declaration is marked only once every unit is proven down. A run stopped by half is still running, and a file claiming otherwise is worse than one that says nothing: the next reader stops looking.</p>
+          <p data-lang="de">Eine Stilllegung trägt ein Datum und einen geschriebenen Grund, und die Deklaration wird erst markiert, wenn jede Einheit nachweislich unten ist. Ein halb gestoppter Lauf läuft noch, und eine Datei, die etwas anderes behauptet, ist schlimmer als eine, die schweigt: der nächste Leser hört auf zu suchen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- ownership ---- -->
+  <section class="alt" style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">Ownership</p>
+        <p class="eyebrow" data-lang="de">Eigentum</p>
+        <h2 class="h2" data-lang="en">Two signals, never one</h2>
+        <h2 class="h2" data-lang="de">Zwei Signale, nie eines</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">A stamp on the machine, and a marker inside the artifact itself. A stamp without a marker is drift, and so is the reverse. The reason for two is not redundancy: two blind procedures that can only ever agree with each other would prove nothing. Because they are written by different steps and read from different places, a disagreement between them is information.</p>
+        <p data-lang="de">Ein Stempel auf der Maschine, und eine Marke im Artefakt selbst. Ein Stempel ohne Marke ist Drift, und umgekehrt genauso. Der Grund für zwei ist nicht Redundanz: zwei blinde Verfahren, die einander nur zustimmen können, bewiesen nichts. Weil sie von verschiedenen Schritten geschrieben und an verschiedenen Stellen gelesen werden, ist ein Widerspruch zwischen ihnen eine Information.</p>
+        <p data-lang="en">This is also what makes <code>owner: human</code> and <code>owner: foreign</code> useful rather than decorative. A run the Bridge does not execute can still be declared, so it becomes visible in the report, and the tooling then leaves it alone on purpose instead of by accident.</p>
+        <p data-lang="de">Genau das macht <code>owner: human</code> und <code>owner: foreign</code> nützlich statt schmückend. Ein Lauf, den die Bridge nicht ausführt, kann trotzdem deklariert werden, wird damit im Bericht sichtbar, und das Werkzeug lässt ihn danach absichtlich in Ruhe statt aus Versehen.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- the page ---- -->
+  <section style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">Seeing it without a terminal</p>
+        <p class="eyebrow" data-lang="de">Sehen ohne Terminal</p>
+        <h2 class="h2" data-lang="en">A page that cannot lie about its own age</h2>
+        <h2 class="h2" data-lang="de">Eine Seite, die über ihr eigenes Alter nicht lügen kann</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">The same data <code>reconcile</code> reports can be rendered as one self-contained page and published where a browser reaches it. Two properties of that page are load bearing rather than decorative.</p>
+        <p data-lang="de">Dieselben Daten, die <code>reconcile</code> meldet, lassen sich als eine in sich geschlossene Seite rendern und dort veröffentlichen, wo ein Browser sie erreicht. Zwei Eigenschaften dieser Seite sind tragend statt schmückend.</p>
+      </div>
+      <div class="split reveal">
+        <div class="card">
+          <span class="tag" data-lang="en">the reader's clock decides</span>
+          <span class="tag" data-lang="de">die Uhr des Lesers entscheidet</span>
+          <h4 data-lang="en">Freshness is computed where it is read</h4>
+          <h4 data-lang="de">Frische wird dort berechnet, wo gelesen wird</h4>
+          <p data-lang="en">On a terminal an age is free, because you just ran the command. A page on a server is opened hours later, looks identical, and is believed. So the page publishes its own moment in machine readable form and computes the age in the browser, and it judges that age only against a cadence somebody declared. Where nobody declared one, it says there is no cadence rather than inventing a threshold.</p>
+          <p data-lang="de">Im Terminal ist ein Alter kostenlos, weil man den Befehl gerade ausgeführt hat. Eine Seite auf einem Server wird Stunden später geöffnet, sieht identisch aus und wird geglaubt. Also veröffentlicht die Seite ihren eigenen Zeitpunkt maschinenlesbar, rechnet das Alter im Browser aus und misst es nur an einem Takt, den jemand deklariert hat. Wo niemand einen deklariert hat, sagt sie das, statt eine Schwelle zu erfinden.</p>
+        </div>
+        <div class="card">
+          <span class="tag" data-lang="en">two facts, never merged</span>
+          <span class="tag" data-lang="de">zwei Fakten, nie verschmolzen</span>
+          <h4 data-lang="en">How it went is a different question from when it last ran</h4>
+          <h4 data-lang="de">Wie es lief ist eine andere Frage als wann zuletzt</h4>
+          <p data-lang="en">A row showing only the newest firing renders a job that has been clean for a month exactly like one that failed twice this week and happened to succeed on the attempt before somebody looked. So each run carries a strip of what the machine actually wrote down, oldest on the left, shaped per verdict rather than coloured.</p>
+          <p data-lang="de">Eine Zeile, die nur das jüngste Feuern zeigt, stellt einen seit einem Monat sauberen Job genauso dar wie einen, der diese Woche zweimal scheiterte und zufällig beim Versuch vor dem Hinsehen gelang. Also trägt jeder Lauf einen Streifen dessen, was die Maschine wirklich aufgeschrieben hat, ältestes links, in Form je Urteil statt in Farbe.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- how it is proved ---- -->
+  <section class="alt" style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">How the contract is proved</p>
+        <p class="eyebrow" data-lang="de">Wie der Vertrag bewiesen wird</p>
+        <h2 class="h2" data-lang="en">Four suites, and two of them exist to test the other two</h2>
+        <h2 class="h2" data-lang="de">Vier Prüfmappen, und zwei davon prüfen die anderen zwei</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">A skill that writes unit files onto machines is the one place where a contract broken unnoticed ends up on a service manager. So the suites come in pairs: one that checks the behaviour, and one that checks whether the first one would notice if the behaviour changed.</p>
+        <p data-lang="de">Ein Skill, der Einheitsdateien auf Maschinen schreibt, ist die eine Stelle, an der ein unbemerkt gebrochener Vertrag beim Dienstverwalter landet. Deshalb kommen die Mappen paarweise: eine prüft das Verhalten, die andere prüft, ob die erste es überhaupt merken würde.</p>
+      </div>
+      <div class="block reveal">
+<pre class="code">bash skills/workload/run-tests.sh            <span class="cmt"># the engine</span>
+bash skills/workload/run-tests.sh --mutate   <span class="cmt"># and whether those tests bite</span>
+bash workflow/workloads/_tests/run.sh        <span class="cmt"># the declaration contract</span>
+bash workflow/workloads/_tests/run.sh --mutate <span class="cmt"># and whether those controls bite</span></pre>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">A mutation run softens exactly one rule in a scratch copy and requires that exactly one test turns red. A test that stays green under the softening of the rule it claims to hold was never holding it. That is not a theoretical worry: three needles had already gone hollow when this was written, one matching nothing after a rule was restructured, one matching twice after a second spelling of the same pattern appeared, and one pointing at code that had been deleted. In each case the run kept reporting green for everything around it.</p>
+        <p data-lang="de">Ein Mutationslauf weicht genau eine Regel in einer Wegwerfkopie auf und verlangt, dass genau ein Test rot wird. Ein Test, der unter der Aufweichung seiner eigenen Regel grün bleibt, hat sie nie gehalten. Das ist keine theoretische Sorge: drei Nadeln waren beim Schreiben bereits hohl, eine traf nach einem Umbau nichts mehr, eine traf zweimal, nachdem eine zweite Schreibweise desselben Musters dazugekommen war, und eine zeigte auf gelöschten Code. Jedes Mal meldete der Lauf für alles ringsum weiter grün.</p>
+        <p data-lang="en">Every contract run also ends by printing what is <strong>not</strong> fully covered, class by class, so the green above it cannot be read as completeness.</p>
+        <p data-lang="de">Jeder Vertragslauf druckt am Ende außerdem, was <strong>nicht</strong> vollständig abgedeckt ist, Klasse für Klasse, damit das Grün darüber nicht als Vollständigkeit gelesen wird.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- where it lives ---- -->
+  <section style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">Where it lives</p>
+        <p class="eyebrow" data-lang="de">Wo es liegt</p>
+        <h2 class="h2" data-lang="en">The contract ships, your declarations do not</h2>
+        <h2 class="h2" data-lang="de">Der Vertrag reist, deine Deklarationen nicht</h2>
+      </div>
+      <div class="block reveal">
+        <p data-lang="en">A declaration names a concrete host, concrete paths and concrete recipients, so it stays in your instance and never travels upward. The contract and the engine are generic and do travel. That split is structural, decided by where a file lives rather than by a tag somebody could forget.</p>
+        <p data-lang="de">Eine Deklaration nennt einen konkreten Wirt, konkrete Pfade und konkrete Empfänger, bleibt also in deiner Instanz und reist nie nach oben. Vertrag und Motor sind generisch und reisen. Diese Trennung ist strukturell: sie entscheidet sich daran, wo eine Datei liegt, nicht an einer Markierung, die jemand vergessen könnte.</p>
+      </div>
+      <div class="block reveal">
+<pre class="code">workflow/workloads/_schema.yaml     <span class="cmt"># CORE  the contract</span>
+workflow/workloads/_template.yaml   <span class="cmt"># CORE  the starting point</span>
+workflow/workloads/_tests/          <span class="cmt"># CORE  the contract's own regression suite</span>
+workflow/workloads/&lt;id&gt;.yaml        <span class="cmt"># USER  your declarations</span>
+skills/workload/                    <span class="cmt"># CORE  the engine and the skill</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- limits ---- -->
+  <section class="alt" id="limits" style="padding-block:72px">
+    <div class="container">
+      <div class="grp reveal">
+        <p class="eyebrow" data-lang="en">Limits</p>
+        <p class="eyebrow" data-lang="de">Grenzen</p>
+        <h2 class="h2" data-lang="en">What it deliberately does not do</h2>
+        <h2 class="h2" data-lang="de">Was es bewusst nicht tut</h2>
+      </div>
+      <div class="block reveal">
+        <ul>
+          <li><span data-lang="en"><strong>No sudo, ever.</strong> A run that needs elevation yields a printed plan for a person, and the next reconcile verifies whatever they did.</span><span data-lang="de"><strong>Kein sudo, nie.</strong> Ein Lauf, der Erhöhung braucht, ergibt einen gedruckten Plan für einen Menschen, und der nächste Abgleich prüft nach, was er getan hat.</span></li>
+          <li><span data-lang="en"><strong>No secrets.</strong> Neither a declaration nor the ownership stamp carries one. <code>execution.env</code> takes a locator such as <code>keychain://…</code>, and the locator is what reaches the unit file: resolving it here would write a live credential to disk. The program resolves its own at run time.</span><span data-lang="de"><strong>Keine Geheimnisse.</strong> Weder eine Deklaration noch der Besitzstempel trägt eines. <code>execution.env</code> nimmt einen Locator wie <code>keychain://…</code>, und der Locator ist es, was die Einheitsdatei erreicht: ihn hier aufzulösen hieße, ein lebendes Zugangsmittel auf die Platte zu schreiben. Das Programm löst seinen eigenen zur Laufzeit auf.</span></li>
+          <li><span data-lang="en"><strong>No plaintext recipients.</strong> A declaration names a group and a person by reference, because it is a tracked file and travels with the scope router.</span><span data-lang="de"><strong>Keine Klartext-Empfänger.</strong> Eine Deklaration nennt Gruppe und Person per Verweis, denn sie ist eine versionierte Datei und reist mit dem Scope-Router.</span></li>
+          <li><span data-lang="en"><strong>No general purpose dashboard.</strong> The page draws this skill's own material and nothing fetched from anywhere else.</span><span data-lang="de"><strong>Kein Allzweck-Dashboard.</strong> Die Seite zeichnet das eigene Material dieses Skills und nichts von anderswo Geholtes.</span></li>
+          <li><span data-lang="en"><strong>No proof from a hand run.</strong> An interactive or ssh session has its own identity and its own grants, so the honest probe runs in the service manager's context.</span><span data-lang="de"><strong>Kein Beweis aus einem Handstart.</strong> Eine interaktive oder ssh-Sitzung hat eigene Identität und eigene Genehmigungen, also läuft die ehrliche Sonde im Kontext des Dienstverwalters.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- closing pointers ---- -->
+  <section style="padding-block:64px 88px">
+    <div class="container">
+      <div class="prose">
+        <h2 class="h2" data-lang="en">Read on</h2>
+        <h2 class="h2" data-lang="de">Weiterlesen</h2>
+        <ul>
+          <li><a href="https://github.com/bks-lab/open-bridge/blob/main/docs/workloads.md" target="_blank" rel="noopener"><code>docs/workloads.md</code></a> <span data-lang="en">the full guide: contract, hard rules, and the case behind each one</span><span data-lang="de">der vollständige Guide: Vertrag, harte Regeln und der Fall hinter jeder einzelnen</span></li>
+          <li><a href="https://github.com/bks-lab/open-bridge/blob/main/skills/workload/SKILL.md" target="_blank" rel="noopener"><code>skills/workload/SKILL.md</code></a> <span data-lang="en">every command, and every property of the page</span><span data-lang="de">jeder Befehl, und jede Eigenschaft der Seite</span></li>
+          <li><a href="https://github.com/bks-lab/open-bridge/blob/main/rules/deploy-reconciliation.md" target="_blank" rel="noopener"><code>rules/deploy-reconciliation.md</code></a> <span data-lang="en">why a declared status is never trusted anywhere in this project</span><span data-lang="de">warum ein deklarierter Status in diesem Projekt nirgends geglaubt wird</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!-- ========================== END PAGE CONTENT ============================== -->
+
+<!-- ======================= FOOTER (shared) ======================= -->
+<footer id="license">
+  <div class="foot-grid">
+    <div class="foot-blurb">
+      <a class="wordmark" href="index.html">open<span class="text-gradient">-bridge</span></a>
+      <span data-lang="en">Built at BKS-Lab — a small team — and used daily to run it. Present tense, no hero arc: this is method and substrate.</span>
+      <span data-lang="de">Gebaut bei BKS-Lab — einem kleinen Team — und täglich genutzt, um genau diese Firma zu betreiben. Präsens, kein Heldenbogen: das ist Methode und Substrat.</span>
+      <table class="license-table">
+        <tr><td><span data-lang="en">Code &amp; content</span><span data-lang="de">Code &amp; Inhalt</span></td><td>MIT</td><td><a href="https://github.com/bks-lab/open-bridge/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
+        <tr><td><span data-lang="en">Brand</span><span data-lang="de">Marke</span></td><td><span data-lang="en">Trademark policy</span><span data-lang="de">Markenrichtlinie</span></td><td><a href="https://github.com/bks-lab/open-bridge/blob/main/TRADEMARK.md" target="_blank" rel="noopener">TRADEMARK.md</a></td></tr>
+      </table>
+      <p class="muted" style="margin-top:14px;font-size:12.5px">© 2026 BKS-Lab and Contributors. <span data-lang="en">Licenses cover copyright, not brands.</span><span data-lang="de">Lizenzen decken Copyright ab, nicht Marken.</span> <span data-lang="en">Contributions require a DCO sign-off (</span><span data-lang="de">Beiträge erfordern einen DCO-Sign-off (</span><code>git commit -s</code>).</p>
+    </div>
+
+    <div>
+      <h4 data-lang="en">Explore</h4>
+      <h4 data-lang="de">Erkunden</h4>
+      <a href="index.html"><span data-lang="en">Home</span><span data-lang="de">Start</span></a>
+      <a href="concepts.html"><span data-lang="en">Concepts in depth</span><span data-lang="de">Konzepte im Detail</span></a>
+      <a href="workspaces.html"><span data-lang="en">Workspaces</span><span data-lang="de">Workspaces</span></a>
+      <a href="use-cases.html"><span data-lang="en">Use cases &amp; solutions</span><span data-lang="de">Anwendungsfälle &amp; Lösungen</span></a>
+      <a href="explore.html"><span data-lang="en">Explore the concepts</span><span data-lang="de">Konzepte erkunden</span></a>
+    </div>
+
+    <div>
+      <h4 data-lang="en">Links</h4>
+      <h4 data-lang="de">Links</h4>
+      <a href="https://github.com/bks-lab/open-bridge" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/bks-lab/open-bridge/blob/main/README.md" target="_blank" rel="noopener">README</a>
+      <a href="https://github.com/bks-lab/open-bridge/tree/main/docs" target="_blank" rel="noopener">docs/</a>
+      <a href="https://github.com/bks-lab/open-bridge/blob/main/docs/workloads.md" target="_blank" rel="noopener"><span data-lang="en">Workloads guide</span><span data-lang="de">Workloads-Guide</span></a>
+    </div>
+  </div>
+
+  <div class="foot-bottom">
+    <span data-lang="en">Public · MIT · no waitlist · newly released</span>
+    <span data-lang="de">Public · MIT · keine Warteliste · frisch veröffentlicht</span>
+    <a class="btn btn-secondary" style="padding:10px 20px;font-size:14px" href="https://github.com/bks-lab/open-bridge" target="_blank" rel="noopener">
+      <span data-lang="en">Read the code on GitHub</span><span data-lang="de">Lies den Code auf GitHub</span> <span class="arrow">→</span>
+    </a>
+  </div>
+</footer>
+
+<!-- ======================= Shared page controller ======================= -->
+<script>
+(function(){
+  "use strict";
+  var root = document.documentElement;
+
+  function applyTheme(mode){
+    if(mode === "dark"){ root.classList.add("dark"); }
+    else { root.classList.remove("dark"); }
+  }
+  function toggleTheme(){
+    var next = root.classList.contains("dark") ? "light" : "dark";
+    applyTheme(next);
+    try { localStorage.setItem("ob-theme", next); } catch(e){}
+  }
+  var themeBtn = document.getElementById("theme-toggle");
+  if(themeBtn){ themeBtn.addEventListener("click", toggleTheme); }
+
+  function applyLang(lang){
+    root.setAttribute("data-active-lang", lang);
+    root.setAttribute("lang", lang);
+    var en = document.getElementById("lang-en");
+    var de = document.getElementById("lang-de");
+    if(en){ en.setAttribute("aria-pressed", lang === "en" ? "true" : "false"); }
+    if(de){ de.setAttribute("aria-pressed", lang === "de" ? "true" : "false"); }
+  }
+  applyLang(root.getAttribute("data-active-lang") === "de" ? "de" : "en");
+  function setLang(lang){
+    applyLang(lang);
+    try { localStorage.setItem("ob-lang", lang); } catch(e){}
+  }
+  var enBtn = document.getElementById("lang-en");
+  var deBtn = document.getElementById("lang-de");
+  if(enBtn){ enBtn.addEventListener("click", function(){ setLang("en"); }); }
+  if(deBtn){ deBtn.addEventListener("click", function(){ setLang("de"); }); }
+
+  document.addEventListener("keydown", function(ev){
+    if(ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    var tag = (ev.target && ev.target.tagName) ? ev.target.tagName.toUpperCase() : "";
+    if(tag === "INPUT" || tag === "TEXTAREA" || (ev.target && ev.target.isContentEditable)) return;
+    var k = ev.key.toLowerCase();
+    if(k === "t"){ toggleTheme(); }
+    if(k === "l"){ setLang(root.getAttribute("data-active-lang") === "en" ? "de" : "en"); }
+  });
+
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if("IntersectionObserver" in window && !reduceMotion){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){ en.target.classList.add("in"); io.unobserve(en.target); }
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function(el){ el.classList.add("in"); });
+  }
+})();
+</script>
+</body>
+</html>

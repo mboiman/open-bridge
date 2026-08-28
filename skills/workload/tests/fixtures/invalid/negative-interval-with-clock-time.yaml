@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-interval-with-clock-time
+purpose: "Negative control: a cadence job has no appointment, delivery_at must be rejected"
+placement: {host: host-a, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 900, delivery_at: "06:30"}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}

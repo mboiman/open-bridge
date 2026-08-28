@@ -1,0 +1,9 @@
+# A path with a version number is a run with an expiry date. Two silent
+# failures hang on the same character sequence: the next upgrade deletes the
+# file, and the grant somebody once issued sticks to the old path.
+schema_version: 1
+scope: user
+id: negative-version-in-interpreter-path
+purpose: "Control: a versioned interpreter path must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human, interpreter: /opt/example/Cellar/sometool/1.73.5/bin/sometool}
+execution: {command: ["/bin/true"], timeout_sec: 30}

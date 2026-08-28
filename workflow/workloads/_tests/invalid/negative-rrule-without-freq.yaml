@@ -1,0 +1,10 @@
+# Representative of the "pattern" class (id, rrule, delivery_at, and the three
+# instant patterns added in this round). Checked on rrule because that is where
+# the scar sits: a hand written parser that silently only understands FREQ=DAILY
+# turns every weekly entry into a single run.
+schema_version: 1
+scope: user
+id: negative-rrule-without-freq
+purpose: "Control: an rrule with no FREQ must be refused"
+placement: {host: host-a, kind: recurring, runtime: cron, owner: human}
+schedule: {rrule: "every monday", timezone: Europe/Berlin}

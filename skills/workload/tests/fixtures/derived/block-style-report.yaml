@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../../../workflow/workloads/_schema.yaml
+---
+# Block style on purpose: this is the ONE declaration a line patcher may touch.
+# Every corpus case writes placement in flow style, which is exactly why
+# patch_declaration has to refuse there instead of mangling the file.
+schema_version: 1
+scope: user
+id: block-style-report
+title: Block Style Report
+purpose: "Patchable twin of the daily report, used to prove a surgical edit keeps comments"
+
+placement:
+  host: host-a                 # trailing comment that must survive a patch
+  kind: recurring
+  runtime: launchd
+  owner: bridge
+  provisioned_at: null         # the field a provision run writes back
+
+schedule:
+  rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA"
+  delivery_at: "06:30"
+  duration_estimate_min: 20
+  timezone: Europe/Berlin
+
+execution:
+  command: ["/opt/bridge/scripts/daily-health-report.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+
+response:
+  evidence: log-trace
+  notify_on: [failure, timeout, missing]
+  notify_via: bridge-notify

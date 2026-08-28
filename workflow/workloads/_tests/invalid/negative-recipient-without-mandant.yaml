@@ -1,0 +1,10 @@
+# Control for: response.recipients[].required[mandant].
+# A person key without a mandant points nowhere: the person is only resolved
+# under identity/mandants/<slug>. With no mandant there is no place they are
+# written down, and the run would deliver to nobody.
+schema_version: 1
+scope: user
+id: negative-recipient-without-mandant
+purpose: "Control: a recipient with no mandant slug must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+response: {evidence: exit-code, recipients: [{person: first_person}]}

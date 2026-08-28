@@ -1,0 +1,33 @@
+# Asks about ABSENCE and not about failure. The pair with its neighbour is the
+# point: a declaration that names one word must not receive the other's alarms,
+# or `notify_on` is decoration.
+---
+schema_version: 1
+scope: user
+id: "only-missing-asked"
+title: "Tell me when it does not happen"
+purpose: "A run that asks about absence only"
+persona_ref: _shared
+placement:
+  host: "host-a"
+  kind: "recurring"
+  runtime: "launchd"
+  owner: "bridge"
+  provisioned_at: null
+  interpreter: /bin/bash
+schedule:
+  rrule: "FREQ=DAILY"
+  delivery_at: "07:00"
+  duration_estimate_min: 0
+  timezone: Europe/Berlin
+execution:
+  command: ["/bin/bash", "/opt/daily.sh"]
+  timeout_sec: 600
+  isolation: process-group
+  single_flight: true
+  on_timeout: report
+response:
+  evidence: log-trace
+  notify_on: [missing]
+  notify_via: bridge-notify
+learned_from: "fixture: one word asked must not deliver the other word's alarms"

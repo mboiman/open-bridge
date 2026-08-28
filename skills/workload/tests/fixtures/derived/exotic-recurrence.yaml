@@ -1,0 +1,12 @@
+schema_version: 1
+scope: user
+id: exotic-recurrence
+purpose: "Last Friday of the month, a recurrence no calendar backend can express natively"
+placement: {host: host-a, kind: recurring, runtime: launchd, owner: bridge}
+schedule:
+  rrule: "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+  delivery_at: "17:00"
+  duration_estimate_min: 0
+  timezone: Europe/Berlin
+execution: {command: ["/opt/bridge/scripts/monthly.sh"], timeout_sec: 60}
+response: {evidence: log-trace}

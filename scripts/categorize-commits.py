@@ -293,9 +293,33 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     # Local-only, each VERIFIED generic against promote.content_blocklist:
     "scripts/overlay-export.py",
     "scripts/tests/test_overlay_secret_scan.py",
-    # NOT listed on purpose: test_scope_router.py and
-    # test_push_guard_content_net.py name real instance paths BY DESIGN — that is
-    # what makes them leak-regression tests. They stay `user`.
+    # NOT listed on purpose: test_push_guard_content_net.py names real instance
+    # paths BY DESIGN, which is what makes it a leak-regression test. It stays
+    # `user`, and it is not tracked upstream either.
+    #
+    # Registered 2026-08-27, all thirteen already tracked on open-bridge main and
+    # byte-identical here. They were added next to files that ARE listed, and the
+    # set above was generated once and never re-generated, so each shipped, and
+    # the router then refused to carry the next change to it. Nothing said so.
+    # test_scope_router.py sat here as a deliberate exclusion for naming real
+    # instance paths; it was made portable afterwards (its own docstring states
+    # it) and the exclusion outlived its reason.
+    #
+    # test_every_file_upstream_ships_stays_core is what makes this list stop
+    # going stale: it re-derives the answer from the upstream tree on every run.
+    "scripts/bridge-divergence-check.py",
+    "scripts/capability_registry.py",
+    "scripts/lib/__init__.py",
+    "scripts/lib/registry_io.py",
+    "scripts/tests/test-capability-registry.sh",
+    "scripts/tests/test-extract-frontmatter.sh",
+    "scripts/tests/test-gen-board.sh",
+    "scripts/tests/test-validate-bridge-rule-map.sh",
+    "scripts/tests/test_extract_frontmatter.py",
+    "scripts/tests/test_gen_board.py",
+    "scripts/tests/test_scope_router.py",
+    "scripts/tests/test_validate_bridge_rule_map.py",
+    "scripts/upstream-monitor.sh",
 })
 
 
@@ -338,6 +362,32 @@ CLUSTER_WRAPPER_FALLBACK = re.compile(
     r"^(?:identity|infra|workflow)/[a-z0-9][a-z0-9-]*/(?!_(?:schema|template)\.yaml$)"
 )
 
+# `_tests/` beside a wrapper schema is that schema's own regression suite, so it
+# is CORE material by construction and belongs with the schema it guards. The
+# fallback above cannot see that: its lookahead names two literals, so a whole
+# directory of contract fixtures falls through to `user`. infra/remotes/_tests/
+# shipped upstream on 2026-08-27 together with the CI step that runs it, and the
+# router said `user` for all ten files on the same day.
+#
+# ENUMERATED, not a `_tests` predicate, and the reason is not symmetry with the
+# comment above: fixtures are the one place where instance data legitimately sits
+# while a suite is being written. A family joins this list once its fixtures are
+# generic, which is a decision somebody makes, not a shape a regex can read.
+#
+# Checked FIRST in classify_file, ahead of the frontmatter dispatch, and that is
+# the load-bearing part. A fixture of a declaration IS a declaration: every file
+# in infra/remotes/_tests/ carries `scope: user`, because that is the value a
+# remote inventory is supposed to have. The dispatch read it as the file's own
+# tier and answered `user` before any path rule ran. A fixture's `scope:`
+# describes what it depicts, never where it lives, and only an enumerated
+# family may claim that exemption, which is why the set above is a list and not
+# a shape.
+WRAPPER_TESTS_CORE = re.compile(r"^(?:infra/remotes|workflow/workloads)/_tests/")
+# workflow/workloads joined on 2026-08-27, when its 69 fixtures were rewritten
+# generic and in English for exactly this step. Before that they named real
+# hosts, real customers and one real person, so the family stayed out and its
+# CI guard stayed red, which is the shape this list is meant to have.
+
 
 def _unquote(path: str) -> str:
     """Undo git's `core.quotePath` escaping, defensively.
@@ -360,6 +410,11 @@ def _unquote(path: str) -> str:
 
 def classify_file(path: str) -> str:
     path = _unquote(path)
+    # Before everything, including the frontmatter dispatch below: see
+    # WRAPPER_TESTS_CORE. A contract fixture depicts a declaration and therefore
+    # carries that declaration's `scope:`, which is not its own tier.
+    if WRAPPER_TESTS_CORE.search(path):
+        return "core"
     # Cluster-wrapper config files: a frontmatter `scope:` WINS over the path
     # default. No frontmatter scope ⇒ fall through to the path rules below
     # (fail-safe: a missing tag defaults to `user`, never leaking upward).

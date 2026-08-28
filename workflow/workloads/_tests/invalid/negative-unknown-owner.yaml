@@ -1,0 +1,9 @@
+# Representative of the "enum" class (scope, kind, runtime, owner, evidence,
+# isolation, on_timeout, notify_on). Deliberately checked on owner: by its own
+# description that is the field this schema exists for at all. A fourth owner
+# would be a hole in responsibility, not a typo.
+schema_version: 1
+scope: user
+id: negative-unknown-owner
+purpose: "Control: an owner outside the enumeration must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: devops}

@@ -1,0 +1,10 @@
+# Control for: placement.required[host, kind, runtime, owner].
+# With no owner the file falls out of every responsibility: the allOf rule for
+# bridge owned runs never fires, because its `if` asks for owner. A declaration
+# with no owner therefore looks clean, and that is precisely the hole this
+# schema exists to close.
+schema_version: 1
+scope: user
+id: negative-placement-without-owner
+purpose: "Control: a placement with no owner must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd}

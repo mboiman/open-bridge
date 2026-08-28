@@ -1,0 +1,8 @@
+# The value sends a person into a settings pane. A typo sends them into one
+# that does not exist: they find nothing and conclude the grant is fine.
+schema_version: 1
+scope: user
+id: negative-unknown-grant
+purpose: "Control: an invented grant name must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human, interpreter: /opt/example/bin/own-runner, privacy_grants: [full-disk]}
+execution: {command: ["/opt/example/bin/own-runner"], timeout_sec: 30}

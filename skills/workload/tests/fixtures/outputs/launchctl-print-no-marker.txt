@@ -1,0 +1,6 @@
+gui/4242/bridge.calendar-export = {
+	active count = 1
+	path = /home/opuser/Library/LaunchAgents/bridge.calendar-export.plist
+	state = running
+	program = /opt/bridge/bin/handmade.sh
+}

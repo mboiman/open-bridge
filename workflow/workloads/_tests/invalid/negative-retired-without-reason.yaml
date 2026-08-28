@@ -1,0 +1,9 @@
+# Control for: retired.required[at, reason].
+# Retiring means switching off PLUS a reason. A date on its own loses exactly
+# the why that a renamed file loses too.
+schema_version: 1
+scope: user
+id: negative-retired-without-reason
+purpose: "Control: a retirement with no reason must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human}
+retired: {at: "2026-08-06"}

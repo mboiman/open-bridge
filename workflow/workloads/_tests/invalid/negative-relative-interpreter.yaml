@@ -1,0 +1,12 @@
+# Control for: placement.interpreter, the pattern.
+#
+# The quietest of the three path cases. A relative interpreter path is not a
+# start failure: the service manager resolves it against its own PATH and
+# starts SOME binary. What is missing is the privacy grant, because that hangs
+# on the literal path the unit names. Nothing crashes; the run simply sees
+# nothing any more and reads like an empty inbox.
+schema_version: 1
+scope: user
+id: negative-relative-interpreter
+purpose: "Control: a relative interpreter path must be refused"
+placement: {host: host-a, kind: daemon, runtime: launchd, owner: human, interpreter: "python3"}

@@ -1,0 +1,8 @@
+schema_version: 1
+scope: user
+id: negative-interval-with-oneshot-at
+purpose: "Control: an interval job is not a one-shot, at must be refused"
+placement: {host: example-host, kind: interval, runtime: launchd, owner: bridge}
+schedule: {every_sec: 900, at: "2026-10-15T09:00:00+02:00", timezone: Europe/Berlin}
+execution: {command: ["/bin/true"], timeout_sec: 60}
+response: {evidence: exit-code}
