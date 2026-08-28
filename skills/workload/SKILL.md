@@ -489,6 +489,17 @@ Four of those are worth spelling out, because each one used to be a `0`:
 - Four counts head the page, each one counted off the very rows below it. A
   summary reaching for a figure the table does not carry is how a headline and
   its own detail come to disagree.
+- **Both labels, and neither is guessed.** A row carries the sphere the run
+  belongs to (`persona_ref`, with *undecided* as its own word, because an empty
+  cell reads as one of the reserved answers) and the name the machine knows it
+  by. That name is asked of the backend that assigns it, never rebuilt in the
+  view: a second derivation of a name drifts from the first, and where a runtime
+  names nothing the page says so instead of inventing one.
+- **Declared and delivered never share a mark.** A declaration names its
+  recipients and nothing on the execution path reads them, so the page says the
+  group and says which of the two facts that is, every time. It names no person:
+  a person is named in a declaration by a slug, a slug of a person is a name,
+  and this page is read by every device on the network it is served from.
 - The reason row under each run is a disclosure: one click instead of one
   scroll. The page SHIPS expanded and unfiltered and the script collapses it, so
   a reader without scripting gets the long document rather than a table whose

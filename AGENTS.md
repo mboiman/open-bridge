@@ -704,119 +704,34 @@ Schema in `infra/remotes/_template.yaml`; per-box setup notes in `<name>-setup.m
 
 A **workload** is one thing that runs on one machine: a scheduled report, an
 interval poller, a daemon, an agent, a path watcher, a one-shot. It lives as a
-single declaration in **`workflow/workloads/<id>.yaml`** and is carried by the
-`workload` skill, which renders the unit file, provisions it, and reconciles the
-declaration against the live service manager.
+single declaration in **`workflow/workloads/<id>.yaml`**, and the `workload`
+skill renders the unit from it, provisions it, reconciles it against the live
+service manager, and can draw the result as one self-contained page.
 
-The declaration is the source of truth; the unit file on the machine is an
-artifact and may be rebuilt from it at any time.
-
-**The contract has four parts** — WHERE it sits (`placement`), WHEN it fires
-(`schedule`), HOW it runs (`execution`), HOW it answers (`response`) — plus an
-optional `reconcile` probe. Schema and template: `workflow/workloads/_schema.yaml`
-and `_template.yaml`; regression suite for the contract itself in
-`workflow/workloads/_tests/`.
-
-### Seeing it without a terminal
-
-`workload view` renders the same data `reconcile` reports as one self-contained
-page: no font CDN, no script host, nothing fetched. `workload publish` puts that
-page on a machine where a browser reaches it. These properties are load-bearing
-rather than nice:
-
-- **The reader's clock takes the freshness verdict, never the renderer.** On a
-  terminal an age is free, because you just ran the command. A page on a server
-  is read hours later, looks identical, and is believed. So the page publishes
-  its moment in a machine readable form and computes the age in the browser, and
-  it judges that age only against a cadence somebody declared.
-- **A page nobody refreshes says so.** No declared cadence still means no
-  verdict, because a threshold nobody chose would be invented. But *that there
-  is no cadence* is a fact, and stating it costs nothing. Without it a page
-  published once by hand is indistinguishable from one refreshed a minute ago:
-  its age sits in small type beside the stamp while the headline count reads as
-  the present, and a reader takes an eight hour old number for the state of the
-  machine.
-- **Both labels, and neither is guessed.** A row carries the sphere the run
-  belongs to (`persona_ref`, with *undecided* as its own word, because an empty
-  cell reads as one of the reserved answers) and the name the machine knows it
-  by. That name is asked of the backend that assigns it, never rebuilt in the
-  view: a second derivation of a name drifts from the first, and where a runtime
-  names nothing the page says so instead of inventing one.
-- **How it went is not the same question as when it last ran.** A row showing
-  only the newest firing renders a job that has been clean for a month exactly
-  like one that failed twice this week and succeeded on the attempt before
-  somebody looked. So each run carries a strip of what the machine wrote down,
-  oldest on the left, shape per verdict rather than colour, capped where it is
-  built rather than in the drawing. And where a run never ends, the strip says
-  what its marks are: that guard writes a line when the run STOPS, so an empty
-  strip there is the good case and a bare empty cell would read as the opposite.
-- **Declared and delivered never share a mark.** A declaration names its
-  recipients and nothing on the execution path reads them, so the page says the
-  group and says which of the two facts that is, every time. It names no person:
-  a person is named in a declaration by a slug, a slug of a person is a name,
-  and this page is read by every device on the network it is served from.
-- **Delivered and reachable are two facts.** Bytes on a disk and a browser
-  receiving them fail independently: a file in the wrong directory lands
-  perfectly and is never served. Without a `--url` reachable stays *not asked*.
-- **A served directory is proved ours before anything is written**, by a marker
-  file inside it, never by its name. Such a directory usually belongs to a
-  puller or another view already, and publishing into it either destroys their
-  output or loses the page at their next sync.
-- **The page opens on a 24 hour calendar**, one lane per declared run, with the
-  hour taken from the same function the unit file is rendered from. What a
-  drawing may and may not assert is a cross-skill gate rather than a detail of
-  this skill: [`rules/visual-output.md`](rules/visual-output.md) § Gate 3.
-- **A day, a week and a month, and a weekly run is not due every day.** The same
-  weekday set the unit file is rendered from decides which marks belong to the
-  day drawn; an appointment that falls elsewhere is drawn faintly and says so,
-  because dropping it reads as a run with nothing scheduled and keeping it plain
-  asserts an appointment nobody declared. All three scales ship rendered and one
-  is shown, so a reader without scripting keeps the day. Two facts per cell and
-  never merged: due comes from the declaration, ran from what the machine wrote
-  down. The page names the day it drew and the zone it drew it in.
-- **The program a run calls is not the artifact it was rendered from.** `in_sync`
-  compares a unit against its artifact and its stamp, and the program is neither:
-  a wrapper outside the repository that has drifted from its twin runs forever
-  while a change in the repository never reaches it, with no error anywhere.
-  Every row therefore says whether its program is this repository's own file, a
-  copy of one, or a file that exists on a single disk. Which side of a drifted
-  pair is right is a question for a person; noticing that two exist and have come
-  apart is the machine's half.
+The declaration is the source of truth; the unit on the machine is an artifact
+and may be rebuilt from it at any time. The contract has four parts: WHERE it
+sits (`placement`), WHEN it fires (`schedule`), HOW it runs (`execution`), HOW
+it answers (`response`), plus an optional `reconcile` probe.
 
 ### Hard rules
 
 - **There is no `status:` field, and that is deliberate.** A declared status is
-  never the truth ([`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md));
-  the service manager is. State comes from `reconcile` asking the live source.
-- **Two ownership signals, never one.** A stamp on the machine and a marker
-  inside the artifact. A stamp without a marker is drift, and so is the reverse:
-  two blind procedures that can only agree would prove nothing.
-- **A deadline, evidence and `owner: bridge`** are mandatory for every kind the
-  Bridge both owns and executes. A run without a deadline once held a machine
-  for three and a half hours.
+  never the truth; the service manager is
+  ([`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md)).
 - **Recipients are references** (`mandant:` / `person:`), never plaintext
   addresses: a declaration is a tracked file and travels with the scope router.
 - **`execution.env` carries locators, never values** (`keychain://…`), and the
-  locator is what reaches the unit file. Nothing in the skill resolves it: a
-  resolved secret would be written to disk. The program resolves its own at
-  run time.
-- **The program keeps its name.** No version segment in `placement.interpreter`:
-  a versioned path is deleted by the upgrade that creates its successor, and on
-  macOS the privacy grant is keyed on the literal path, so it is orphaned in
-  silence. A declared `placement.privacy_grants` additionally refuses an
-  interpreter the whole machine shares, because a grant is issued to a PATH and
-  would then belong to every program at it.
-- **Nothing is called `in_sync` before the persistent off-list has been asked.**
-  `in_sync` is a statement about bytes. A unit whose bytes match can sit in the
-  service manager's off-list and never start again, and that list is where a stop
-  is written precisely because it survives a reboot.
-- **An inventory entry that says why it is gone has not drifted.**
-  `intentionally_absent: {since, reason}` is a record of a decision, and filing
-  it under drift tells a reader there is work here whose only content is deleting
-  that record.
-- **Running one by hand proves nothing about the job.** An interactive or ssh
-  session has its own identity and its own grants; the honest probe runs in the
-  service manager's context.
+  locator is what reaches the unit. The program resolves its own at run time.
+- **Running one by hand proves nothing about the job.** The honest probe runs in
+  the service manager's context, which has its own identity and its own grants.
+
+**The rest, and where:** the data model, the remaining contract rules (two
+ownership signals; a deadline, evidence and `owner: bridge` are mandatory) and
+the case behind each one in [`docs/workloads.md`](docs/workloads.md) · schema,
+template and the contract's regression suite under `workflow/workloads/` · the
+skill's mechanics, `view` and `publish` included, in `skills/workload/SKILL.md`
+· what a drawing may assert in
+[`rules/visual-output.md`](rules/visual-output.md) § Gate 3.
 
 ## Channels — Messaging & Outbound Transports
 
