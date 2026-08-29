@@ -45,11 +45,11 @@ items:
     note: The entry file. Thin by design; it routes, it does not explain.
 
   AGENTS.md:
-    max_bytes: 56000
+    max_bytes: 32000
     note: >-
-      The operating manual, and the largest single always-on item in a fresh
-      clone by a wide margin. Mechanics belong in the file that owns them;
-      this one should route to them.
+      The operating manual, and still the largest single always-on item. It
+      routes; it does not restate. Every load-bearing pointer in it is a
+      markdown link, which `scripts/check-doc-routes.py` holds to resolving.
 
   ecosystem.yaml:
     optional: true

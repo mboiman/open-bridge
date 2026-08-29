@@ -325,13 +325,16 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     # never shipped. test_paths_a_core_ci_workflow_runs_are_core caught exactly
     # that, before the first human read the diff.
     "scripts/bridge-config.py",
+    "scripts/check-doc-routes.py",
     "scripts/lib/standing_orders.py",
     "scripts/measure-context.py",
     "scripts/standing-orders.py",
     "scripts/tests/test-bridge-config.sh",
+    "scripts/tests/test-doc-routes.sh",
     "scripts/tests/test-measure-context.sh",
     "scripts/tests/test-standing-orders.sh",
     "scripts/tests/test_bridge_config.py",
+    "scripts/tests/test_doc_routes.py",
     "scripts/tests/test_measure_context.py",
     "scripts/tests/test_standing_orders.py",
 })

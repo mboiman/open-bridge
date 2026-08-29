@@ -112,6 +112,16 @@ jobs:
       - name: Run config-slice test suite
         run: bash scripts/tests/test-bridge-config.sh
 
+      - name: Run doc-route test suite
+        run: bash scripts/tests/test-doc-routes.sh
+
+      # An always-on document earns its size by pointing at the file that owns
+      # a mechanic instead of restating it. That trade only holds while the
+      # pointer resolves, and a dead pointer fails silently, at the moment
+      # somebody needed the thing it pointed at.
+      - name: Every route in an always-on document resolves
+        run: python3 scripts/check-doc-routes.py
+
       # Refuses an order that defers without a trigger or without a summary.
       # Such a file reads as enforced in the tree and loads in no session, which
       # is a worse failure than the cost the contract removes.
