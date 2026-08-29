@@ -77,6 +77,16 @@ generalises that cap to the whole always-on surface.
     main(argv) -> int
         0 when no row is in a failing state, 1 otherwise.
 
+    write_user_budget(repo_root, rows) -> Path
+        `--init`. An instance adopting this from CORE starts with nine or more
+        `undeclared` rows, because CORE cannot know which files a given instance
+        loads. Failing on day one with no way forward would be a gate nobody
+        adopts, so `--init` writes the undeclared items into
+        `context-budget.user.yaml` UNCAPPED: visible in every report, failing
+        nothing, and one line each away from a real cap. It refuses to overwrite
+        an existing user budget without `--force`, since that file is hand-tuned
+        the moment anybody cares about it.
+
 EVERY GATE HAS A FIXTURE THAT TRIPS IT. A control that is never made to fail
 proves nothing about the rule it claims to enforce; the same reasoning the
 remote-inventory battery states in `infra/remotes/_tests/run.sh --mutate`.
@@ -378,6 +388,37 @@ def test_a_command_that_fails_is_a_finding_not_a_zero(tree):
     rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
     row = next(r for r in rows if r["path"].startswith("cmd:"))
     assert row["state"] == "missing"
+
+
+def test_init_writes_the_undeclared_items_uncapped(tree):
+    """CORE cannot know an instance's files. Failing on day one with no way
+    forward is a gate nobody adopts."""
+    _write(tree, "protocols/standing-orders/mine.md", _order("mine"))
+    assert mc.main(["--repo-root", str(tree), "--method", "bytes"]) == 1
+    mc.main(["--repo-root", str(tree), "--init"])
+    written = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    assert "protocols/standing-orders/mine.md" in written
+    # No ITEM carries a cap. The header comment names the field on purpose,
+    # since telling the reader where the value is, is the point of the file.
+    assert "max_bytes" not in written.split("items:", 1)[1]
+
+
+def test_after_init_the_gate_passes(tree):
+    _write(tree, "protocols/standing-orders/mine.md", _order("mine"))
+    mc.main(["--repo-root", str(tree), "--init"])
+    assert mc.main(["--repo-root", str(tree), "--method", "bytes"]) == 0
+
+
+def test_init_refuses_to_clobber_a_hand_tuned_user_budget(tree):
+    _write(tree, "context-budget.user.yaml", "items:\n  AGENTS.md:\n    max_bytes: 1\n")
+    with pytest.raises(SystemExit):
+        mc.main(["--repo-root", str(tree), "--init"])
+
+
+def test_init_leaves_an_already_declared_item_alone(tree):
+    mc.main(["--repo-root", str(tree), "--init"])
+    written = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    assert "AGENTS.md" not in written
 
 
 def test_a_missing_core_budget_is_a_hard_error(tmp_path):

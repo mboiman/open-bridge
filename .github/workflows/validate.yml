@@ -115,6 +115,9 @@ jobs:
       - name: Run doc-route test suite
         run: bash scripts/tests/test-doc-routes.sh
 
+      - name: Run work-log slice test suite
+        run: bash scripts/tests/test-worklog.sh
+
       # An always-on document earns its size by pointing at the file that owns
       # a mechanic instead of restating it. That trade only holds while the
       # pointer resolves, and a dead pointer fails silently, at the moment

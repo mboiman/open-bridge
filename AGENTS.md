@@ -386,8 +386,10 @@ never a block** — session start warns when `doing + review` exceeds
 
 ### Session Start (automatic when enabled)
 
-Read `work/log.md` and `work/board.md`, creating either from templates if
-missing — **never fail on a missing work file, create and continue**. Ensure
+Read the recent slice of the log
+(`python3 scripts/worklog.py --recent 3`) and `work/board.md`, creating either
+from templates if missing — **never fail on a missing work file, create and
+continue**. Ensure
 today has a day-block. Warn, do not block, on the WIP cap. Load the standing-order
 index (§ Standing Orders). Full sequence:
 [`rules/operations.md`](rules/operations.md).

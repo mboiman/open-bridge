@@ -378,6 +378,45 @@ def render_report(
     return "\n".join(out)
 
 
+def write_user_budget(repo_root: Path, rows: list[dict], force: bool = False) -> Path:
+    """`--init`: declare the undeclared, uncapped, in the per-instance overlay.
+
+    An instance adopting this from CORE starts with every file CORE cannot know
+    about reported `undeclared`, which fails the run. That is correct (a meter
+    that cannot see a new file reports green while its subject grows) and it is
+    also unusable as a first experience. So the first run can declare them,
+    uncapped: visible in every report, failing nothing, and one line each away
+    from a real cap.
+
+    It refuses to overwrite an existing overlay without `--force`, because that
+    file is hand-tuned the moment anybody cares about it.
+    """
+    target = Path(repo_root) / USER_BUDGET
+    if target.exists() and not force:
+        sys.exit(
+            f"error: {USER_BUDGET} already exists.\n"
+            "       It is hand-tuned once anybody has cared about a cap, so it\n"
+            "       is not overwritten. Add the items by hand, or pass --force."
+        )
+    undeclared = [r["path"] for r in rows if r["state"] == "undeclared"]
+    lines = [
+        "# Per-instance context budget, layered over the CORE `context-budget.yaml`.",
+        "#",
+        "# Written by `measure-context.py --init` from what this instance actually",
+        "# loads. Every entry starts UNCAPPED: reported in each run, failing",
+        "# nothing. Add `max_bytes:` to the ones whose growth you want to hear",
+        "# about, which is the entire value of the file.",
+        "",
+        "items:",
+    ]
+    for path in undeclared:
+        lines.append(f'  "{path}": {{}}')
+    if not undeclared:
+        lines.append("  {}")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
 # ------------------------------------------------------------------ main --
 
 def main(argv=None) -> int:
@@ -388,6 +427,13 @@ def main(argv=None) -> int:
     parser.add_argument("--method", choices=("bytes", "api"), default="bytes")
     parser.add_argument("--out", default=None, help="also write the report here")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="declare this instance's undeclared items, uncapped, in "
+             "context-budget.user.yaml",
+    )
+    parser.add_argument("--force", action="store_true", help="with --init: overwrite")
     args = parser.parse_args(argv)
 
     root = (
@@ -401,6 +447,17 @@ def main(argv=None) -> int:
     bytes_per_token = float(
         (budget.get("calibration") or {}).get("bytes_per_token", DEFAULT_BYTES_PER_TOKEN)
     )
+    if args.init:
+        target = write_user_budget(root, rows, force=args.force)
+        undeclared = sum(1 for r in rows if r["state"] == "undeclared")
+        if not args.quiet:
+            print(
+                f"measure-context: declared {undeclared} item(s) uncapped in "
+                f"{target.name}. Add a cap to the ones whose growth you want to "
+                f"hear about."
+            )
+        return 0
+
     report = render_report(
         rows,
         effective_method(rows, args.method),

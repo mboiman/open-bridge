@@ -75,9 +75,6 @@ items:
   # as that instance's work makes it. Declaring them anyway means an instance
   # gets them measured without editing a CORE file — an uncapped item is
   # reported, never a build failure.
-  work/log.md:
-    optional: true
-    source: phase1
   work/board.md:
     optional: true
     source: phase1
@@ -100,3 +97,12 @@ items:
     note: >-
       Six of twenty-one blocks. Empty in a fresh clone, since a fresh clone has
       no bridge-config.yaml, and that is not an error.
+  "cmd:python3 scripts/worklog.py --recent 3":
+    source: phase1
+    note: >-
+      The week header, the rolling TODO and the three most recent day blocks.
+      No cap shipped, for the same reason board.md carries none: CORE cannot
+      know how long an instance's log rows run. Watch this line anyway. On the
+      instance this was built against the whole log measured 405,076 bytes and
+      this slice 247,159, because the rows had become essays rather than rows.
+      A number that large here means `/archive` is overdue, or the rows are.

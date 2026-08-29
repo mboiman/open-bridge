@@ -23,8 +23,13 @@ session load needs; the other fifteen belong to the skill that owns them and are
 read when that skill runs. Reading the whole file to reach `work.enabled` is
 what the slice exists to stop:
 
-1. Read `work/log.md` (last activity, current week) and `work/board.md`
-   (active tasks — `work/tasks/` finite, `work/streams/` long-running)
+1. Read the recent slice of the work log with
+   `python3 scripts/worklog.py --recent 3` (the week header, the rolling TODO
+   and the three most recent day blocks) plus `work/board.md` (active tasks —
+   `work/tasks/` finite, `work/streams/` long-running). Reading the whole log to
+   reach the last activity is what the slice exists to stop: on one live
+   instance that file was 405,076 bytes. `/briefing` and `/archive` still read
+   it in full, which is what they are for
 2. Create today's day-block if missing (from `work/templates/day.md`;
    header `## {Weekday} DD.MM`)
 3. Load standing orders: run `python3 scripts/standing-orders.py --index` and
