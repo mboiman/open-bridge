@@ -75,12 +75,28 @@ items:
   # as that instance's work makes it. Declaring them anyway means an instance
   # gets them measured without editing a CORE file — an uncapped item is
   # reported, never a build failure.
-  bridge-config.yaml:
-    optional: true
-    source: phase1
   work/log.md:
     optional: true
     source: phase1
   work/board.md:
     optional: true
     source: phase1
+
+  # ------------------------------------------------------------- commands --
+  # Not every always-on payload is a file. These two are computed at the moment
+  # of use, so they can never be stale, and the meter measures what they print
+  # rather than what they read. Both replace something larger: the index stands
+  # in for six deferred order bodies, and the slice for fifteen config blocks
+  # that belong to the skills owning them.
+  "cmd:python3 scripts/standing-orders.py --index":
+    source: phase1
+    max_bytes: 4000
+    note: >-
+      The always-on half of the standing-order load contract. Grows by one line
+      per order, which is the cost the contract is worth paying.
+  "cmd:python3 scripts/bridge-config.py --session":
+    source: phase1
+    max_bytes: 6000
+    note: >-
+      Six of twenty-one blocks. Empty in a fresh clone, since a fresh clone has
+      no bridge-config.yaml, and that is not an error.

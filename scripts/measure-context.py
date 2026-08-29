@@ -35,6 +35,8 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,6 +55,15 @@ ORDERS_DIR = Path("protocols") / "standing-orders"
 
 # Only a line that STARTS with `@` is an import. An address in prose is not.
 IMPORT_RE = re.compile(r"^@(\S+)\s*$")
+
+# Some always-on payload is not a file. Phase 1 loads the standing-order index
+# and a slice of bridge-config.yaml, both computed at the moment of use so they
+# can never go stale. A budget item keyed `cmd:<command>` is measured by running
+# it and measuring stdout, which is what actually loads.
+CMD_PREFIX = "cmd:"
+# A budget file is reviewed, but it is still config, and config that can run
+# anything is a different kind of file than the one anybody reviewed it as.
+CMD_ALLOWED_PREFIX = "python3 scripts/"
 
 DEFAULT_BYTES_PER_TOKEN = 2.4
 DEFAULT_MODEL = "claude-opus-5"
@@ -198,6 +209,32 @@ def count_tokens(text: str, method: str, bytes_per_token: float, model: str):
 
 # ---------------------------------------------------------------- the rows --
 
+def run_command_item(repo_root: Path, key: str):
+    """Run a `cmd:` budget item and return its stdout, or None when it failed.
+
+    None is deliberately not an empty string: a payload that cannot be produced
+    and one that shrank to nothing look identical at zero bytes, and only one of
+    them is a finding.
+    """
+    command = key[len(CMD_PREFIX):].strip()
+    if not command.startswith(CMD_ALLOWED_PREFIX):
+        sys.exit(
+            f"error: budget item {key!r} is outside the command allowlist.\n"
+            f"       Only {CMD_ALLOWED_PREFIX!r} is accepted."
+        )
+    try:
+        done = subprocess.run(
+            shlex.split(command),
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
 def item_state(row: dict, policy, exists: bool) -> str:
     """ok | over | uncapped | undeclared | absent | missing."""
     if policy is None:
@@ -234,8 +271,18 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
     for path in sorted(set(discovered) | set(items)):
         policy = items.get(path)
         source = discovered.get(path) or (policy or {}).get("source") or "phase1"
-        target = root / path
-        exists = target.is_file()
+        if path.startswith(CMD_PREFIX):
+            text = run_command_item(root, path)
+            exists = text is not None
+            source = (policy or {}).get("source") or "command"
+        else:
+            target = root / path
+            exists = target.is_file()
+            text = (
+                target.read_text(encoding="utf-8", errors="replace")
+                if exists
+                else None
+            )
 
         row = {
             "path": path,
@@ -246,7 +293,6 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
             "max_bytes": (policy or {}).get("max_bytes"),
         }
         if exists:
-            text = target.read_text(encoding="utf-8", errors="replace")
             row["bytes"] = len(text.encode("utf-8"))
             row["tokens"], row["method"] = count_tokens(
                 text, method, bytes_per_token, model

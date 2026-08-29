@@ -109,6 +109,9 @@ jobs:
       - name: Run standing-order contract test suite
         run: bash scripts/tests/test-standing-orders.sh
 
+      - name: Run config-slice test suite
+        run: bash scripts/tests/test-bridge-config.sh
+
       # Refuses an order that defers without a trigger or without a summary.
       # Such a file reads as enforced in the tree and loads in no session, which
       # is a worse failure than the cost the contract removes.

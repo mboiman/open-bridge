@@ -44,6 +44,14 @@ generalises that cap to the whole always-on surface.
         reports an estimate as exact, which is the whole reason the method
         travels with the number.
 
+    COMMAND ITEMS. Some always-on payload is not a file. Phase 1 loads the
+    standing-order index and a slice of `bridge-config.yaml`, both computed at
+    the moment of use so they can never go stale. A budget item keyed
+    `cmd:<command>` is measured by running it and measuring stdout, which is
+    what is actually loaded. Only `python3 scripts/...` is accepted: a budget
+    file is reviewed, but it is still config, and config that can run anything
+    is a different kind of file than the one anybody reviewed it as.
+
     collect_rows(repo_root, budget, method) -> list[dict]
         One row per always-on item, sorted by (source, path) so an unchanged
         tree renders identically twice.
@@ -318,6 +326,58 @@ def test_the_user_overlay_replaces_an_item_by_key(tree):
     )
     budget = mc.load_budget(tree)
     assert budget["items"]["AGENTS.md"]["max_bytes"] == 100
+
+
+def test_a_command_item_measures_what_the_command_prints(tree):
+    """The payload is the output, not a file, because that is what loads."""
+    _write(
+        tree,
+        "context-budget.user.yaml",
+        'items:\n  "cmd:python3 scripts/echo.py":\n    max_bytes: 1000\n',
+    )
+    _write(tree, "scripts/echo.py", "print('x' * 41)\n")
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    row = next(r for r in rows if r["path"].startswith("cmd:"))
+    assert row["bytes"] == 42  # 41 x plus the newline
+    assert row["state"] == "ok"
+
+
+def test_a_command_item_over_its_cap_is_over(tree):
+    _write(
+        tree,
+        "context-budget.user.yaml",
+        'items:\n  "cmd:python3 scripts/echo.py":\n    max_bytes: 10\n',
+    )
+    _write(tree, "scripts/echo.py", "print('x' * 41)\n")
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    row = next(r for r in rows if r["path"].startswith("cmd:"))
+    assert row["state"] == "over"
+
+
+def test_a_command_outside_the_allowlist_is_refused(tree):
+    """A budget file is reviewed, but it is still config. Config that can run
+    anything is not the file anybody reviewed it as."""
+    _write(
+        tree,
+        "context-budget.user.yaml",
+        'items:\n  "cmd:rm -rf /":\n    max_bytes: 10\n',
+    )
+    with pytest.raises(SystemExit):
+        mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+
+
+def test_a_command_that_fails_is_a_finding_not_a_zero(tree):
+    """A command that cannot run loads nothing, and nothing measured as zero
+    reads exactly like a payload that shrank to nothing."""
+    _write(
+        tree,
+        "context-budget.user.yaml",
+        'items:\n  "cmd:python3 scripts/boom.py":\n    max_bytes: 1000\n',
+    )
+    _write(tree, "scripts/boom.py", "import sys; sys.exit(3)\n")
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    row = next(r for r in rows if r["path"].startswith("cmd:"))
+    assert row["state"] == "missing"
 
 
 def test_a_missing_core_budget_is_a_hard_error(tmp_path):

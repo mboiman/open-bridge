@@ -16,8 +16,12 @@ skip this phase — not even for generic greetings.
 
 ### Phase 1 — Work-system load
 
-Only runs when Phase 0 returns NORMAL **and** `work.enabled: true` in
-bridge-config.yaml:
+Only runs when Phase 0 returns NORMAL **and** `work.enabled: true` in the
+session slice of bridge-config.yaml. Read that slice with
+`python3 scripts/bridge-config.py --session`, which emits the six blocks the
+session load needs; the other fifteen belong to the skill that owns them and are
+read when that skill runs. Reading the whole file to reach `work.enabled` is
+what the slice exists to stop:
 
 1. Read `work/log.md` (last activity, current week) and `work/board.md`
    (active tasks — `work/tasks/` finite, `work/streams/` long-running)

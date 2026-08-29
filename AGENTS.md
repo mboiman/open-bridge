@@ -28,7 +28,10 @@ points at the `rules/` and `docs/` files that carry the mechanics.
 
 1. **This file (`AGENTS.md`)** is the full operating manual. The name is a
    convention; the content applies to all agents.
-2. **Read `bridge-config.yaml`** for user preferences (theme, language, features).
+2. **Read the session slice of `bridge-config.yaml`** with
+   `python3 scripts/bridge-config.py --session` (identity, purpose, user_profile,
+   theme, language, work). The other fifteen blocks belong to the skill that owns
+   them; read a block with `--keys <block>` when that skill runs.
 3. **Read `ecosystem.yaml` if present** — the project registry (repos, packages,
    infrastructure, workspaces). It is created during onboarding and is user-specific
    and gitignored (like `bridge-config.yaml`), so it is absent on a fresh clone. When
