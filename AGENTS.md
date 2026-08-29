@@ -153,6 +153,12 @@ every dispatch). `protocols/` stays **top-level**
 (CORE content with its own lifecycle) — `standing-orders/` ships CORE defaults;
 user-authored orders live in `standing-orders/user/`.
 
+Every order with `scope: always` is paid on every session and against every
+sub-agent dispatch, so the set carries a declared ceiling like `SOUL.md` does:
+`context-budget.yaml` holds it, `python3 scripts/measure-context.py` reports and
+enforces it (bytes gate, token counts inform), and CI fails on an always-on file
+nobody declared.
+
 ---
 
 ## Layout — Cluster-Wrappers

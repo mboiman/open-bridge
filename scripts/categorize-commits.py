@@ -320,6 +320,13 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     "scripts/tests/test_scope_router.py",
     "scripts/tests/test_validate_bridge_rule_map.py",
     "scripts/upstream-monitor.sh",
+    # Registered 2026-08-29 with the context budget. validate.yml runs all three
+    # in CI, so a non-core classification would have upstream CI call files that
+    # never shipped. test_paths_a_core_ci_workflow_runs_are_core caught exactly
+    # that, before the first human read the diff.
+    "scripts/measure-context.py",
+    "scripts/tests/test-measure-context.sh",
+    "scripts/tests/test_measure_context.py",
 })
 
 
