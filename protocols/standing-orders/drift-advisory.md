@@ -2,6 +2,9 @@
 name: drift-advisory
 scope: always
 applies_to: []
+load: on-trigger
+triggers: ["rename", "move a file", "cross-repo", "update the docs", "coupled files"]
+summary: "Warn when a change touches coupled files, where updating one location and not the other drifts silently."
 enforcement: advisory
 ---
 

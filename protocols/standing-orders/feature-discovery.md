@@ -3,6 +3,9 @@ name: feature-discovery
 scope: always
 enforcement: advisory
 applies_to: [ops]
+load: on-trigger
+triggers: ["how do I", "is there a way", "what can the bridge do", "suggest a feature"]
+summary: "Suggest a Bridge feature the user has not enabled when their problem is one it already solves."
 ---
 # Feature Discovery — Proactive Bridge-Feature Suggestions
 

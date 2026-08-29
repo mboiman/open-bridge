@@ -106,6 +106,15 @@ jobs:
       - name: Run rule-inventory test suite
         run: bash scripts/tests/test-validate-bridge-rule-map.sh
 
+      - name: Run standing-order contract test suite
+        run: bash scripts/tests/test-standing-orders.sh
+
+      # Refuses an order that defers without a trigger or without a summary.
+      # Such a file reads as enforced in the tree and loads in no session, which
+      # is a worse failure than the cost the contract removes.
+      - name: Validate the standing-order load contract
+        run: python3 scripts/standing-orders.py --check
+
       - name: Run context-budget test suite
         run: bash scripts/tests/test-measure-context.sh
 

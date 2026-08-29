@@ -58,22 +58,16 @@ items:
       shipped: CORE cannot know how large an instance's registry should be.
 
   # -------------------------------------------------------- standing orders --
-  protocols/standing-orders/board-task-criteria.md:
-    max_bytes: 7000
-  protocols/standing-orders/code-standards.md:
-    max_bytes: 2000
+  # Only the orders that are actually always-on, i.e. `load: eager`. The six
+  # carrying `load: on-trigger` are fetched by their vocabulary and left this
+  # list when the contract landed; `measure-context.py` still names them under
+  # the table, so a deferred body is never mistaken for one that vanished.
+  # The two below stayed eager on purpose: each bites when nobody says its
+  # vocabulary, which is the only criterion that keeps an order eager.
   protocols/standing-orders/document-work.md:
     max_bytes: 3000
-  protocols/standing-orders/drift-advisory.md:
-    max_bytes: 5000
-  protocols/standing-orders/feature-discovery.md:
-    max_bytes: 9000
   protocols/standing-orders/security-baseline.md:
     max_bytes: 2000
-  protocols/standing-orders/task-sync.md:
-    max_bytes: 11000
-  protocols/standing-orders/work-board-reconciliation.md:
-    max_bytes: 5000
 
   # ------------------------------------------------------------ Phase 1 reads --
   # Named in `rules/operations.md` § Phase 1. They are instance data, absent in

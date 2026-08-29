@@ -153,11 +153,19 @@ every dispatch). `protocols/` stays **top-level**
 (CORE content with its own lifecycle) — `standing-orders/` ships CORE defaults;
 user-authored orders live in `standing-orders/user/`.
 
-Every order with `scope: always` is paid on every session and against every
-sub-agent dispatch, so the set carries a declared ceiling like `SOUL.md` does:
-`context-budget.yaml` holds it, `python3 scripts/measure-context.py` reports and
-enforces it (bytes gate, token counts inform), and CI fails on an always-on file
-nobody declared.
+`scope: always` says an order **applies** always; `load:` says when its **body**
+is read. `load: eager` (the default) reads it at session start; `load: on-trigger`
+keeps only a `summary` and a `triggers` vocabulary in context and fetches the body
+when that vocabulary comes up — the disclosure model skills already use. Stay
+eager only when the order bites while nobody says its own vocabulary. The index a
+session carries is `python3 scripts/standing-orders.py --index`; `--check` refuses
+an order that defers without a trigger, since it would read as enforced and load
+never.
+
+The always-on surface as a whole carries a declared ceiling, the same idea as the
+`SOUL.md` cap: `context-budget.yaml` holds it, `python3 scripts/measure-context.py`
+reports and enforces it (bytes gate, token counts inform), and CI fails on an
+always-on file nobody declared.
 
 ---
 

@@ -33,11 +33,18 @@ The full contract, including every state and why it exists, lives in
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
 
 import yaml
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lib.standing_orders import (  # noqa: E402  (path setup must precede this import)
+    collect_orders,
+    eager_paths,
+)
 
 CORE_BUDGET = "context-budget.yaml"
 USER_BUDGET = "context-budget.user.yaml"
@@ -122,34 +129,33 @@ def discover_imports(repo_root: Path, entry: str = ENTRY, max_depth: int = 4) ->
     return found
 
 
-def _frontmatter(path: Path) -> dict:
-    """The YAML block between the first two `---` fences, or an empty dict."""
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("\n---", 1)
-    if len(parts) < 2:
-        return {}
-    body = parts[0][3:]
-    try:
-        loaded = yaml.safe_load(body)
-    except yaml.YAMLError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
 def discover_standing_orders(repo_root: Path) -> list[str]:
-    """Every standing order carrying `scope: always`, sorted by path."""
-    base = Path(repo_root) / ORDERS_DIR
-    if not base.is_dir():
-        return []
-    found = []
-    for path in base.rglob("*.md"):
-        if path.name == "README.md" or path.name.startswith("_"):
+    """The orders that are actually always-on: `scope: always` AND `load: eager`.
+
+    An `on-trigger` order is fetched by its vocabulary and is not part of the
+    always-on surface. Counting it here would overstate the budget and hide the
+    saving the load contract buys. The contract lives in
+    `scripts/lib/standing_orders.py`, shared so this file and the index can
+    never disagree about what is always-on.
+    """
+    return sorted(eager_paths(collect_orders(Path(repo_root))))
+
+
+def deferred_standing_orders(repo_root: Path) -> list[tuple[str, int]]:
+    """The bodies the contract moved off the always-on surface, and their size.
+
+    Reported rather than dropped: silence about a deferred body reads exactly
+    like a file that vanished.
+    """
+    root = Path(repo_root)
+    out = []
+    for order in collect_orders(root):
+        if order["load"] == "eager":
             continue
-        if str(_frontmatter(path).get("scope", "")).strip() == "always":
-            found.append(path.relative_to(repo_root).as_posix())
-    return sorted(found)
+        path = root / order["path"]
+        size = len(path.read_bytes()) if path.is_file() else 0
+        out.append((order["path"], size))
+    return sorted(out)
 
 
 # ------------------------------------------------------------ the counting --
@@ -266,7 +272,12 @@ def _cell(value) -> str:
     return "-" if value is None else f"{value:,}".replace(",", " ")
 
 
-def render_report(rows: list[dict], method: str, bytes_per_token: float) -> str:
+def render_report(
+    rows: list[dict],
+    method: str,
+    bytes_per_token: float,
+    deferred: list[tuple[str, int]] | None = None,
+) -> str:
     """Deterministic markdown. No timestamp, no host, no absolute path."""
     out = ["# Context budget", ""]
     if method == "api":
@@ -294,6 +305,19 @@ def render_report(rows: list[dict], method: str, bytes_per_token: float) -> str:
         f"| | **total** | **{_cell(total_bytes)}** | | "
         f"**{_cell(total_tokens)}** | |"
     )
+
+    if deferred:
+        total = sum(size for _, size in deferred)
+        out += [
+            "",
+            f"{len(deferred)} standing order(s) load on trigger and are not part "
+            f"of the always-on surface ({_cell(total)} bytes, fetched by "
+            f"vocabulary). They are listed here so a deferred body is never "
+            f"mistaken for a file that vanished:",
+            "",
+        ]
+        for path, size in deferred:
+            out.append(f"- `{path}` ({_cell(size)} bytes)")
 
     failing = [r for r in rows if r["state"] in FAILING]
     out.append("")
@@ -331,7 +355,12 @@ def main(argv=None) -> int:
     bytes_per_token = float(
         (budget.get("calibration") or {}).get("bytes_per_token", DEFAULT_BYTES_PER_TOKEN)
     )
-    report = render_report(rows, effective_method(rows, args.method), bytes_per_token)
+    report = render_report(
+        rows,
+        effective_method(rows, args.method),
+        bytes_per_token,
+        deferred=deferred_standing_orders(root),
+    )
 
     if not args.quiet:
         print(report)

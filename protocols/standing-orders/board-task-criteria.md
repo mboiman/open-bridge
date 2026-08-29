@@ -3,6 +3,9 @@ name: board-task-criteria
 scope: always
 enforcement: advisory
 applies_to: []
+load: on-trigger
+triggers: ["new task", "create a task", "board", "STATUS.md", "escalate", "is this a task"]
+summary: "When a log entry escalates into a board task with its own STATUS.md, and when it stays a log line."
 ---
 # Board-Task Criteria — When does work become a Board task?
 

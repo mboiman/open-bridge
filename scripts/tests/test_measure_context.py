@@ -28,9 +28,12 @@ generalises that cap to the whole always-on surface.
         quietly leaving the measured set.
 
     discover_standing_orders(repo_root) -> list[str]
-        Every `protocols/standing-orders/**/*.md` whose frontmatter carries
-        `scope: always`, sorted by path. `README.md` and `_`-prefixed files are
-        not orders and are skipped.
+        The orders that are actually always-on: `scope: always` AND
+        `load: eager` (the default). An `on-trigger` order is fetched by its
+        vocabulary and is not part of the always-on surface, so counting it
+        here would overstate the budget and hide the saving. The load contract
+        itself lives in `scripts/lib/standing_orders.py`, shared so the meter
+        and the index can never disagree about what is always-on.
 
     count_tokens(text, method, bytes_per_token, model) -> (int, str)
         Returns the count AND the method that actually produced it. `api` is
@@ -102,13 +105,19 @@ def _write(root: Path, rel: str, text: str) -> Path:
     return p
 
 
-def _order(name: str, scope: str = "always") -> str:
+def _order(name: str, scope: str = "always", load: str | None = None) -> str:
+    extra = ""
+    if load == "on-trigger":
+        extra = 'load: on-trigger\ntriggers: ["x"]\nsummary: "s"\n'
+    elif load:
+        extra = f"load: {load}\n"
     return (
         "---\n"
         f"name: {name}\n"
         f"scope: {scope}\n"
         "enforcement: advisory\n"
         "applies_to: []\n"
+        f"{extra}"
         "---\n\n"
         f"# {name}\n\nbody\n"
     )
@@ -209,6 +218,26 @@ def test_only_scope_always_orders_are_collected(tree):
 def test_readme_and_underscore_files_are_not_orders(tree):
     found = mc.discover_standing_orders(tree)
     assert not any("README" in p or "_template" in p for p in found)
+
+
+def test_an_on_trigger_order_is_not_part_of_the_always_on_set(tree):
+    """It is fetched by its vocabulary, so counting it would overstate the
+    budget and hide the very saving the contract buys."""
+    _write(
+        tree,
+        "protocols/standing-orders/deferred.md",
+        _order("deferred", load="on-trigger"),
+    )
+    assert not any(
+        "deferred" in p for p in mc.discover_standing_orders(tree)
+    )
+
+
+def test_the_report_says_what_was_deferred_rather_than_dropping_it(tree):
+    """Silence about a deferred body reads as a file that vanished."""
+    out = mc.render_report([], "bytes", 2.4, deferred=[("a.md", 10), ("b.md", 20)])
+    assert "2" in out
+    assert "trigger" in out.lower()
 
 
 def test_user_tier_orders_are_collected_and_sorted(tree):

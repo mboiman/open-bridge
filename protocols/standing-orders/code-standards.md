@@ -3,6 +3,9 @@ name: code-standards
 scope: always
 enforcement: advisory
 applies_to: [analyst, builder]
+load: on-trigger
+triggers: ["write code", "implement", "refactor", "code review", "dispatch a build sub-agent"]
+summary: "Code quality expectations applied to dispatched build sub-agents."
 ---
 # Code Standards
 

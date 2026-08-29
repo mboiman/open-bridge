@@ -3,6 +3,7 @@ name: document-work
 scope: always
 enforcement: hook-warned
 applies_to: []   # empty = every dispatched sub-agent
+load: eager   # fires without its own vocabulary: work gets logged unasked, or not at all
 ---
 # Document All Work
 

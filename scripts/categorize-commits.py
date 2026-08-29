@@ -324,9 +324,13 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     # in CI, so a non-core classification would have upstream CI call files that
     # never shipped. test_paths_a_core_ci_workflow_runs_are_core caught exactly
     # that, before the first human read the diff.
+    "scripts/lib/standing_orders.py",
     "scripts/measure-context.py",
+    "scripts/standing-orders.py",
     "scripts/tests/test-measure-context.sh",
+    "scripts/tests/test-standing-orders.sh",
     "scripts/tests/test_measure_context.py",
+    "scripts/tests/test_standing_orders.py",
 })
 
 

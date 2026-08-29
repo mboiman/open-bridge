@@ -3,6 +3,9 @@ name: task-sync
 scope: always
 enforcement: hook-warned
 applies_to: []   # empty = every dispatched sub-agent
+load: on-trigger
+triggers: ["close a task", "task done", "sync", "tracker", "github issue", "wiki page"]
+summary: "The three-axis resolver that keeps a task and its external issue, wiki page or work item aligned."
 ---
 # Task Sync Routing
 

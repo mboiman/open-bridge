@@ -23,7 +23,10 @@ bridge-config.yaml:
    (active tasks — `work/tasks/` finite, `work/streams/` long-running)
 2. Create today's day-block if missing (from `work/templates/day.md`;
    header `## {Weekday} DD.MM`)
-3. Load standing orders from `protocols/standing-orders/` (scope: always)
+3. Load standing orders: run `python3 scripts/standing-orders.py --index` and
+   read the bodies it marks `eager`. For the rest the index carries a summary
+   and a trigger vocabulary; read that body when its vocabulary comes up. The
+   index is computed at the moment of use, so it is never stale
 4. Check CORE updates: `git log HEAD..main --oneline` — offer merge if new
 5. On "continue", "morning", "status": show summary, don't ask questions.
    When `bridge-config.yaml` `purpose.statement` is non-empty, **lead the
