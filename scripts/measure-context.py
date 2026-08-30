@@ -465,6 +465,14 @@ def always_on_parts(repo_root: Path, budget: dict) -> dict[str, str]:
                 if target.is_file()
                 else None
             )
+            # The CARD is what a session loads for a declared source, so it is
+            # what the surface has to be. Handing over the file body would put
+            # ~25 KB of never-read registry into the reachability contract and
+            # let a family claim a route through text nobody sees — the second
+            # definition of always-on this function exists to prevent.
+            policy = (budget.get("items") or {}).get(path) or {}
+            if text and policy.get("card"):
+                text = render_card(text, policy["card"], path)
         if text:
             parts[path] = text
     return parts

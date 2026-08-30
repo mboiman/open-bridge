@@ -469,8 +469,20 @@ def check_declaration(text: str, card=None) -> list[str]:
     """
     if not card:
         return []
-    present = set(parse_source(text))
+    blocks = parse_source(text)
+    present = set(blocks)
     findings = []
+    for name in card.get("sections") or []:
+        kind = (blocks.get(name) or {}).get("kind")
+        if kind and kind != "map":
+            findings.append(
+                f"sections: '{name}' is a {kind}, not a map. A section is "
+                f"rendered from its CHILDREN, and a non-map has none: the card "
+                f"gets a bare heading, the entries leave the count, and they do "
+                f"not reach 'also present' either. Undeclared it would fall "
+                f"through to a working pointer, so declaring it is strictly "
+                f"worse than leaving it out."
+            )
     for field in ("keep", "sections"):
         for name in card.get(field) or []:
             if name not in present:

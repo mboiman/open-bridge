@@ -37,6 +37,57 @@ def _frontmatter(path: Path) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _is_order_candidate(path: Path) -> bool:
+    """A `.md` under the orders dir that is not a README or `_`-prefixed."""
+    return path.suffix == ".md" and path.name != "README.md" and not path.name.startswith("_")
+
+
+def _unreadable_reason(path: Path):
+    """Why this file's frontmatter cannot be read, or None when it can.
+
+    A file with NO fence at all is prose that never claimed to be an order, and
+    demanding frontmatter of it would be a check about somebody's notes. A file
+    that HAS a fence and still yields nothing is the finding: it looks enforced
+    in the tree and is loaded by nobody.
+    """
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    fenced = any(line.strip() == "---" for line in text.split("\n"))
+    if not text.startswith("---"):
+        if fenced:
+            return "a `---` fence exists but the file does not start with it"
+        return None
+    parts = text.split("\n---", 1)
+    if len(parts) < 2:
+        return "the frontmatter fence is never closed"
+    try:
+        loaded = yaml.safe_load(parts[0][3:])
+    except yaml.YAMLError as exc:
+        return f"the frontmatter is not valid YAML ({str(exc).splitlines()[0]})"
+    if not isinstance(loaded, dict):
+        return "the frontmatter is not a mapping"
+    return None
+
+
+def unreadable_orders(repo_root: Path) -> list[str]:
+    """Order files whose frontmatter cannot be read, as repo-relative paths.
+
+    Without this they are INVISIBLE. `_frontmatter` returns `{}`, `scope`
+    becomes `""`, and `collect_orders` drops them for not being `scope: always`
+    — the same silent exit an org-scoped order takes on purpose. Downstream the
+    two are indistinguishable, and only one of them is a guardrail going
+    missing. Verified on two files carrying `enforcement: blocking`: both left
+    the index, and `--check` reported the survivors as valid and exited 0.
+    """
+    base = Path(repo_root) / ORDERS_DIR
+    if not base.is_dir():
+        return []
+    return sorted(
+        path.relative_to(repo_root).as_posix()
+        for path in base.rglob("*.md")
+        if _is_order_candidate(path) and _unreadable_reason(path)
+    )
+
+
 def load_order(path: Path) -> dict:
     """Frontmatter plus the derived load policy, with the path attached."""
     front = _frontmatter(Path(path))
@@ -71,9 +122,14 @@ def collect_orders(repo_root: Path) -> list[dict]:
     return sorted(orders, key=lambda o: o["path"])
 
 
-def check_orders(orders: list[dict]) -> list[str]:
+def check_orders(orders: list[dict], unreadable=()) -> list[str]:
     """Contract violations, empty when it holds."""
-    violations = []
+    violations = [
+        f"{path}: frontmatter cannot be read, so this file is in the tree and "
+        f"in no session. An order that reads as enforced and loads never is the "
+        f"one failure this contract exists to make impossible."
+        for path in unreadable
+    ]
     for order in orders:
         where = order["path"]
         if order["load"] not in VALID_LOAD:

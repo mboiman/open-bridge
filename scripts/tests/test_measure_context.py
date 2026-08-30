@@ -714,3 +714,47 @@ def test_the_report_names_the_largest_entries(listed):
     _skill(listed, "huge", "H" * 400)
     rows = mc.collect_rows(listed, mc.load_budget(listed), "bytes")
     assert "huge" in mc.render_report(rows, "bytes", 2.4)
+
+
+# ------------------------------------- one definition of the always-on surface --
+#
+# `always_on_parts` re-read the raw file for a `card:`-indexed source while
+# `collect_rows` measured the rendered card. Two definitions of always-on, which
+# is precisely what this module's docstring says a second definition would cause:
+# something claims residency in text no session ever loads.
+#
+# Measured on a live instance: check-reachability was crediting 25 365 bytes of
+# registry body that Phase 1 never reads. The 26/26 headline survived only
+# because no family happened to depend on that text — it held by luck, not by
+# construction, which is the definition of a guard that is not doing its job.
+
+
+def test_an_indexed_source_enters_the_surface_as_its_card(tree):
+    _declare_card(tree)
+    # The description IS the card label, so the needle has to be a field the
+    # card never carries: the body detail that only `--get` reaches.
+    _write(
+        tree,
+        "ecosystem.yaml",
+        "org: acme\ncustomers:\n  one:\n    description: a label\n    secret_detail: only in the body\n",
+    )
+    parts = mc.always_on_parts(tree, mc.load_budget(tree))
+    assert "only in the body" not in parts["ecosystem.yaml"]
+    assert "**one** — a label" in parts["ecosystem.yaml"]
+
+
+def test_the_surface_and_the_gate_agree_byte_for_byte(tree):
+    _declare_card(tree)
+    _write(tree, "ecosystem.yaml", "org: acme\ncustomers:\n  one:\n    description: body text\n")
+    budget = mc.load_budget(tree)
+    parts = mc.always_on_parts(tree, budget)
+    rows = {r["path"]: r for r in mc.collect_rows(tree, budget, "bytes")}
+    assert len(parts["ecosystem.yaml"].encode("utf-8")) == rows["ecosystem.yaml"]["bytes"]
+
+
+def test_an_undeclared_source_still_enters_whole(tree):
+    # Fail-open: no card means the file stays always-on in full, and the surface
+    # has to say so or the two halves disagree in the other direction.
+    _write(tree, "ecosystem.yaml", "alpha: 1\nbeta: 2\n")
+    parts = mc.always_on_parts(tree, mc.load_budget(tree))
+    assert parts["ecosystem.yaml"] == "alpha: 1\nbeta: 2\n"
