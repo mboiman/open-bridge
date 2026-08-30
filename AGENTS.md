@@ -32,10 +32,13 @@ points at the `rules/` and `docs/` files that carry the mechanics.
    `python3 scripts/bridge-config.py --session` (identity, purpose, user_profile,
    theme, language, work). The other fifteen blocks belong to the skill that owns
    them; read a block with `--keys <block>` when that skill runs.
-3. **Read `ecosystem.yaml` if present** — the project registry (repos, packages,
-   infrastructure, workspaces). It is created during onboarding and is user-specific
-   and gitignored (like `bridge-config.yaml`), so it is absent on a fresh clone. When
-   present, `CLAUDE.md` imports it via `@ecosystem.yaml`. `ecosystem.example.yaml` **is**
+3. **Index `ecosystem.yaml` if present** — the project registry (repos, packages,
+   infrastructure, workspaces). Created during onboarding, user-specific and gitignored
+   (like `bridge-config.yaml`), so absent on a fresh clone. It is **not** an `@`-import:
+   Phase 1 runs `python3 scripts/context-index.py ecosystem.yaml` for the settings plus
+   one line per entry, and `--get <name>` fetches an entry when the work names one — the
+   split skills have always had, applied to a declared map
+   ([`docs/context-index.md`](docs/context-index.md)). `ecosystem.example.yaml` **is**
    present on a fresh clone as the registry template — onboarding uses it as the starting
    point (copy + auto-populate → the gitignored `ecosystem.yaml`); do not hand-copy it.
 
@@ -153,14 +156,38 @@ always-on file nobody declared.
 Config lives in **three semantic cluster-wrappers**, and every config type gets
 its own **folder** — no exceptions, no thresholds:
 
-```
-identity/    WHO am I, to WHOM do I send    (personas, accounts, mandants, contracts, agent)
-infra/       WHERE does what run, HOW reach (remotes, channels, backups, instances)
-workflow/    WHAT happens when              (calendars, contexts, projects, workloads)
-```
+`identity/` WHO am I, to WHOM do I send · `infra/` WHERE does what run, HOW
+reach · `workflow/` WHAT happens when. Every family below is a route: read the
+folder when its subject comes up, and its `_template.yaml` says what belongs in
+one. `scripts/check-reachability.py` fails CI when a family in the tree is named
+in nothing a session loads, so this list cannot quietly fall behind the tree —
+five families were missing from it when that check was first run. Entries also
+reference each other (`bridge_refs:`, `*_ref:`, `related_*:`); those references
+are the graph a session walks after the first hop, and
+`scripts/check-edges.py` holds them to resolving (`--neighbours <path>` shows
+one hop both ways, `--fix` rewrites a reference whose task merely moved KIND).
 
-Top-level, own lifecycle: `protocols/` `work/` `docs/` `rules/` `trackers/`
-`themes/` `skills/` `.claude/`.
+| Family | Read it when |
+|---|---|
+| `identity/personas/` | an identity the user HOLDS: signature, tax data, filing paths |
+| `identity/mandants/` | who RECEIVES an outgoing message |
+| `identity/accounts/` | a cloud tenant, subscription or vault reference |
+| `identity/contracts/` | a customer contract: term, rate, notice |
+| `identity/agent/` | this orchestrator's own name, role and voice |
+| `infra/remotes/` | a machine: ssh, wake, services, "which PC" |
+| `infra/channels/` | an outbound transport: mail, chat, bot, digest |
+| `infra/backups/` | what is backed up where, and whether it is fresh |
+| `infra/instances/` | another Bridge this one should know about |
+| `infra/transcriptions/` | recording → transcript topology |
+| `infra/utilities/` | a supply contract at a location: power, gas, water, heat |
+| `workflow/calendars/` | a scheduled outbound action |
+| `workflow/contexts/` | where a piece of work gets documented |
+| `workflow/projects/` | a board's field values and state map, before ANY tracker call |
+| `workflow/workloads/` | one declared run on one machine |
+| `workflow/workspaces/` | a named binding of repos + config overlays |
+
+Top-level, own lifecycle: `rules/` `protocols/standing-orders/` `skills/`
+`trackers/` `themes/` `.claude/agents/` `work/` `docs/`.
 
 **Default-to-Folder:** every config type lives in `<wrapper>/<types>/` — a plural
 folder holding `_template.yaml`, an optional `_schema.yaml`, and all `<id>.yaml`

@@ -472,3 +472,121 @@ def test_uncapped_alone_does_not_trip_the_gate(tree):
         "items:\n  AGENTS.md: {}\n",
     )
     assert mc.main(["--repo-root", str(tree), "--method", "bytes"]) == 0
+
+
+# ------------------------------------------------------- indexed sources --
+#
+# An item may declare a `card:`. The session then loads the card, not the file,
+# so the meter has to measure the card — otherwise the gate guards a number
+# nobody pays and reports red for content that never reaches a session.
+
+REGISTRY = (
+    "org: example-org\n"
+    "\n"
+    "customers:\n"
+    "  one:\n"
+    "    description: The first customer.\n"
+    "    contact: someone@example.org\n"
+    "    notes: a long block of detail nobody needs before the name comes up\n"
+    "  two:\n"
+    "    description: The second customer.\n"
+    "    contact: other@example.org\n"
+    "    notes: more detail of the same kind, equally unread until asked for\n"
+)
+
+
+def _declare_card(tree: Path, cap: str = "") -> Path:
+    budget = (tree / "context-budget.yaml").read_text(encoding="utf-8")
+    budget = budget.replace(
+        "  ecosystem.yaml:\n    optional: true\n",
+        "  ecosystem.yaml:\n"
+        "    optional: true\n"
+        f"{cap}"
+        "    card:\n"
+        "      kind: index\n"
+        "      keep: [org]\n"
+        "      sections: [customers]\n",
+    )
+    (tree / "context-budget.yaml").write_text(budget, encoding="utf-8")
+    return tree
+
+
+def test_an_indexed_item_is_measured_by_its_card(tree):
+    _write(tree, "ecosystem.yaml", REGISTRY)
+    _declare_card(tree)
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    row = next(r for r in rows if r["path"] == "ecosystem.yaml")
+
+    assert row["bytes"] < len(REGISTRY.encode("utf-8"))
+    assert row["body_bytes"] == len(REGISTRY.encode("utf-8"))
+
+
+def test_an_indexed_item_gates_on_the_card_and_not_the_file(tree):
+    """The sharp case: a cap the FILE blows and the CARD clears.
+
+    If this ever reads `over`, the meter is gating a number no session pays,
+    and the first thing anybody would do about it is raise the cap — which
+    would quietly undo the feature.
+    """
+    _write(tree, "ecosystem.yaml", REGISTRY)
+    _declare_card(tree, cap="    max_bytes: 300\n")
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    row = next(r for r in rows if r["path"] == "ecosystem.yaml")
+
+    assert len(REGISTRY.encode("utf-8")) > 300, "the fixture has to blow the cap"
+    assert row["state"] == "ok"
+
+
+def test_an_indexed_item_over_its_cap_is_still_over(tree):
+    _write(tree, "ecosystem.yaml", REGISTRY)
+    _declare_card(tree, cap="    max_bytes: 10\n")
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+
+    assert next(r for r in rows if r["path"] == "ecosystem.yaml")["state"] == "over"
+
+
+def test_the_report_names_what_an_indexed_source_defers(tree):
+    """Same rule as a deferred order body: say it, or it reads as vanished."""
+    _write(tree, "ecosystem.yaml", REGISTRY)
+    _declare_card(tree)
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    report = mc.render_report(rows, "bytes", 2.4)
+
+    assert "ecosystem.yaml" in report
+    assert str(len(REGISTRY.encode("utf-8"))) in report
+    assert "--get" in report
+
+
+def test_an_indexed_item_that_is_absent_is_still_not_a_failure(tree):
+    """A card declared over instance data absent from a fresh clone."""
+    _declare_card(tree)
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+
+    assert next(r for r in rows if r["path"] == "ecosystem.yaml")["state"] == "absent"
+
+
+def test_init_writes_what_the_shipped_schema_requires(tree):
+    """`--init` has to produce a file this repo's own schema accepts.
+
+    It did not. The overlay was written with `items:` alone while
+    `docs/schemas/context-budget.schema.yaml` requires `schema_version` as
+    well, so `validate-bridge.py` rejected it — and nobody saw that for a day,
+    because the file is gitignored by default and no validator ever reached it.
+    It surfaced the moment one instance started tracking it.
+
+    The required keys are read FROM the schema rather than listed here, so this
+    cannot go stale the way the thing it is guarding did.
+    """
+    import yaml as _yaml
+
+    mc.main(["--repo-root", str(tree), "--init"])
+    written = _yaml.safe_load(
+        (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    )
+    schema = _yaml.safe_load(
+        (Path(mc.__file__).resolve().parents[1]
+         / "docs/schemas/context-budget.schema.yaml").read_text(encoding="utf-8")
+    )
+
+    for key in schema.get("required", []):
+        assert key in written, f"--init omits {key!r}, which the schema requires"

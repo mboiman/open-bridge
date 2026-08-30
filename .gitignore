@@ -71,6 +71,14 @@ rules/org/**
 !/ecosystem.example.yaml
 # ---------------------------------------------------------------------------
 
+# Coverage artifacts. `coverage run` writes `.coverage` into the repo root, and
+# it is a binary index of ABSOLUTE paths — so an unguarded `git add -A` after a
+# coverage run puts a developer's home directory into a public PR. The leak
+# check catches it, but only after the push; ignoring it is the actual fix.
+.coverage
+.coverage.*
+htmlcov/
+
 # Doc-system audit log — concrete filenames + persona refs = PII.
 work/doc-system/
 

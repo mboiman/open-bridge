@@ -691,3 +691,27 @@ def test_a_user_surface_keeps_its_tests_local():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_per_instance_declaration_files_are_user():
+    """`edges.yaml` and `context-budget.user.yaml` name an instance's own paths.
+
+    Both are declarations ABOUT the local tree — which files it has, which of
+    their references are excused and why. Classified `core` they would ride a
+    promote upward carrying one instance's directory layout into a public repo,
+    and nothing would say so: the tracked ones would simply be carried, and the
+    gitignored one would be missed on the day somebody tracks it, which is
+    exactly what a private instance using GitHub as offsite backup does.
+
+    Found while shipping the edge guard, on the same day the reachability check
+    found five families nobody had named. The pattern is the same one that had
+    already bitten `infra/remotes/_tests/`: a new family next to a registered
+    one, and the list was generated once and never re-generated.
+    """
+    for path in ("edges.yaml", "context-budget.user.yaml"):
+        assert tier(path) == "user", path
+
+
+def test_the_core_budget_itself_stays_core():
+    """The counterpart. `context-budget.yaml` is the shipped policy."""
+    assert tier("context-budget.yaml") == "core"

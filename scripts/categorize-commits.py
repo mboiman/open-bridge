@@ -90,6 +90,14 @@ USER_PATTERNS = [
     # checkup skill. So the `_`-companions are USER here too, which is why this
     # sits in the pattern list rather than relying on the `_`-prefix rule.
     r"^workflow/checks/",
+    # Declarations ABOUT the local tree: which files this instance has, which
+    # of their references are excused and why. Classified `core` they would
+    # ride a promote upward carrying one instance's directory layout into a
+    # public repo, and nothing would say so. `context-budget.user.yaml` is
+    # gitignored by default and would have been missed the day an instance
+    # tracks it — which a private instance using GitHub as offsite backup does.
+    r"^edges\.yaml$",
+    r"^context-budget\.user\.yaml$",
     r"^workspaces\.lock\.yaml$",                      # sibling of overlays.lock.yaml above
     # Per-tier INVERTED: these exist on both sides and must never be copied either
     # way. .bridge-origin in particular tells the push guard whether the origin is
@@ -340,6 +348,23 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     "scripts/tests/test_measure_context.py",
     "scripts/tests/test_standing_orders.py",
     "scripts/tests/test_worklog.py",
+    # Registered 2026-08-30 with the context index. Same reason as the block
+    # above: validate.yml runs the suite and the `--check` guard, so a
+    # non-core classification would have upstream CI call files that never
+    # shipped.
+    "scripts/context-index.py",
+    "scripts/lib/context_index.py",
+    "scripts/tests/test-context-index.sh",
+    "scripts/tests/test_context_index.py",
+    # Registered 2026-08-30 with the reachability contract. Same reason again:
+    # validate.yml runs the suite, the check and its mutation battery.
+    "scripts/check-reachability.py",
+    "scripts/tests/test-reachability.sh",
+    "scripts/tests/test_reachability.py",
+    # Registered 2026-08-30 with the edge guard. validate.yml runs both.
+    "scripts/check-edges.py",
+    "scripts/tests/test-edges.sh",
+    "scripts/tests/test_edges.py",
 })
 
 

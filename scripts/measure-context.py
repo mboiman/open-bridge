@@ -47,6 +47,7 @@ from lib.standing_orders import (  # noqa: E402  (path setup must precede this i
     collect_orders,
     eager_paths,
 )
+from lib.context_index import render_card  # noqa: E402
 
 CORE_BUDGET = "context-budget.yaml"
 USER_BUDGET = "context-budget.user.yaml"
@@ -271,6 +272,7 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
     for path in sorted(set(discovered) | set(items)):
         policy = items.get(path)
         source = discovered.get(path) or (policy or {}).get("source") or "phase1"
+        body_bytes = None
         if path.startswith(CMD_PREFIX):
             text = run_command_item(root, path)
             exists = text is not None
@@ -283,6 +285,13 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
                 if exists
                 else None
             )
+            # A declared card is what the session actually loads, so it is what
+            # the gate has to measure. Measuring the file instead would report
+            # red for content no session pays for, and the obvious response to
+            # that red — raise the cap — would quietly undo the feature.
+            if exists and (policy or {}).get("card"):
+                body_bytes = len(text.encode("utf-8"))
+                text = render_card(text, policy["card"], path)
 
         row = {
             "path": path,
@@ -291,6 +300,7 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
             "tokens": 0,
             "method": method,
             "max_bytes": (policy or {}).get("max_bytes"),
+            "body_bytes": body_bytes,
         }
         if exists:
             row["bytes"] = len(text.encode("utf-8"))
@@ -302,6 +312,41 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
 
     rows.sort(key=lambda r: (r["source"], r["path"]))
     return rows
+
+
+def always_on_parts(repo_root: Path, budget: dict) -> dict[str, str]:
+    """Everything a session loads before it answers, KEYED BY WHERE IT CAME FROM.
+
+    Same discovery as `collect_rows`, on purpose. A second definition of
+    always-on would let something claim residency in a file no session reads,
+    which is the failure the budget exists to make impossible.
+
+    Keyed rather than concatenated so a caller can say WHICH file carries a
+    thing, and so a mutation battery can remove one contributor at a time. A
+    battery over the concatenation only proves that a substring test is a
+    substring test.
+    """
+    root = Path(repo_root)
+    parts: dict[str, str] = {}
+    for row in collect_rows(root, budget, "bytes"):
+        path = row["path"]
+        if path.startswith(CMD_PREFIX):
+            text = run_command_item(root, path)
+        else:
+            target = root / path
+            text = (
+                target.read_text(encoding="utf-8", errors="replace")
+                if target.is_file()
+                else None
+            )
+        if text:
+            parts[path] = text
+    return parts
+
+
+def always_on_text(repo_root: Path, budget: dict) -> str:
+    """The same surface as one string."""
+    return "\n".join(always_on_parts(repo_root, budget).values())
 
 
 # -------------------------------------------------------------- the report --
@@ -365,6 +410,23 @@ def render_report(
         for path, size in deferred:
             out.append(f"- `{path}` ({_cell(size)} bytes)")
 
+    indexed = [r for r in rows if r.get("body_bytes")]
+    if indexed:
+        out += [
+            "",
+            f"{len(indexed)} source(s) are indexed: the card above is always-on, "
+            f"the rest arrives when somebody names an entry. Listed so a "
+            f"deferred body is never mistaken for a file that shrank:",
+            "",
+        ]
+        for row in indexed:
+            deferred_bytes = row["body_bytes"] - row["bytes"]
+            out.append(
+                f"- `{row['path']}` — card {_cell(row['bytes'])} of "
+                f"{_cell(row['body_bytes'])} bytes, {_cell(deferred_bytes)} "
+                f"reachable with `context-index.py {row['path']} --get <path>`"
+            )
+
     failing = [r for r in rows if r["state"] in FAILING]
     out.append("")
     if failing:
@@ -406,6 +468,12 @@ def write_user_budget(repo_root: Path, rows: list[dict], force: bool = False) ->
         "# loads. Every entry starts UNCAPPED: reported in each run, failing",
         "# nothing. Add `max_bytes:` to the ones whose growth you want to hear",
         "# about, which is the entire value of the file.",
+        "",
+        "# The shipped schema (docs/schemas/context-budget.schema.yaml) validates",
+        "# this overlay as well as the CORE file, and requires this key. It was",
+        "# missing here for a day, unnoticed, because the file is gitignored by",
+        "# default and no validator ever reached it.",
+        "schema_version: 1",
         "",
         "items:",
     ]

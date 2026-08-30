@@ -118,6 +118,15 @@ jobs:
       - name: Run work-log slice test suite
         run: bash scripts/tests/test-worklog.sh
 
+      - name: Run context-index test suite
+        run: bash scripts/tests/test-context-index.sh
+
+      - name: Run reachability test suite
+        run: bash scripts/tests/test-reachability.sh
+
+      - name: Run edge-guard test suite
+        run: bash scripts/tests/test-edges.sh
+
       # An always-on document earns its size by pointing at the file that owns
       # a mechanic instead of restating it. That trade only holds while the
       # pointer resolves, and a dead pointer fails silently, at the moment
@@ -133,6 +142,39 @@ jobs:
 
       - name: Run context-budget test suite
         run: bash scripts/tests/test-measure-context.sh
+
+      # The declaration is the failure surface the index adds. A name in
+      # `keep:` or `sections:` that the source does not have is absorbed in
+      # silence: the real key falls through to "also present", its content
+      # stops being resident, and the card still renders and still passes its
+      # cap. Same run also proves the parser can slice everything the index
+      # advertises, on this tree rather than on a fixture.
+      - name: Every declared card checks out against its source
+        run: python3 scripts/context-index.py --check
+
+      # The budget proves the always-on layer is small and the index proves a
+      # body can be fetched. Neither proves a session still KNOWS the body is
+      # there. A cut that removes the last mention of a config family leaves
+      # every other check green and the capability gone, because nothing will
+      # go looking for it. Five families were in that state when this was
+      # first run, none of them caused by a cut — they had never been named.
+      - name: Every config family is reachable, and the scenarios walk
+        run: python3 scripts/check-reachability.py
+
+      # And the check has to be able to fail. Hide each pointer in turn and
+      # demand a finding: a needle that matches nothing softens nothing.
+      - name: Prove every reachability needle bites
+        run: python3 scripts/check-reachability.py --mutate
+
+      # The third layer. Entries reference each other in ordinary fields —
+      # a customer names its mandant, an account names the task that
+      # provisioned it — and nothing checked that those resolve. On a live
+      # instance 38 of 145 did not, and 20 of those had simply moved KIND:
+      # the documented `mv work/{from}/{slug}` lifecycle, with no reference
+      # pulled along. open-bridge itself declares none, so this is quiet
+      # upstream and load-bearing downstream, which is the correct shape.
+      - name: Every declared reference between entries resolves
+        run: python3 scripts/check-edges.py
 
       # The gate itself, on the live tree. Bytes are exact and offline, so this
       # needs no key and no network; token counts ride along as an estimate and

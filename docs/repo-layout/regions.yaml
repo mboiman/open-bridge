@@ -21,7 +21,7 @@ regions:
       (own, customer, partner, reference) with GitHub slug, local path,
       language, and dependencies. Alongside workspaces, GitHub Projects numbers,
       Azure infrastructure per customer, and the skill catalogs.
-      Loaded automatically into CLAUDE.md via `@ecosystem.yaml`.
+      Read at session start via `scripts/context-index.py ecosystem.yaml`.
       Created at onboarding from the discovery scan; user-specific and
       gitignored — not shipped on a fresh clone.
     examples:

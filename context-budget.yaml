@@ -45,17 +45,36 @@ items:
     note: The entry file. Thin by design; it routes, it does not explain.
 
   AGENTS.md:
-    max_bytes: 32000
+    max_bytes: 33000
     note: >-
       The operating manual, and still the largest single always-on item. It
       routes; it does not restate. Every load-bearing pointer in it is a
       markdown link, which `scripts/check-doc-routes.py` holds to resolving.
+      RAISED from 32000 on 2026-08-30, and the argument belongs in the diff a
+      reviewer sees, which is what this cap is for. The 1,378 bytes bought the
+      config-family index: one row per family, each naming the path and what
+      brings a session to it. `scripts/check-reachability.py` found five
+      families that existed in the tree and were named in nothing a session
+      loads, so the list is now load-bearing rather than decorative, and CI
+      fails when it falls behind the tree.
 
   ecosystem.yaml:
     optional: true
+    source: phase1
     note: >-
-      Created at onboarding and gitignored, so absent in a fresh clone. No cap
-      shipped: CORE cannot know how large an instance's registry should be.
+      Created at onboarding and gitignored, so absent in a fresh clone. It used
+      to be an `@`-import read in full, and it is the one always-on file that
+      grows with the instance rather than with this repo: one line per repo,
+      customer, workspace and board, each with a paragraph nobody needs before
+      its name comes up. It is now INDEXED — Phase 1 loads the card below and
+      fetches an entry when somebody names one. The cap is on the card, which
+      is why there is one at all: a table of contents has a size CORE can
+      reason about, a registry does not.
+    card:
+      kind: index
+      keep: [org, local_root, work_system]
+      sections: [base, customers, internal, partners, workspaces]
+      label: [description, display_name, name]
 
   # -------------------------------------------------------- standing orders --
   # Only the orders that are actually always-on, i.e. `load: eager`. The six
@@ -103,6 +122,8 @@ items:
       The week header, the rolling TODO and the three most recent day blocks.
       No cap shipped, for the same reason board.md carries none: CORE cannot
       know how long an instance's log rows run. Watch this line anyway. On the
-      instance this was built against the whole log measured 405,076 bytes and
-      this slice 247,159, because the rows had become essays rather than rows.
-      A number that large here means `/archive` is overdue, or the rows are.
+      instance this was built against, the whole log measured 405,076 bytes and
+      this slice 115,492, of which a single day was 95,842 across 55 rows.
+      NOT what `/archive` fixes, and the earlier wording here said otherwise:
+      the slice is always the three most recent blocks, and archiving removes
+      what lies BEFORE them. The driver is row length times rows per day.
