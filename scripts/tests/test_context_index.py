@@ -898,3 +898,139 @@ def test_structure_guard_reports_a_kind_disagreement():
     wrong["runtime"] = dict(wrong["runtime"], kind="scalar")
 
     assert any("runtime" in f for f in ci.check_structure(text, blocks=wrong))
+
+
+# ------------------------------------------------------------ file header --
+#
+# A card is a table of contents, and a table of contents that omits what the
+# BOOK is is incomplete. Measured on a live instance: slicing three registries
+# into cards dropped 24 comment lines, ALL of them the leading header block and
+# none of them attached to a key. Among them:
+#
+#     # scope: bks — org/customer registry, routet zu bks-bridge, NIE open-bridge.
+#     # PERSONAL-tier ecosystem extension (NEVER promoted to public/bks)
+#     # ... so this content never reaches an upstream
+#
+# Promote routing is structural, so nothing was UNSAFE. But a session that only
+# ever sees the card had no way to learn that the file it is holding is PII that
+# must never be published, and that is the one sentence a header exists to say.
+# 2 018 bytes across those three files, 0.63 % of that instance's always-on
+# surface, and it is bounded by the item's own max_bytes like everything else.
+#
+# The split rule is free: `_with_leading_comments` already decides, by
+# contiguity, which comments belong to the first key. The header is what is left
+# ABOVE that, so the two can never overlap and nothing is carried twice.
+
+
+def _hdr(body: str) -> str:
+    return ci.render_card(body, {"kind": "index"}, "f.yaml")
+
+
+def test_the_leading_comment_block_reaches_the_card():
+    card = _hdr("# what this file is\n# and its scope\n\nalpha:\n  a: 1\n")
+    assert "# what this file is" in card
+    assert "# and its scope" in card
+
+
+def test_a_comment_touching_the_first_key_is_not_header():
+    # No blank line, so it belongs to `alpha` by the contiguity rule and must
+    # not be duplicated into the header.
+    body = "# real header\n\n# belongs to alpha\nalpha:\n  a: 1\n"
+    card = ci.render_card(body, {"kind": "index", "keep": ["alpha"]}, "f.yaml")
+    assert card.count("# belongs to alpha") == 1
+    assert "# real header" in card
+
+
+def test_the_header_is_not_emitted_twice_when_the_first_key_is_kept():
+    body = "# header\n\nalpha:\n  a: 1\n"
+    card = ci.render_card(body, {"kind": "index", "keep": ["alpha"]}, "f.yaml")
+    assert card.count("# header") == 1
+
+
+def test_a_file_that_starts_with_a_key_has_no_header():
+    assert ci.file_header("alpha:\n  a: 1\n") == ""
+
+
+def test_a_file_with_no_header_gains_no_stray_blank_block():
+    card = _hdr("alpha:\n  a: 1\n")
+    assert not card.startswith("\n")
+    assert "\n\n\n" not in card
+
+
+def test_a_file_with_no_top_level_key_yields_no_header():
+    # Degenerate: without a key there is nothing to be the header OF, and
+    # returning the whole file would put an entire document in the card.
+    assert ci.file_header("# just a comment\n# and another\n") == ""
+
+
+def test_the_language_server_directive_is_dropped():
+    body = "# yaml-language-server: $schema=./_schema.yaml\n# real prose\n\nalpha:\n  a: 1\n"
+    header = ci.file_header(body)
+    assert "yaml-language-server" not in header
+    assert "# real prose" in header
+
+
+def test_a_document_marker_is_dropped():
+    body = "---\n# real prose\n\nalpha:\n  a: 1\n"
+    header = ci.file_header(body)
+    assert header.strip().splitlines() == ["# real prose"]
+
+
+def test_the_header_survives_on_a_real_registry_shape():
+    body = (
+        "# ecosystem.personal.yaml — PERSONAL tier\n"
+        "# scope: personal — NEVER promoted to public\n"
+        "\n"
+        "freelance:\n"
+        "  praxis:\n"
+        "    description: a customer\n"
+    )
+    card = ci.render_card(body, {"kind": "index", "sections": ["freelance"]}, "e.yaml")
+    assert "NEVER promoted to public" in card
+    assert "**praxis**" in card
+
+
+def test_the_header_does_not_confuse_the_declaration_check():
+    # The header is prose, not a key. It must not make `keep`/`sections`
+    # validation think a declared name is present, nor an absent one missing.
+    body = "# alpha: this looks like a key but is a comment\n\nbeta:\n  b: 1\n"
+    assert ci.check_declaration(body, {"kind": "index", "keep": ["alpha"]})
+    assert not ci.check_declaration(body, {"kind": "index", "keep": ["beta"]})
+
+
+# ------------------------------------------ a section that is not a mapping --
+#
+# `sections:` names top-level MAPS, whose children become the card's one-line
+# entries. Declare a name whose value is a SEQUENCE and render_card iterates
+# `children`, which parse_source leaves empty for a list: a bare `## name`
+# heading, zero rows, the entries missing from the count, and absent from "Also
+# present" too — while all four guards stay green.
+#
+# Live on an instance on 2026-08-30: `github_projects` (8 boards) declared as a
+# section rendered as an empty heading. Removing the declaration restored a
+# working pointer, `Also present, fetch by name: github_projects (list of 8).`
+# So the declaration was strictly WORSE than no declaration, which is the one
+# direction a fail-open design must never be able to go.
+
+
+def test_a_sequence_declared_as_a_section_is_a_finding():
+    body = "alpha:\n  - one\n  - two\n"
+    findings = ci.check_declaration(body, {"kind": "index", "sections": ["alpha"]})
+    assert findings and "alpha" in findings[0]
+
+
+def test_a_scalar_declared_as_a_section_is_a_finding():
+    findings = ci.check_declaration("alpha: 1\n", {"kind": "index", "sections": ["alpha"]})
+    assert findings and "alpha" in findings[0]
+
+
+def test_a_mapping_declared_as_a_section_is_fine():
+    body = "alpha:\n  one:\n    description: x\n"
+    assert ci.check_declaration(body, {"kind": "index", "sections": ["alpha"]}) == []
+
+
+def test_a_sequence_in_keep_is_not_a_finding():
+    # `keep:` slices the block whole, so a list is perfectly valid there. Only
+    # `sections:` needs children to render anything.
+    body = "alpha:\n  - one\n"
+    assert ci.check_declaration(body, {"kind": "index", "keep": ["alpha"]}) == []

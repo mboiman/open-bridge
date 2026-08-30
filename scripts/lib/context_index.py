@@ -187,6 +187,43 @@ def _with_leading_comments(lines: list[str], start: int) -> int:
     return i
 
 
+# An editor directive, not prose. It tells a language server where the schema
+# is and says nothing about what the file holds, so it is noise in a card.
+DIRECTIVE = re.compile(r"^#\s*yaml-language-server\s*:")
+
+
+def file_header(text: str) -> str:
+    """The leading comment block: what this FILE is, above the first key.
+
+    A card is a table of contents, and one that omits what the book is is
+    incomplete. Measured on a live instance, slicing three registries dropped 24
+    comment lines, every one of them from this block and none attached to a key.
+    Among them `scope: bks — routet zu bks-bridge, NIE open-bridge` and
+    `PERSONAL-tier … NEVER promoted to public`. Promote routing is structural, so
+    nothing was unsafe; but a session that only ever sees the card had no way to
+    learn that the file it holds is PII that must never be published, and that is
+    the one sentence a header exists to say. 2 018 bytes for three files there,
+    and it is bounded by the item's own `max_bytes` like every other line.
+
+    The split from the FIRST KEY's own comments costs nothing: contiguity already
+    decides that, in `_with_leading_comments`. The header is what sits above what
+    that returns, so the two partition the region and nothing is carried twice.
+
+    Empty when there is no key to be the header OF: a file of pure comments would
+    otherwise arrive whole, which is the opposite of a card.
+    """
+    lines = text.split("\n")
+    first = next((i for i, line in enumerate(lines) if TOP_KEY.match(line)), None)
+    if first is None:
+        return ""
+    kept = [
+        line
+        for line in lines[: _with_leading_comments(lines, first)]
+        if _is_comment(line) and not DIRECTIVE.match(line.strip())
+    ]
+    return "\n".join(kept).strip()
+
+
 def slice_block(text: str, dotted: str) -> str:
     """The raw text of `dotted` (`section` or `section.entry`), comments kept."""
     lines = text.split("\n")
@@ -349,6 +386,11 @@ def render_card(text: str, card, rel_path: str) -> str:
 
     out = [f"# {rel_path} — index", ""]
 
+    header = file_header(text)
+    if header:
+        out.append(header)
+        out.append("")
+
     if kept:
         out.append("Kept whole:")
         out.append("")
@@ -427,8 +469,20 @@ def check_declaration(text: str, card=None) -> list[str]:
     """
     if not card:
         return []
-    present = set(parse_source(text))
+    blocks = parse_source(text)
+    present = set(blocks)
     findings = []
+    for name in card.get("sections") or []:
+        kind = (blocks.get(name) or {}).get("kind")
+        if kind and kind != "map":
+            findings.append(
+                f"sections: '{name}' is a {kind}, not a map. A section is "
+                f"rendered from its CHILDREN, and a non-map has none: the card "
+                f"gets a bare heading, the entries leave the count, and they do "
+                f"not reach 'also present' either. Undeclared it would fall "
+                f"through to a working pointer, so declaring it is strictly "
+                f"worse than leaving it out."
+            )
     for field in ("keep", "sections"):
         for name in card.get(field) or []:
             if name not in present:

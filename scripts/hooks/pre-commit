@@ -136,5 +136,33 @@ if echo "$STAGED" | grep -Eq '^work/(tasks|streams|done)/' && [ -f scripts/gen-b
   python3 scripts/gen-board.py --check >/dev/null 2>&1 || warn "⚠ BOARD: work/ changed — regenerate with python3 scripts/gen-board.py"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# (f) ALWAYS-ON gate — the four context guards, on the one branch CI never sees.
+#
+# `validate.yml` triggers on `main` only. Every instance works on `user/*`, so
+# in a downstream tree these guards run when somebody types the command and
+# never otherwise. That is the difference between having a guard and running
+# one, and it went unnoticed here until an audit went looking: a whole family of
+# checks, green in upstream CI, unenforced in every tree they were written for.
+#
+# Warn-only like everything else in this file, and gated on the surface being
+# touched, so an ordinary work commit pays nothing. Measured on a live instance:
+# 2.6 s for all four when they do run.
+SURFACE='^(context-budget.*\.yaml|ecosystem.*\.yaml|CLAUDE\.md|AGENTS\.md|identity/|infra/|workflow/|protocols/standing-orders/|skills/|\.claude/agents/)'
+if echo "$STAGED" | grep -Eq "$SURFACE"; then
+  # Each is skipped when absent: a fork that has not adopted one is not failing
+  # a check about a file it never took.
+  [ -f scripts/measure-context.py ] && python3 scripts/measure-context.py >/dev/null 2>&1 ||
+    { [ -f scripts/measure-context.py ] && warn "⚠ BUDGET: an always-on item is over cap or undeclared — python3 scripts/measure-context.py"; }
+  [ -f scripts/context-index.py ] && python3 scripts/context-index.py --check >/dev/null 2>&1 ||
+    { [ -f scripts/context-index.py ] && warn "⚠ INDEX: a declared card no longer matches its source — python3 scripts/context-index.py --check"; }
+  [ -f scripts/check-reachability.py ] && python3 scripts/check-reachability.py >/dev/null 2>&1 ||
+    { [ -f scripts/check-reachability.py ] && warn "⚠ REACH: a config family is named in nothing a session loads — python3 scripts/check-reachability.py"; }
+  [ -f scripts/check-edges.py ] && python3 scripts/check-edges.py >/dev/null 2>&1 ||
+    { [ -f scripts/check-edges.py ] && warn "⚠ EDGES: a reference between entries no longer resolves — python3 scripts/check-edges.py"; }
+  [ -f scripts/standing-orders.py ] && python3 scripts/standing-orders.py --check >/dev/null 2>&1 ||
+    { [ -f scripts/standing-orders.py ] && warn "⚠ ORDERS: a standing order is unreadable or defers with no trigger — python3 scripts/standing-orders.py --check"; }
+fi
+
 warn "───────────────────────────────────────────────────────────────────"
 exit 0

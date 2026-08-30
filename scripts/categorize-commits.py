@@ -364,6 +364,10 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     # Registered 2026-08-30 with the edge guard. validate.yml runs both.
     "scripts/check-edges.py",
     "scripts/tests/test-edges.sh",
+    # Registered 2026-08-30 with the pre-commit always-on gate; validate.yml
+    # runs it, so a non-core classification would have upstream CI call a file
+    # that never shipped.
+    "scripts/tests/test-precommit-guards.sh",
     "scripts/tests/test_edges.py",
 })
 

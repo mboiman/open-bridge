@@ -247,3 +247,75 @@ def test_check_exits_one_on_an_unreachable_order(tree):
 def test_index_exits_zero_and_prints(tree, capsys):
     assert so.main(["--index", "--repo-root", str(tree)]) == 0
     assert "on-demand" in capsys.readouterr().out
+
+
+# ------------------------------------------------- unreadable frontmatter --
+#
+# A file under protocols/standing-orders/ IS an order by convention: that is
+# exactly what collect_orders globs. When its frontmatter cannot be read,
+# `_frontmatter` returns {} and `scope` becomes "", so `collect_orders` drops it
+# for not being `scope: always` — the same silent exit an org-scoped order takes
+# on purpose. The two are indistinguishable downstream, and only one of them is
+# somebody's guardrail going missing.
+#
+# Found 2026-08-30 by an adversarial audit, with two fixtures that both declare
+# `scope: always, enforcement: blocking`: one carrying a single comment line
+# above the fence, one with an unquoted colon inside a value. Both vanished from
+# --index, and --check reported "1 order(s) valid" and exited 0.
+#
+# The CI backstop could not have caught it either: it extracts frontmatter with
+# awk (which reads both fixtures happily) and globs -maxdepth 1, so it never
+# enters user/ — the one directory AGENTS.md designates for hand-written orders.
+
+
+def _order_file(root, rel, body):
+    p = root / "protocols" / "standing-orders" / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_a_fence_that_does_not_start_the_file_is_unreadable(tmp_path):
+    _order_file(
+        tmp_path,
+        "user/leading-comment.md",
+        "<!-- a note -->\n---\nname: x\nscope: always\nenforcement: blocking\n---\n# body\n",
+    )
+    assert so.unreadable_orders(tmp_path) == ["protocols/standing-orders/user/leading-comment.md"]
+
+
+def test_frontmatter_that_does_not_parse_is_unreadable(tmp_path):
+    _order_file(
+        tmp_path,
+        "user/typo.md",
+        "---\nname: x\nscope: always\nsummary: Rule: never push a user branch\n---\n# body\n",
+    )
+    assert so.unreadable_orders(tmp_path) == ["protocols/standing-orders/user/typo.md"]
+
+
+def test_a_well_formed_order_is_not_unreadable(tmp_path):
+    _order_file(tmp_path, "user/fine.md", "---\nname: fine\nscope: always\n---\n# body\n")
+    assert so.unreadable_orders(tmp_path) == []
+
+
+def test_a_file_with_no_frontmatter_at_all_is_not_a_finding(tmp_path):
+    # Prose that never claimed to be an order. Demanding frontmatter of it would
+    # be a check about somebody's notes.
+    _order_file(tmp_path, "user/notes.md", "# just prose\n\nno fence anywhere\n")
+    assert so.unreadable_orders(tmp_path) == []
+
+
+def test_readme_and_underscore_files_are_exempt(tmp_path):
+    _order_file(tmp_path, "user/README.md", "<!-- x -->\n---\nbad: [\n---\n")
+    _order_file(tmp_path, "user/_template.md", "<!-- x -->\n---\nbad: [\n---\n")
+    assert so.unreadable_orders(tmp_path) == []
+
+
+def test_the_check_reports_an_unreadable_order(tmp_path):
+    _order_file(tmp_path, "user/typo.md", "---\nscope: always\nsummary: a: b\n---\n")
+    violations = so.check_orders([], so.unreadable_orders(tmp_path))
+    assert violations and "typo.md" in violations[0]
+
+
+def test_the_check_is_silent_when_nothing_is_unreadable():
+    assert so.check_orders([], []) == []
