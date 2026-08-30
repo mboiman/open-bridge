@@ -353,6 +353,10 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     "scripts/check-reachability.py",
     "scripts/tests/test-reachability.sh",
     "scripts/tests/test_reachability.py",
+    # Registered 2026-08-30 with the edge guard. validate.yml runs both.
+    "scripts/check-edges.py",
+    "scripts/tests/test-edges.sh",
+    "scripts/tests/test_edges.py",
 })
 
 

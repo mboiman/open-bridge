@@ -161,7 +161,11 @@ reach · `workflow/` WHAT happens when. Every family below is a route: read the
 folder when its subject comes up, and its `_template.yaml` says what belongs in
 one. `scripts/check-reachability.py` fails CI when a family in the tree is named
 in nothing a session loads, so this list cannot quietly fall behind the tree —
-five families were missing from it when that check was first run.
+five families were missing from it when that check was first run. Entries also
+reference each other (`bridge_refs:`, `*_ref:`, `related_*:`); those references
+are the graph a session walks after the first hop, and
+`scripts/check-edges.py` holds them to resolving (`--neighbours <path>` shows
+one hop both ways, `--fix` rewrites a reference whose task merely moved KIND).
 
 | Family | Read it when |
 |---|---|

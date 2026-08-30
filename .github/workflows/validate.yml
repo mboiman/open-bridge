@@ -124,6 +124,9 @@ jobs:
       - name: Run reachability test suite
         run: bash scripts/tests/test-reachability.sh
 
+      - name: Run edge-guard test suite
+        run: bash scripts/tests/test-edges.sh
+
       # An always-on document earns its size by pointing at the file that owns
       # a mechanic instead of restating it. That trade only holds while the
       # pointer resolves, and a dead pointer fails silently, at the moment
@@ -162,6 +165,16 @@ jobs:
       # demand a finding: a needle that matches nothing softens nothing.
       - name: Prove every reachability needle bites
         run: python3 scripts/check-reachability.py --mutate
+
+      # The third layer. Entries reference each other in ordinary fields —
+      # a customer names its mandant, an account names the task that
+      # provisioned it — and nothing checked that those resolve. On a live
+      # instance 38 of 145 did not, and 20 of those had simply moved KIND:
+      # the documented `mv work/{from}/{slug}` lifecycle, with no reference
+      # pulled along. open-bridge itself declares none, so this is quiet
+      # upstream and load-bearing downstream, which is the correct shape.
+      - name: Every declared reference between entries resolves
+        run: python3 scripts/check-edges.py
 
       # The gate itself, on the live tree. Bytes are exact and offline, so this
       # needs no key and no network; token counts ride along as an estimate and
