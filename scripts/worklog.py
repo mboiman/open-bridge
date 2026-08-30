@@ -62,20 +62,49 @@ def parse_blocks(text: str) -> tuple[str, list[str]]:
     return header, blocks
 
 
-def _sort_key(index_and_block: tuple[int, str]) -> tuple[int, int, int]:
-    """Newest first. An unparseable heading sorts last but is never dropped."""
-    index, block = index_and_block
+def _dated(block: str):
+    """(month, day) for a parseable heading, or None."""
     match = DAY_HEADING.match(block.split("\n", 1)[0])
     if not match:
-        return (0, 0, -index)
-    day, month = int(match.group(1)), int(match.group(2))
-    return (1, month * 100 + day, -index)
+        return None
+    return int(match.group(2)), int(match.group(1))
+
+
+def _sort_key(index_and_block: tuple[int, str]) -> tuple[int, int, int]:
+    """Newest first, among DATED blocks only.
+
+    It used to be asked to rank the unparseable ones too, returning `(0, 0, ...)`
+    for them — which under `reverse=True` sorted them last, and `[:count]` then
+    cut them first. The module's own contract says the opposite, and the two
+    lived four lines apart. Ranking is now only asked of blocks that HAVE a
+    rank; keeping the rest is `recent_blocks`' job.
+    """
+    index, block = index_and_block
+    parsed = _dated(block)
+    day_key = (parsed[0] * 100 + parsed[1]) if parsed else 0
+    return (1 if parsed else 0, day_key, -index)
 
 
 def recent_blocks(blocks: list[str], count: int) -> list[str]:
-    """The `count` most recent day blocks, by heading date, file order ignored."""
-    ordered = sorted(enumerate(blocks), key=_sort_key, reverse=True)
-    return [block for _, block in ordered[: max(0, count)]]
+    """The `count` most recent DATED blocks, plus every undated one.
+
+    "A heading whose date will not parse is kept rather than dropped, because
+    losing a day is worse than including one too many" — the contract at the top
+    of this file. Keeping it means keeping it IN ADDITION: an undated block does
+    not consume one of the `count` slots, or adding a pinned section to the log
+    would silently shorten the working memory by a day and nothing would say so.
+
+    Undated blocks stay in FILE order, because that is the only order they have:
+    a pinned section sits where its author put it, and there is no date to rank
+    it by. Dated blocks stay newest-first as before.
+
+    The slice is measured by the context budget, so a log that grows undated
+    sections trips a declared cap rather than quietly costing every session.
+    """
+    dated = [(i, b) for i, b in enumerate(blocks) if _dated(b)]
+    undated = [b for b in blocks if not _dated(b)]
+    ordered = sorted(dated, key=_sort_key, reverse=True)
+    return undated + [block for _, block in ordered[: max(0, count)]]
 
 
 def render(header: str, blocks: list[str]) -> str:

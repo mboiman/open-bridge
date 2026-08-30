@@ -183,16 +183,57 @@ def _work_candidates(root: Path, slug: str, tail: list[str]) -> list[str]:
     return out
 
 
+def _tail_match(root: Path, target: str):
+    """A repo path ENDING in `target`, or None.
+
+    The whole tail, never the basename alone. `README.md` exists all over a
+    Bridge, and matching on the name would call every stale reference "moved"
+    and point it somewhere arbitrary. `channels/telegram.yaml` matching
+    `infra/channels/telegram.yaml` is a real move; `README.md` matching one of
+    fourteen is a coin toss.
+    """
+    name = target.rsplit("/", 1)[-1]
+    for path in root.rglob(name):
+        # `.bridge/workspaces/` holds CLONES of other repositories. A hit there
+        # resolves in somebody else's tree, which is the one thing this module
+        # refuses to judge — and calling it a move would rewrite a reference
+        # that is correct as written into a path that exists only while that
+        # workspace happens to be checked out.
+        if not path.is_file() or {".git", ".bridge"} & set(path.parts):
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel != target and rel.endswith("/" + target):
+            return rel
+    return None
+
+
 def classify(repo_root, target: str) -> tuple[str, str | None]:
     """ok | moved | external | dead, with the live path when it moved."""
     root = Path(repo_root)
+    # An absolute or home-relative path IS the neighbour-checkout case, and it
+    # used to be the one this missed: `"/Users/…".split("/")[0]` is `""`, and
+    # `root / ""` is the root itself, which is always a directory — so it fell
+    # past the escape hatch it was meant to take and came out `dead`.
+    if target.startswith("/") or target.startswith("~"):
+        return "external", None
+    if (root / target).exists():
+        return "ok", None
+
+    # Before excusing anything: does this file live somewhere else in THIS tree?
+    # The cluster-wrapper reorg moved channels/ backups/ remotes/ under infra/
+    # and calendars/ contexts/ projects/ under workflow/, so a pre-reorg path
+    # has a first segment that is no longer a repo directory — and the old rule
+    # called exactly that "external" and excused it. It is the rot this guard
+    # exists to find, and it was hiding in the guard's own escape hatch.
+    moved = _tail_match(root, target)
+    if moved:
+        return "moved", moved
+
     head = target.split("/")[0]
     if not (root / head).is_dir():
         # A neighbour checkout. Judging it would be judging someone else's
         # tree, and the third false alarm is when people stop reading output.
         return "external", None
-    if (root / target).exists():
-        return "ok", None
 
     work = _work_slug(target)
     if work:
