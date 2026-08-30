@@ -176,6 +176,13 @@ jobs:
       - name: Every declared reference between entries resolves
         run: python3 scripts/check-edges.py
 
+      # The hook is the only enforcement a `user/*` branch ever gets, because
+      # this workflow triggers on `main` and no instance works there. Its gate
+      # is a shell &&/|| chain, which is the kind that reads correct and
+      # behaves otherwise, so its three branches per guard are asserted.
+      - name: The pre-commit always-on gate keeps its contract
+        run: sh scripts/tests/test-precommit-guards.sh
+
       # The gate itself, on the live tree. Bytes are exact and offline, so this
       # needs no key and no network; token counts ride along as an estimate and
       # never fail the build. A new always-on file that nobody declared fails
