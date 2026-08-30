@@ -263,7 +263,7 @@ def test_fix_rewrites_a_moved_reference_and_keeps_the_comments(tmp_path):
         ),
         "work/done/2026-05/moved/STATUS.md": "x\n",
     })
-    changed = edges.fix_moved(tmp_path)
+    changed, _ = edges.fix_moved(tmp_path)
     text = (tmp_path / "identity/mandants/a.yaml").read_text(encoding="utf-8")
 
     assert changed == 1
@@ -275,7 +275,7 @@ def test_fix_rewrites_a_moved_reference_and_keeps_the_comments(tmp_path):
 def test_fix_leaves_dead_references_alone(tmp_path):
     """A dead edge is a decision, not a typo. Only `moved` is mechanical."""
     _tree(tmp_path, {"identity/mandants/a.yaml": "x: identity/personas/nope.yaml\n"})
-    assert edges.fix_moved(tmp_path) == 0
+    assert edges.fix_moved(tmp_path)[0] == 0
 
 
 def test_fix_is_idempotent(tmp_path):
@@ -283,8 +283,8 @@ def test_fix_is_idempotent(tmp_path):
         "identity/mandants/a.yaml": "task_ref: work/tasks/moved/STATUS.md\n",
         "work/streams/moved/STATUS.md": "x\n",
     })
-    assert edges.fix_moved(tmp_path) == 1
-    assert edges.fix_moved(tmp_path) == 0
+    assert edges.fix_moved(tmp_path)[0] == 1
+    assert edges.fix_moved(tmp_path)[0] == 0
 
 
 # --------------------------------------------------------------- the CLI --
@@ -533,3 +533,64 @@ def test_a_hit_inside_a_cloned_workspace_is_not_a_move(tmp_path):
     clone.mkdir(parents=True)
     (clone / "index.md").write_text("x\n", encoding="utf-8")
     assert edges.classify(tmp_path, "incidents/index.md")[0] == "external"
+
+
+# ------------------------------------------ --fix must honour exceptions --
+#
+# `check()` and `stats()` both call `load_exceptions()`. `fix_moved()` did not.
+# So a path an instance had explicitly declared NOT to be repo-relative, with a
+# written reason, was rewritten as if it were.
+#
+# It happened. `infra/channels/voice-news.yaml :: pipeline.steps` carried the
+# reason "Laufzeitpfade der ausgerollten Pipeline auf macminim4, relativ zum
+# Arbeitsverzeichnis des Dienstes" — runtime paths of a deployed pipeline,
+# relative to the SERVICE's working directory. The tail match found the sources
+# under work/done/… and `--fix` rewrote `bin/generate_voice.py` into a repo path
+# the service cannot resolve. A working config, broken by its own guard.
+#
+# Skipped LOUDLY, never silently: a fix run that declines to touch something has
+# to say so, or the next reader assumes it had nothing to decline.
+
+
+def _excepted_tree(tmp_path):
+    (tmp_path / "infra" / "channels").mkdir(parents=True)
+    (tmp_path / "infra" / "channels" / "ch.yaml").write_text(
+        "id: ch\npipeline:\n  steps:\n    - script: bin/run.py\n", encoding="utf-8"
+    )
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "bin").mkdir()
+    (tmp_path / "work" / "bin" / "run.py").write_text("x\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_fix_leaves_an_excepted_edge_alone(tmp_path):
+    _excepted_tree(tmp_path)
+    (tmp_path / "edges.yaml").write_text(
+        "exceptions:\n"
+        "  - path: infra/channels/ch.yaml\n"
+        "    keys: [pipeline.steps]\n"
+        "    reason: runtime paths, relative to the service working directory\n",
+        encoding="utf-8",
+    )
+    edges.fix_moved(tmp_path)
+    assert "script: bin/run.py" in (tmp_path / "infra" / "channels" / "ch.yaml").read_text()
+
+
+def test_fix_still_rewrites_an_unexcepted_edge(tmp_path):
+    _excepted_tree(tmp_path)
+    edges.fix_moved(tmp_path)
+    assert "work/bin/run.py" in (tmp_path / "infra" / "channels" / "ch.yaml").read_text()
+
+
+def test_fix_reports_what_it_declined_to_touch(tmp_path):
+    _excepted_tree(tmp_path)
+    (tmp_path / "edges.yaml").write_text(
+        "exceptions:\n"
+        "  - path: infra/channels/ch.yaml\n"
+        "    keys: [pipeline.steps]\n"
+        "    reason: runtime paths\n",
+        encoding="utf-8",
+    )
+    changed, skipped = edges.fix_moved(tmp_path)
+    assert changed == 0
+    assert skipped and "pipeline.steps" in skipped[0]
