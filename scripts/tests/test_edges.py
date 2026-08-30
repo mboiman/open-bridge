@@ -290,8 +290,31 @@ def test_fix_is_idempotent(tmp_path):
 # --------------------------------------------------------------- the CLI --
 
 
-def test_main_is_green_on_this_repo():
-    assert edges.main([]) == 0
+def test_main_runs_on_this_repo_and_agrees_with_itself():
+    """A SMOKE test on real content, not a cleanliness gate.
+
+    It used to assert the exit code was 0, which is a GATE and not a contract:
+    it says this particular tree has no dead reference. In open-bridge that is
+    trivially true, because CORE ships no instance YAML and therefore declares
+    zero edges. In a downstream instance it is false the moment somebody
+    references a document they have not written yet — and then the whole CORE
+    contract suite goes red for a content decision that has nothing to do with
+    whether this code works. Measured on one: one legitimate finding, 913 other
+    tests passing, suite red.
+
+    The gate exists and belongs where it already is: `validate.yml` runs
+    `python3 scripts/check-edges.py` as its own step, so a real finding still
+    fails CI, and it fails it with a name that says what broke.
+
+    What survives here is what a contract test can honestly assert about a live
+    tree: the CLI runs, and its exit code AGREES with its findings. That still
+    catches the crash class this file was written after (a parser that walked
+    real YAML and reported 54 findings, none of them real), and it stays green
+    while an instance decides what to do about a reference.
+    """
+    findings = edges.check(edges.HERE.parent)
+    assert edges.main([]) == (1 if findings else 0)
+    assert all(isinstance(f, str) and f for f in findings)
 
 
 def test_main_returns_one_on_a_finding(tmp_path):

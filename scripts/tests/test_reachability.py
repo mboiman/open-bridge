@@ -244,17 +244,30 @@ def test_the_surface_includes_what_a_phase_one_command_prints(tmp_path):
 # --------------------------------------------------------------------- CLI --
 
 
-def test_cli_is_green_on_this_repo():
-    """The live tree, which is the only run that matters.
+def test_cli_runs_on_this_repo_and_agrees_with_itself():
+    """The live tree, which is the only run that matters — as a SMOKE test.
 
-    It found two families on its first outing — `identity/contracts/` and
-    `infra/instances/`, both shipped, both named nowhere — and neither was
+    It found two families on its first outing, `identity/contracts/` and
+    `infra/instances/`, both shipped and both named nowhere, and neither was
     caused by the cuts that came before it. They had simply never been named.
+    That is the value worth keeping: the check meets real content here and
+    nowhere else in this file.
+
+    What is NOT worth keeping is the old assertion that the exit code is zero.
+    That is a gate on THIS tree, and a downstream instance trips it the moment
+    it ships a family it has not pointed at yet — turning the CORE contract
+    suite red for a content decision. `validate.yml` already runs
+    `check-reachability.py` and `--mutate` as their own steps, so the gate is
+    not lost; it just stops being confused with the contract.
     """
     result = subprocess.run(
         [sys.executable, str(CLI)], capture_output=True, text=True, cwd=REPO_ROOT
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode in (0, 1), result.stdout + result.stderr
+    # Exit code and output have to agree, which is the part a live tree can
+    # falsify: a check that exits 1 while naming nothing is broken, and so is
+    # one that exits 0 after printing findings.
+    assert bool(result.returncode) == ("finding(s)" in result.stderr)
 
 
 def test_cli_exits_non_zero_on_a_finding(tmp_path):
