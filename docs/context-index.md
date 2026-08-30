@@ -135,6 +135,23 @@ The suite also runs all three content guards over **every YAML file in the
 repo** on each CI run. The fixture is what the author imagined; the tree is
 what actually exists, and the difference has been this feature's whole yield.
 
+## The other two checks in this family
+
+`context-budget.yaml` says how much the always-on layer may weigh and this file
+says how a large source is cut down. Two more guards cover what neither can see,
+and CI runs both:
+
+| Check | Question |
+|---|---|
+| `scripts/check-reachability.py` | does a session still KNOW the body is there — every config family named by its path in the routing surface, plus eleven scenarios walked end to end |
+| `scripts/check-edges.py` | do the references BETWEEN entries still resolve — `ok` / `moved` (mechanical, `--fix`) / `external` / `dead`, with per-instance exceptions declared in `edges.yaml`, each carrying a reason |
+
+The reachability check runs against the **routing** surface, which is the
+always-on layer minus `work/` and the log slice. Work state is measured to the
+byte by the budget and cannot satisfy a routing claim: a family named only in a
+work-log row is unreachable again within days, and the guard would stay green
+throughout.
+
 ## The cost
 
 An `@`-import is resident for the whole session; a Phase 1 read is ordinary

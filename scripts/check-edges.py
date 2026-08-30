@@ -7,6 +7,9 @@
     python3 scripts/check-edges.py --neighbours <path>      # one hop, both ways
     python3 scripts/check-edges.py --fix                    # rewrite the moved ones
 
+Exceptions live in an optional `edges.yaml` at the repo root, each with a
+reason. See `load_exceptions`.
+
 The card layer says WHAT exists. The reachability contract says a session can
 still find it. Neither says anything about the third thing a Bridge is made of:
 the references BETWEEN entries. A customer names its mandant, a mandant names a
@@ -71,6 +74,44 @@ SCAN_GLOBS = (
 # Where a work item can live. The KIND model in AGENTS.md: a finite task, a
 # long-runner, or closed under a month.
 WORK_BUCKETS = ("work/tasks", "work/streams")
+
+
+EXCEPTION_FILE = "edges.yaml"
+
+
+def load_exceptions(repo_root) -> list[dict]:
+    """Per-instance exceptions, each carrying its reason.
+
+    A checker over free-form YAML cannot know that `bin/generate_voice.py` is a
+    runtime path inside a deployed pipeline, or that everything under a
+    `family_repo:` key lives in a different checkout. On a live instance those
+    two shapes were 7 of 18 findings, and a check whose output is mostly
+    unactionable is a check people stop reading.
+
+    So the instance says so, once, WITH A REASON — and the reason is the point.
+    It turns unknowns into known things. An exception without one is a finding,
+    because an undocumented exception is indistinguishable from forgetting, and
+    an exception that no longer excuses anything is a finding too, because that
+    is how a list of exceptions becomes a list of lies.
+    """
+    if yaml is None:  # pragma: no cover
+        return []
+    path = Path(repo_root) / EXCEPTION_FILE
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return list(data.get("exceptions") or [])
+
+
+def _excused(exceptions: list[dict], rel: str, key: str):
+    """The exception covering this edge, or None."""
+    for entry in exceptions:
+        if entry.get("path") != rel:
+            continue
+        for prefix in entry.get("keys") or []:
+            if key == prefix or key.startswith(prefix + "."):
+                return entry
+    return None
 
 
 def _skip(rel: str) -> bool:
@@ -163,9 +204,21 @@ def classify(repo_root, target: str) -> tuple[str, str | None]:
 
 
 def check(repo_root) -> list[str]:
+    exceptions = load_exceptions(repo_root)
+    used = set()
     findings = []
     for rel, key, target in iter_edges(repo_root):
         state, live = classify(repo_root, target)
+        excuse = _excused(exceptions, rel, key)
+        if excuse is not None and state in ("dead", "moved"):
+            used.add(id(excuse))
+            if not str(excuse.get("reason") or "").strip():
+                findings.append(
+                    f"{rel} :: {key} is excepted in {EXCEPTION_FILE} with no "
+                    f"reason; an undocumented exception is indistinguishable "
+                    f"from forgetting"
+                )
+            continue
         if state == "moved":
             findings.append(
                 f"{rel} :: {key} -> {target} moved; it now lives at {live} "
@@ -173,13 +226,25 @@ def check(repo_root) -> list[str]:
             )
         elif state == "dead":
             findings.append(f"{rel} :: {key} -> {target} is dead, nothing at that path")
+
+    for entry in exceptions:
+        if id(entry) not in used:
+            findings.append(
+                f"{entry.get('path')} :: {entry.get('keys')} is excepted in "
+                f"{EXCEPTION_FILE} and excuses nothing — every edge it names "
+                f"resolves, so the exception is stale"
+            )
     return findings
 
 
 def stats(repo_root) -> Counter:
+    exceptions = load_exceptions(repo_root)
     counter: Counter = Counter()
-    for _, _, target in iter_edges(repo_root):
-        counter[classify(repo_root, target)[0]] += 1
+    for rel, key, target in iter_edges(repo_root):
+        state = classify(repo_root, target)[0]
+        if state in ("dead", "moved") and _excused(exceptions, rel, key):
+            state = "declared"
+        counter[state] += 1
     return counter
 
 
@@ -233,7 +298,7 @@ def main(argv=None) -> int:
         counter = stats(root)
         total = sum(counter.values())
         print(f"check-edges: {total} declared edge(s)")
-        for state in ("ok", "moved", "dead", "external"):
+        for state in ("ok", "moved", "dead", "external", "declared"):
             if counter[state]:
                 print(f"  {counter[state]:>4}  {state}")
         return 0

@@ -90,6 +90,14 @@ USER_PATTERNS = [
     # checkup skill. So the `_`-companions are USER here too, which is why this
     # sits in the pattern list rather than relying on the `_`-prefix rule.
     r"^workflow/checks/",
+    # Declarations ABOUT the local tree: which files this instance has, which
+    # of their references are excused and why. Classified `core` they would
+    # ride a promote upward carrying one instance's directory layout into a
+    # public repo, and nothing would say so. `context-budget.user.yaml` is
+    # gitignored by default and would have been missed the day an instance
+    # tracks it — which a private instance using GitHub as offsite backup does.
+    r"^edges\.yaml$",
+    r"^context-budget\.user\.yaml$",
     r"^workspaces\.lock\.yaml$",                      # sibling of overlays.lock.yaml above
     # Per-tier INVERTED: these exist on both sides and must never be copied either
     # way. .bridge-origin in particular tells the push guard whether the origin is

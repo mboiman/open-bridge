@@ -317,3 +317,120 @@ def test_main_neighbours_prints_both_directions(tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert "identity/mandants/a.yaml" in out
+
+
+# ---------------------------------------------------- declared exceptions --
+#
+# A checker over free-form YAML cannot know that `bin/generate_voice.py` is a
+# runtime path inside a deployed pipeline, or that everything under a
+# `family_repo:` key lives in a different checkout. On a live instance those
+# two shapes were 7 of 18 "dead" findings — and a check whose output is mostly
+# unactionable is a check people stop reading.
+#
+# So the instance says so, once, WITH A REASON. The reason is the point: it
+# turns eighteen unknowns into eighteen known things.
+
+
+def test_an_exception_silences_a_matching_finding(tmp_path):
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": "pipeline:\n  steps:\n    - script: bin/x.py\n",
+        # `bin/` has to EXIST, or the path classifies as external and there is
+        # nothing for the exception to excuse.
+        "bin/other.py": "x = 1\n",
+        "edges.yaml": (
+            "exceptions:\n"
+            "  - path: infra/channels/c.yaml\n"
+            "    keys: [pipeline.steps]\n"
+            "    reason: runtime paths inside the deployed pipeline\n"
+        ),
+    })
+    assert edges.check(tmp_path) == []
+
+
+def test_an_exception_does_not_silence_a_different_key(tmp_path):
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": (
+            "pipeline:\n  steps:\n    - script: bin/x.py\n"
+            "other_ref: infra/remotes/gone.yaml\n"
+        ),
+        "infra/remotes/r.yaml": "x: 1\n",
+        "edges.yaml": (
+            "exceptions:\n"
+            "  - path: infra/channels/c.yaml\n"
+            "    keys: [pipeline.steps]\n"
+            "    reason: runtime paths\n"
+        ),
+    })
+    findings = edges.check(tmp_path)
+
+    assert any("gone.yaml" in f for f in findings)
+    assert not any("bin/x.py" in f for f in findings)
+
+
+def test_an_exception_does_not_silence_a_different_file(tmp_path):
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": "a: infra/remotes/gone.yaml\n",
+        "infra/channels/d.yaml": "a: infra/remotes/gone.yaml\n",
+        "infra/remotes/r.yaml": "x: 1\n",
+        "edges.yaml": (
+            "exceptions:\n"
+            "  - path: infra/channels/c.yaml\n"
+            "    keys: [a]\n"
+            "    reason: whatever\n"
+        ),
+    })
+    findings = edges.check(tmp_path)
+
+    assert len(findings) == 1
+    assert "infra/channels/d.yaml" in findings[0]
+
+
+def test_an_exception_without_a_reason_is_itself_a_finding(tmp_path):
+    """An undocumented exception is indistinguishable from forgetting.
+
+    The whole value of declaring one is the sentence next to it; without that
+    the list becomes a place where findings go to be forgotten quietly.
+    """
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": "a: infra/remotes/gone.yaml\n",
+        "infra/remotes/r.yaml": "x: 1\n",
+        "edges.yaml": "exceptions:\n  - path: infra/channels/c.yaml\n    keys: [a]\n",
+    })
+    findings = edges.check(tmp_path)
+
+    assert any("reason" in f for f in findings), findings
+
+
+def test_an_exception_for_something_that_resolves_is_a_finding(tmp_path):
+    """An exception that no longer excuses anything is stale, and stale
+    exceptions are how a list of them turns into a list of lies."""
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": "a: infra/remotes/r.yaml\n",
+        "infra/remotes/r.yaml": "x: 1\n",
+        "edges.yaml": (
+            "exceptions:\n"
+            "  - path: infra/channels/c.yaml\n"
+            "    keys: [a]\n"
+            "    reason: no longer needed\n"
+        ),
+    })
+    assert any("excuses nothing" in f for f in edges.check(tmp_path))
+
+
+def test_no_exception_file_is_fine(tmp_path):
+    _tree(tmp_path, {"identity/personas/p.yaml": "x: 1\n"})
+    assert edges.check(tmp_path) == []
+
+
+def test_stats_counts_declared_exceptions_separately(tmp_path):
+    _tree(tmp_path, {
+        "infra/channels/c.yaml": "a: bin/x.py\n",
+        "bin/other.py": "x = 1\n",
+        "edges.yaml": (
+            "exceptions:\n"
+            "  - path: infra/channels/c.yaml\n"
+            "    keys: [a]\n"
+            "    reason: runtime path\n"
+        ),
+    })
+    assert edges.stats(tmp_path)["declared"] == 1
