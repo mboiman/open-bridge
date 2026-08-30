@@ -563,3 +563,30 @@ def test_an_indexed_item_that_is_absent_is_still_not_a_failure(tree):
     rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
 
     assert next(r for r in rows if r["path"] == "ecosystem.yaml")["state"] == "absent"
+
+
+def test_init_writes_what_the_shipped_schema_requires(tree):
+    """`--init` has to produce a file this repo's own schema accepts.
+
+    It did not. The overlay was written with `items:` alone while
+    `docs/schemas/context-budget.schema.yaml` requires `schema_version` as
+    well, so `validate-bridge.py` rejected it — and nobody saw that for a day,
+    because the file is gitignored by default and no validator ever reached it.
+    It surfaced the moment one instance started tracking it.
+
+    The required keys are read FROM the schema rather than listed here, so this
+    cannot go stale the way the thing it is guarding did.
+    """
+    import yaml as _yaml
+
+    mc.main(["--repo-root", str(tree), "--init"])
+    written = _yaml.safe_load(
+        (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    )
+    schema = _yaml.safe_load(
+        (Path(mc.__file__).resolve().parents[1]
+         / "docs/schemas/context-budget.schema.yaml").read_text(encoding="utf-8")
+    )
+
+    for key in schema.get("required", []):
+        assert key in written, f"--init omits {key!r}, which the schema requires"

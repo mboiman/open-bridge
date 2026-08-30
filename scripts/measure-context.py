@@ -469,6 +469,12 @@ def write_user_budget(repo_root: Path, rows: list[dict], force: bool = False) ->
         "# nothing. Add `max_bytes:` to the ones whose growth you want to hear",
         "# about, which is the entire value of the file.",
         "",
+        "# The shipped schema (docs/schemas/context-budget.schema.yaml) validates",
+        "# this overlay as well as the CORE file, and requires this key. It was",
+        "# missing here for a day, unnoticed, because the file is gitignored by",
+        "# default and no validator ever reached it.",
+        "schema_version: 1",
+        "",
         "items:",
     ]
     for path in undeclared:
