@@ -314,15 +314,20 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
     return rows
 
 
-def always_on_text(repo_root: Path, budget: dict) -> str:
-    """Everything a session loads before it answers, concatenated.
+def always_on_parts(repo_root: Path, budget: dict) -> dict[str, str]:
+    """Everything a session loads before it answers, KEYED BY WHERE IT CAME FROM.
 
     Same discovery as `collect_rows`, on purpose. A second definition of
     always-on would let something claim residency in a file no session reads,
     which is the failure the budget exists to make impossible.
+
+    Keyed rather than concatenated so a caller can say WHICH file carries a
+    thing, and so a mutation battery can remove one contributor at a time. A
+    battery over the concatenation only proves that a substring test is a
+    substring test.
     """
     root = Path(repo_root)
-    parts = []
+    parts: dict[str, str] = {}
     for row in collect_rows(root, budget, "bytes"):
         path = row["path"]
         if path.startswith(CMD_PREFIX):
@@ -335,8 +340,13 @@ def always_on_text(repo_root: Path, budget: dict) -> str:
                 else None
             )
         if text:
-            parts.append(text)
-    return "\n".join(parts)
+            parts[path] = text
+    return parts
+
+
+def always_on_text(repo_root: Path, budget: dict) -> str:
+    """The same surface as one string."""
+    return "\n".join(always_on_parts(repo_root, budget).values())
 
 
 # -------------------------------------------------------------- the report --

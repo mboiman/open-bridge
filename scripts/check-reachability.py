@@ -147,16 +147,58 @@ def load_scenarios(repo_root) -> list[tuple[str, list[str], str]]:
 # ---------------------------------------------------------------- checks --
 
 
-def surface_of(repo_root) -> str:
+def surface_parts(repo_root) -> dict:
     meter = _meter()
-    return meter.always_on_text(repo_root, meter.load_budget(repo_root))
+    return meter.always_on_parts(repo_root, meter.load_budget(repo_root))
+
+
+def surface_of(repo_root) -> str:
+    return "\n".join(surface_parts(repo_root).values())
+
+
+# Contributors that are always-on but are WORK STATE, not routing: the log
+# slice and the board. They belong in the budget — every byte is paid — and
+# they must not satisfy this check.
+#
+# Caught on a live instance, where `identity/vehicles/` passed because a
+# work-log row written that morning happened to name it. The row leaves the
+# three-block slice within days and the family goes unreachable again, with the
+# guard green throughout. A pointer that expires is not a pointer.
+WORK_STATE = ("work/", "cmd:python3 scripts/worklog.py")
+
+
+def routing_surface(repo_root) -> str:
+    """The durable half of the always-on surface: what routes, not what happened."""
+    return "\n".join(
+        text
+        for path, text in surface_parts(repo_root).items()
+        if not path.startswith(WORK_STATE)
+    )
+
+
+def named_in(repo_root, family: str, parts: dict | None = None) -> list[str]:
+    """Which always-on contributors mention this family.
+
+    A finding is more useful when it can say where the last mention lives, and
+    the mutation battery needs it: removing one contributor at a time is what
+    separates a real needle from a substring test talking to itself.
+    """
+    parts = surface_parts(repo_root) if parts is None else parts
+    return [
+        path
+        for path, text in parts.items()
+        if family in text and not path.startswith(WORK_STATE)
+    ]
 
 
 def check(repo_root, surface: str | None = None) -> list[str]:
-    """Families the always-on surface does not name."""
-    surface = surface_of(repo_root) if surface is None else surface
+    """Families the ROUTING surface does not name."""
+    surface = routing_surface(repo_root) if surface is None else surface
     return [
-        f"{family}: exists in the tree and is named nowhere a session loads"
+        f"{family}: exists in the tree and is named nowhere a session loads. "
+        f"An instance names its OWN families in an eager standing order under "
+        f"protocols/standing-orders/user/ — AGENTS.md is CORE and editing it "
+        f"downstream conflicts on every merge."
         for family in discover_families(repo_root)
         if family not in surface
     ]
@@ -165,7 +207,7 @@ def check(repo_root, surface: str | None = None) -> list[str]:
 def check_scenarios(repo_root, surface: str | None = None) -> list[str]:
     """Walk each scenario end to end: vocabulary, route, content."""
     root = Path(repo_root)
-    surface = surface_of(repo_root) if surface is None else surface
+    surface = routing_surface(repo_root) if surface is None else surface
     findings = []
 
     for asks, vocabulary, family in load_scenarios(repo_root):
@@ -194,22 +236,29 @@ def check_scenarios(repo_root, surface: str | None = None) -> list[str]:
 
 
 def mutate(repo_root) -> list[str]:
-    """Prove the contract BITES: hide each pointer in turn, expect a finding.
+    """Prove the contract BITES, one CONTRIBUTOR at a time.
 
-    A guard nobody has watched fail is a guard nobody knows the shape of. This
-    is the same needle discipline the workload and remote suites use, and it
-    has already caught two hollow needles elsewhere in this repo.
+    For each family, drop the always-on files that mention it and require a
+    finding. That is the version worth running: it proves the surface assembly
+    actually reads those files. A battery over the concatenated string would
+    only prove that a substring test is a substring test — it would stay green
+    if `always_on_parts` silently stopped including AGENTS.md.
     """
-    real = surface_of(repo_root)
+    parts = surface_parts(repo_root)
     dead = []
     for family in discover_families(repo_root):
-        if family not in real:
+        carriers = named_in(repo_root, family, parts)
+        if not carriers:
             continue  # already a live finding; the contract check reports it
-        hidden = real.replace(family, "«removed»")
-        if not any(family in f for f in check(repo_root, surface=hidden)):
+        without = "\n".join(
+            text
+            for path, text in parts.items()
+            if path not in carriers and not path.startswith(WORK_STATE)
+        )
+        if not any(family in f for f in check(repo_root, surface=without)):
             dead.append(
-                f"{family}: removing every mention of it produced no finding — "
-                f"this needle is hollow and proves nothing"
+                f"{family}: dropping {carriers} produced no finding — this "
+                f"needle is hollow and proves nothing"
             )
     return dead
 

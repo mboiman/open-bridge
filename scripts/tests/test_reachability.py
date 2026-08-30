@@ -271,3 +271,207 @@ def test_cli_exits_non_zero_on_a_finding(tmp_path):
 
     assert result.returncode == 1
     assert "infra/remotes/" in (result.stdout + result.stderr)
+
+
+# ------------------------------------------------- routing is not work state --
+
+
+def test_a_mention_in_the_work_log_does_not_count(tmp_path):
+    """The log slice is part of the always-on surface and is NOT routing.
+
+    Caught on a live instance: `identity/vehicles/` passed this check because
+    a work-log row written that morning happened to name it. The row scrolls
+    out of the three-block slice within days and the family goes unreachable
+    again, with the guard still green the whole time. A pointer that expires
+    is not a pointer.
+    """
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "Nothing about vehicles here.\n",
+        "identity/vehicles/_template.yaml": "a: 1\n",
+        "work/board.md": "## Doing\n\n- something about identity/vehicles/\n",
+        "context-budget.yaml": MINIMAL_BUDGET
+        + "  work/board.md:\n    source: phase1\n",
+    })
+    findings = reach.check(tmp_path)
+
+    assert any("identity/vehicles/" in f for f in findings), findings
+
+
+def test_the_routing_surface_excludes_work_state(tmp_path):
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "MARKER-ROUTING\n",
+        "work/board.md": "MARKER-WORKSTATE\n",
+        "context-budget.yaml": MINIMAL_BUDGET
+        + "  work/board.md:\n    source: phase1\n",
+    })
+    routing = reach.routing_surface(tmp_path)
+
+    assert "MARKER-ROUTING" in routing
+    assert "MARKER-WORKSTATE" not in routing
+
+
+def test_work_state_still_counts_as_always_on_for_the_budget(tmp_path):
+    """Only THIS check ignores it. The budget still measures every byte."""
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "x\n",
+        "work/board.md": "MARKER-WORKSTATE\n",
+        "context-budget.yaml": MINIMAL_BUDGET
+        + "  work/board.md:\n    source: phase1\n",
+    })
+    assert "MARKER-WORKSTATE" in mc.always_on_text(tmp_path, mc.load_budget(tmp_path))
+
+
+# ------------------------------------------------------------ scenarios --
+#
+# The simulation half, and it had NO direct test until a coverage run said so:
+# 41 % on this file while the index library sat at 96 %. `check_scenarios`,
+# `load_scenarios` and `mutate` were all reached only through a subprocess,
+# which is a behavioural test the coverage tool cannot see and, worse, one
+# that never exercised the failing branches at all.
+
+def _scenario_tree(tmp_path, agents_md: str) -> Path:
+    return _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": agents_md,
+        "infra/remotes/_template.yaml": "a: 1\n",
+        "context-budget.yaml": MINIMAL_BUDGET,
+    })
+
+
+def test_a_scenario_passes_when_word_and_route_are_both_resident(tmp_path):
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    assert not any("infra/remotes/" in f for f in reach.check_scenarios(tmp_path))
+
+
+def test_a_scenario_fails_when_the_vocabulary_is_missing(tmp_path):
+    """Route resident, WORD absent: nothing would trigger the lookup.
+
+    Written with an instance scenario on purpose. Every CORE scenario's word is
+    a substring of its own path (`remote` inside `infra/remotes/`), so a CORE
+    scenario cannot separate the two branches — a first draft of this test
+    ended in `assert isinstance(findings, list)`, which cannot fail.
+    """
+    _scenario_tree(tmp_path, "The inventory lives in `infra/remotes/`.\n")
+    (tmp_path / "reachability-scenarios.yaml").write_text(
+        "scenarios:\n"
+        "  - asks: wake the office box\n"
+        "    vocabulary: [wakeonlan]\n"
+        "    family: infra/remotes/\n",
+        encoding="utf-8",
+    )
+    findings = reach.check_scenarios(tmp_path)
+
+    assert any("wakeonlan" in f for f in findings), findings
+    assert not any("know to look and not where" in f for f in findings), (
+        "the route IS resident; only the vocabulary is missing"
+    )
+
+
+def test_a_scenario_fails_when_the_route_is_missing(tmp_path):
+    """Word resident, route absent: a session knows to look and not where."""
+    _scenario_tree(tmp_path, "Ask about a remote when a machine comes up.\n")
+    findings = reach.check_scenarios(tmp_path)
+
+    assert any("infra/remotes/" in f and "not" in f for f in findings), findings
+
+
+def test_a_scenario_fails_when_the_route_resolves_to_an_empty_directory(tmp_path):
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "A remote machine lives in `infra/remotes/`.\n",
+        "context-budget.yaml": MINIMAL_BUDGET,
+    })
+    (tmp_path / "infra" / "remotes").mkdir(parents=True)
+    findings = reach.check_scenarios(tmp_path)
+
+    assert any("empty directory" in f for f in findings), findings
+
+
+def test_a_scenario_for_a_family_this_instance_lacks_is_skipped(tmp_path):
+    """Demanding a family an instance never enabled is a check about a Bridge
+    that does not exist."""
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "nothing\n",
+        "context-budget.yaml": MINIMAL_BUDGET,
+    })
+    assert not any("workflow/calendars/" in f for f in reach.check_scenarios(tmp_path))
+
+
+def test_an_instance_adds_its_own_scenarios(tmp_path):
+    """CORE cannot know a machine's name or a customer's; the instance can."""
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    (tmp_path / "reachability-scenarios.yaml").write_text(
+        "scenarios:\n"
+        "  - asks: repair the office box\n"
+        "    vocabulary: [officebox]\n"
+        "    family: infra/remotes/\n",
+        encoding="utf-8",
+    )
+    findings = reach.check_scenarios(tmp_path)
+
+    assert any("officebox" in f for f in findings), findings
+
+
+def test_scenarios_without_an_instance_file_are_just_the_core_ones(tmp_path):
+    _scenario_tree(tmp_path, "x\n")
+    assert reach.load_scenarios(tmp_path) == list(reach.SCENARIOS)
+
+
+# ------------------------------------------------------------- the battery --
+
+
+def test_the_battery_is_silent_when_every_needle_bites(tmp_path):
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    assert reach.mutate(tmp_path) == []
+
+
+def test_the_battery_removes_a_contributor_not_a_substring(tmp_path):
+    """The version that earns its place.
+
+    A battery over the concatenated surface only proves a substring test is a
+    substring test: it would stay green if `always_on_parts` silently stopped
+    reading AGENTS.md. Removing the CONTRIBUTOR proves the assembly reads it.
+    """
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    carriers = reach.named_in(tmp_path, "infra/remotes/")
+
+    assert "AGENTS.md" in carriers, carriers
+
+
+def test_a_family_named_only_in_work_state_has_no_carrier(tmp_path):
+    _tree(tmp_path, {
+        "CLAUDE.md": "@AGENTS.md\n",
+        "AGENTS.md": "nothing\n",
+        "infra/remotes/_template.yaml": "a: 1\n",
+        "work/board.md": "about infra/remotes/ today\n",
+        "context-budget.yaml": MINIMAL_BUDGET + "  work/board.md:\n    source: phase1\n",
+    })
+    assert reach.named_in(tmp_path, "infra/remotes/") == []
+
+
+# -------------------------------------------------------------------- CLI --
+
+
+def test_main_returns_zero_on_a_healthy_tree(tmp_path):
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    assert reach.main(["--repo-root", str(tmp_path)]) == 0
+
+
+def test_main_returns_one_on_a_finding(tmp_path):
+    _scenario_tree(tmp_path, "nothing\n")
+    assert reach.main(["--repo-root", str(tmp_path)]) == 1
+
+
+def test_main_families_lists_and_succeeds(tmp_path, capsys):
+    _scenario_tree(tmp_path, "x\n")
+    assert reach.main(["--repo-root", str(tmp_path), "--families"]) == 0
+    assert "infra/remotes/" in capsys.readouterr().out
+
+
+def test_main_mutate_succeeds_on_a_healthy_tree(tmp_path):
+    _scenario_tree(tmp_path, "A remote machine lives in `infra/remotes/`.\n")
+    assert reach.main(["--repo-root", str(tmp_path), "--mutate"]) == 0
