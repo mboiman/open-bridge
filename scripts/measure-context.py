@@ -47,6 +47,7 @@ from lib.standing_orders import (  # noqa: E402  (path setup must precede this i
     collect_orders,
     eager_paths,
 )
+from lib.context_index import render_card  # noqa: E402
 
 CORE_BUDGET = "context-budget.yaml"
 USER_BUDGET = "context-budget.user.yaml"
@@ -271,6 +272,7 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
     for path in sorted(set(discovered) | set(items)):
         policy = items.get(path)
         source = discovered.get(path) or (policy or {}).get("source") or "phase1"
+        body_bytes = None
         if path.startswith(CMD_PREFIX):
             text = run_command_item(root, path)
             exists = text is not None
@@ -283,6 +285,13 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
                 if exists
                 else None
             )
+            # A declared card is what the session actually loads, so it is what
+            # the gate has to measure. Measuring the file instead would report
+            # red for content no session pays for, and the obvious response to
+            # that red — raise the cap — would quietly undo the feature.
+            if exists and (policy or {}).get("card"):
+                body_bytes = len(text.encode("utf-8"))
+                text = render_card(text, policy["card"], path)
 
         row = {
             "path": path,
@@ -291,6 +300,7 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
             "tokens": 0,
             "method": method,
             "max_bytes": (policy or {}).get("max_bytes"),
+            "body_bytes": body_bytes,
         }
         if exists:
             row["bytes"] = len(text.encode("utf-8"))
@@ -364,6 +374,23 @@ def render_report(
         ]
         for path, size in deferred:
             out.append(f"- `{path}` ({_cell(size)} bytes)")
+
+    indexed = [r for r in rows if r.get("body_bytes")]
+    if indexed:
+        out += [
+            "",
+            f"{len(indexed)} source(s) are indexed: the card above is always-on, "
+            f"the rest arrives when somebody names an entry. Listed so a "
+            f"deferred body is never mistaken for a file that shrank:",
+            "",
+        ]
+        for row in indexed:
+            deferred_bytes = row["body_bytes"] - row["bytes"]
+            out.append(
+                f"- `{row['path']}` — card {_cell(row['bytes'])} of "
+                f"{_cell(row['body_bytes'])} bytes, {_cell(deferred_bytes)} "
+                f"reachable with `context-index.py {row['path']} --get <path>`"
+            )
 
     failing = [r for r in rows if r["state"] in FAILING]
     out.append("")
