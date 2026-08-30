@@ -151,3 +151,59 @@ def test_a_missing_log_is_not_an_error(tmp_path, capsys):
     """Phase 1 creates it from a template and continues; it must not die here."""
     assert wl.main(["--repo-root", str(tmp_path), "--recent", "2"]) == 0
     assert capsys.readouterr().out.strip() == ""
+
+
+# --------------------------------------------- the kept-heading contract --
+#
+# The module docstring: "A heading whose date will not parse is kept rather
+# than dropped, because losing a day is worse than including one too many."
+# `_sort_key` returned (0, 0, -index) for it against (1, ...) for a dated one,
+# with reverse=True and then `ordered[:count]` — so it sorted LAST and was the
+# FIRST thing cut. The contract was exactly inverted.
+#
+# The guarding test could not see it: it called recent_blocks(blocks, 99) on a
+# two-block fixture and asserted len == 2, which is true of any implementation
+# that does not delete blocks, and never exercised the production value 3.
+
+
+def _blocks(*headings):
+    return [f"## {h}\n| a | b |\n" for h in headings]
+
+
+def test_an_unparseable_heading_survives_the_production_slice():
+    blocks = _blocks("WICHTIG offene Punkte", "Samstag 30.08", "Freitag 29.08", "Donnerstag 28.08")
+    kept = wl.recent_blocks(blocks, 3)
+    assert any("WICHTIG offene Punkte" in b for b in kept)
+
+
+def test_it_does_not_consume_one_of_the_dated_slots():
+    # "including one too many" — the pinned section is extra, not a substitute
+    # for a day. Otherwise adding one silently shortens the working memory.
+    blocks = _blocks("WICHTIG offene Punkte", "Samstag 30.08", "Freitag 29.08", "Donnerstag 28.08")
+    kept = wl.recent_blocks(blocks, 3)
+    dated = [b for b in kept if "WICHTIG" not in b]
+    assert len(dated) == 3
+
+
+def test_several_unparseable_headings_are_all_kept():
+    blocks = _blocks("Pinned A", "Pinned B", "Samstag 30.08", "Freitag 29.08")
+    kept = wl.recent_blocks(blocks, 1)
+    assert sum("Pinned" in b for b in kept) == 2
+
+
+def test_unparseable_headings_keep_file_order():
+    blocks = _blocks("Pinned A", "Pinned B", "Samstag 30.08")
+    kept = wl.recent_blocks(blocks, 1)
+    assert kept.index(blocks[0]) < kept.index(blocks[1])
+
+
+def test_dated_blocks_are_still_newest_first(tmp_path):
+    blocks = _blocks("Freitag 29.08", "Samstag 30.08", "Donnerstag 28.08")
+    kept = wl.recent_blocks(blocks, 2)
+    assert kept[0].startswith("## Samstag 30.08")
+    assert kept[1].startswith("## Freitag 29.08")
+
+
+def test_a_log_of_only_dated_blocks_is_unchanged(tmp_path):
+    blocks = _blocks("Samstag 30.08", "Freitag 29.08", "Donnerstag 28.08")
+    assert len(wl.recent_blocks(blocks, 2)) == 2

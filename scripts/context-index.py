@@ -94,6 +94,18 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     ci = _lib()
+
+    # Without PyYAML every label renders as "(no label)" and this exits 0. The
+    # label IS the routing signal: a name with no description says something
+    # exists and nothing about whether it is the one you want. A degraded card
+    # is worse than no card, because no card sends you to the file. Refuse.
+    if ci.yaml is None:
+        sys.exit(
+            "error: PyYAML is not importable, so labels cannot be read and every\n"
+            "       entry would render as '(no label)'. Install it rather than\n"
+            "       accept a card that lists names and routes nowhere."
+        )
+
     root = Path(args.repo_root)
 
     if args.check:

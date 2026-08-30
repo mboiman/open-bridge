@@ -45,6 +45,7 @@ than a third time in a third shape.
 """
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -1034,3 +1035,61 @@ def test_a_sequence_in_keep_is_not_a_finding():
     # `sections:` needs children to render anything.
     body = "alpha:\n  - one\n"
     assert ci.check_declaration(body, {"kind": "index", "keep": ["alpha"]}) == []
+
+
+# ------------------------------------------------ a card without PyYAML --
+#
+# `import yaml` is guarded by `try/except ImportError: yaml = None`, and
+# `_label_for` skips its whole body when yaml is None — so every entry renders
+# as `(no label)` and the CLI exits 0. Reproduced: 3 154 B of card became
+# 1 885 B, 24 entries all unlabelled, stderr empty.
+#
+# The label IS the routing signal. `- **ryze** — (no label)` tells a session a
+# name exists and nothing about whether it is the one it wants, which is the
+# failure this module's own docstring names twelve lines above the guard:
+# "the thing does not look missing, it looks like it was never there".
+#
+# Reachable from a venv without PyYAML, a shadowed `yaml` module, or a fresh
+# clone before install. Refusing is the only honest answer: a degraded card is
+# worse than no card, because no card sends you to the file.
+
+
+def _run_without_yaml(tmp_path, *args):
+    stub = tmp_path / "stub"
+    stub.mkdir(exist_ok=True)
+    (stub / "yaml.py").write_text('raise ImportError("no yaml")\n', encoding="utf-8")
+    env = dict(os.environ, PYTHONPATH=str(stub))
+    return subprocess.run(
+        [sys.executable, str(CLI), "--repo-root", str(tmp_path), *args],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_the_cli_refuses_without_pyyaml_instead_of_degrading(tmp_path):
+    (tmp_path / "ecosystem.yaml").write_text(
+        "org: acme\ncustomers:\n  ryze:\n    description: a real label\n", encoding="utf-8"
+    )
+    result = _run_without_yaml(tmp_path, "ecosystem.yaml")
+    assert result.returncode != 0
+    assert "(no label)" not in result.stdout
+    assert "PyYAML" in result.stderr
+
+
+def test_the_check_also_refuses_without_pyyaml(tmp_path):
+    # The gate must not report "0 declared card(s) check out" and exit 0 when it
+    # could not read a declaration in the first place.
+    result = _run_without_yaml(tmp_path, "--check")
+    assert result.returncode != 0
+    assert "PyYAML" in result.stderr
+
+
+def test_the_cli_works_normally_with_pyyaml(tmp_path):
+    (tmp_path / "ecosystem.yaml").write_text(
+        "org: acme\ncustomers:\n  ryze:\n    description: a real label\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "--repo-root", str(tmp_path), "ecosystem.yaml"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "a real label" in result.stdout

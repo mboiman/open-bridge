@@ -457,3 +457,79 @@ def test_stats_counts_declared_exceptions_separately(tmp_path):
         ),
     })
     assert edges.stats(tmp_path)["declared"] == 1
+
+
+# ------------------------------------------- the external escape hatch --
+#
+# `classify` took `target.split("/")[0]` and asked whether that is a directory
+# of this repo. Both interesting cases came out exactly backwards:
+#
+#   channels/telegram.yaml            a real pre-reorg path, the file now lives
+#                                     at infra/channels/ -> "external", excused,
+#                                     and the gate reported "all resolve"
+#   /opt/other-repo/thing.yaml        a genuine neighbour checkout -> the first
+#                                     segment is "" (leading slash), root/"" IS
+#                                     a directory, so it fell through to "dead"
+#
+# The example deliberately avoids a `/Users/<name>/` shape: that is what a real
+# neighbour checkout looks like on macOS, and it is also exactly what the leak
+# scanner refuses — correctly, since it cannot tell a placeholder name from a
+# real one. It caught this fixture on the first push.
+#
+# The cluster-wrapper reorg moved channels/, backups/, remotes/ under infra/ and
+# calendars/, contexts/, projects/ under workflow/ — so this hid exactly the rot
+# the guard was built to find, in exactly the tree that had just been reorganised.
+
+
+def test_an_absolute_path_is_external(tmp_path):
+    assert edges.classify(tmp_path, "/opt/other-repo/thing.yaml")[0] == "external"
+
+
+def test_a_home_relative_path_is_external(tmp_path):
+    assert edges.classify(tmp_path, "~/other/thing.yaml")[0] == "external"
+
+
+def test_a_pre_reorg_path_is_moved_not_external(tmp_path):
+    (tmp_path / "infra" / "channels").mkdir(parents=True)
+    (tmp_path / "infra" / "channels" / "telegram.yaml").write_text("id: t\n", encoding="utf-8")
+    state, live = edges.classify(tmp_path, "channels/telegram.yaml")
+    assert state == "moved"
+    assert live == "infra/channels/telegram.yaml"
+
+
+def test_a_neighbour_checkout_stays_external(tmp_path):
+    # First segment is not a repo directory AND nothing in the tree ends with
+    # the target: someone else's layout, not ours to judge.
+    assert edges.classify(tmp_path, "some-other-repo/config/thing.yaml")[0] == "external"
+
+
+def test_a_resolving_path_is_still_ok(tmp_path):
+    (tmp_path / "infra").mkdir()
+    (tmp_path / "infra" / "x.yaml").write_text("a: 1\n", encoding="utf-8")
+    assert edges.classify(tmp_path, "infra/x.yaml")[0] == "ok"
+
+
+def test_a_missing_file_under_a_real_directory_is_still_dead(tmp_path):
+    (tmp_path / "infra").mkdir()
+    assert edges.classify(tmp_path, "infra/nowhere.yaml")[0] == "dead"
+
+
+def test_the_tail_match_needs_the_whole_tail_not_just_the_basename(tmp_path):
+    # `README.md` exists all over a Bridge. Matching on basename alone would
+    # call every stale reference "moved" and point it somewhere arbitrary.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "README.md").write_text("x\n", encoding="utf-8")
+    assert edges.classify(tmp_path, "somewhere-else/README.md")[0] == "external"
+
+
+def test_a_hit_inside_a_cloned_workspace_is_not_a_move(tmp_path):
+    # `.bridge/workspaces/<name>/` holds CLONES of other repositories. A path
+    # that resolves there resolves in somebody else's tree, which is the one
+    # thing this module refuses to judge. Caught on a live instance: three
+    # references to `incidents/index.md` in a customer context are paths inside
+    # that customer's wiki, and the tail match found the checked-out copy and
+    # called them moved.
+    clone = tmp_path / ".bridge" / "workspaces" / "cust" / "cust-wiki" / "incidents"
+    clone.mkdir(parents=True)
+    (clone / "index.md").write_text("x\n", encoding="utf-8")
+    assert edges.classify(tmp_path, "incidents/index.md")[0] == "external"
