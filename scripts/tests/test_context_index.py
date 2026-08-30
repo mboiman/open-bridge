@@ -788,3 +788,81 @@ def test_every_yaml_in_this_repo_parses_consistently():
 
     assert checked > 50, f"corpus too small to mean anything ({checked} files)"
     assert problems == [], "\n".join(problems[:15])
+
+
+# -------------------------------------------------- quoted keys, and depth --
+#
+# Found on a live context-budget.user.yaml. A key that needs quoting in YAML
+# — a path, anything with a colon — was carried into the index WITH its quotes,
+# so the index advertised a name that `yaml.safe_load` does not report and
+# `--get` refused the name that it does.
+
+QUOTED = '''\
+items:
+  "ecosystem.bks.yaml":
+    max_bytes: 24000
+  plain.md:
+    max_bytes: 100
+'''
+
+
+def test_a_quoted_key_name_matches_what_yaml_reports():
+    children = ci.parse_source(QUOTED)["items"]["children"]
+
+    assert "ecosystem.bks.yaml" in children, f"got {list(children)}"
+    assert '"ecosystem.bks.yaml"' not in children
+
+
+def test_get_accepts_the_name_yaml_reports():
+    """The quoted form worked and the plain form did not, which is backwards:
+    the plain form is the one a caller gets from a YAML reader."""
+    block = ci.slice_block(QUOTED, "items.ecosystem.bks.yaml")
+
+    assert "max_bytes: 24000" in block
+    assert "plain.md" not in block
+
+
+def test_the_index_shows_the_name_without_its_quotes():
+    card = ci.render_card(QUOTED, None, "b.yaml")
+
+    assert "**ecosystem.bks.yaml**" in card
+    assert '**"ecosystem.bks.yaml"**' not in card
+
+
+def test_structure_guard_compares_children_too(source):
+    """It only ever looked at top-level keys, which is why the quoted-name
+    defect sat in a live file with every guard green."""
+    assert ci.check_structure(QUOTED) == []
+
+    wrong = dict(ci.parse_source(QUOTED))
+    items = dict(wrong["items"])
+    items["children"] = dict(items["children"])
+    items["children"]["ghost"] = items["children"].pop("plain.md")
+    wrong["items"] = items
+    findings = ci.check_structure(QUOTED, blocks=wrong)
+
+    assert any("ghost" in f for f in findings), findings
+    assert any("plain.md" in f for f in findings), findings
+
+
+def test_a_quoted_key_containing_a_colon_is_seen():
+    """`"cmd:python3 scripts/worklog.py --recent 3":` is a key in this repo's
+    own context-budget.yaml, and the scanner could not see it at all: the name
+    pattern stopped at the first colon, which sits inside the quotes.
+
+    Found by the whole-tree sweep on its second outing, in a shipped file.
+    """
+    text = (
+        'items:\n'
+        '  "cmd:python3 scripts/worklog.py --recent 3":\n'
+        '    max_bytes: 10\n'
+        '  plain:\n'
+        '    max_bytes: 20\n'
+    )
+    children = ci.parse_source(text)["items"]["children"]
+
+    assert "cmd:python3 scripts/worklog.py --recent 3" in children, list(children)
+    assert ci.check_structure(text) == []
+    assert "max_bytes: 10" in ci.slice_block(
+        text, "items.cmd:python3 scripts/worklog.py --recent 3"
+    )

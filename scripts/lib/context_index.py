@@ -46,7 +46,12 @@ ALSO_PRESENT = "Also present, fetch by name: "
 # key's block ended at the first list item, so it sliced to its header line
 # alone — eleven bytes on a live bridge-config.yaml — and the round-trip guard
 # called that clean, because one line is still something.
-TOP_KEY = re.compile(r"^(?!-\s)([^\s#][^:]*):(?:\s|$)")
+# A quoted key may CONTAIN a colon, and this repo's own context-budget.yaml has
+# three of them ("cmd:python3 scripts/worklog.py --recent 3"). An unquoted name
+# still stops at the first colon, which is what YAML does too.
+KEY_NAME = r'("[^"]*"|\'[^\']*\'|[^\s#][^:]*)'
+TOP_KEY = re.compile(r"^(?!-\s)" + KEY_NAME + r":(?:\s|$)")
+CHILD_KEY = re.compile(r"^(?!-\s)" + KEY_NAME + r":(?:\s|$)")
 
 
 # ------------------------------------------------------------- structure --
@@ -60,14 +65,28 @@ def _is_comment(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
+def _unquote(name: str) -> str:
+    """The name YAML reports, not the spelling the file needed.
+
+    A key with a dot, a slash or a colon has to be quoted in YAML, and carrying
+    the quotes into the index advertises a name no YAML reader will ever hand
+    back. `--get items."a.b"` worked and `--get items.a.b` did not, which is
+    backwards: the second is the form a caller actually has.
+    """
+    name = name.strip()
+    if len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
+        return name[1:-1]
+    return name
+
+
 def _child_key(line: str, indent: int):
     """The child name on `line` at exactly `indent`, or None."""
     if len(line) <= indent or line[:indent].strip() or _is_comment(line):
         return None
     if line[indent : indent + 1].isspace():
         return None
-    match = re.match(r"^(?!-\s)([^\s#][^:]*):(?:\s|$)", line[indent:])
-    return match.group(1).strip() if match else None
+    match = CHILD_KEY.match(line[indent:])
+    return _unquote(match.group(1)) if match else None
 
 
 def _trim(lines: list[str], start: int, end: int) -> int:
@@ -97,7 +116,7 @@ def parse_source(text: str) -> dict:
     for i, line in enumerate(lines):
         match = TOP_KEY.match(line)
         if match:
-            starts.append((i, match.group(1).strip()))
+            starts.append((i, _unquote(match.group(1))))
 
     blocks: dict[str, dict] = {}
     for pos, (start, name) in enumerate(starts):
@@ -463,6 +482,20 @@ def check_structure(text: str, blocks=None) -> list[str]:
                 f"{name}: sliced to its header line alone, and its block value "
                 f"has content"
             )
+        # One level down as well. Checking only the top level is how a live
+        # file kept advertising `"ecosystem.bks.yaml"`, quotes and all, with
+        # every guard green: the defect was never at the top.
+        if not isinstance(value, yaml.MappingNode) or not block["children"]:
+            continue
+        want = {
+            k.value
+            for k, _ in value.value
+            if isinstance(k, yaml.ScalarNode)
+        }
+        for child in want - set(block["children"]):
+            findings.append(f"{name}.{child}: in the source and invisible to the scanner")
+        for child in set(block["children"]) - want:
+            findings.append(f"{name}.{child}: invented by the scanner")
     return findings
 
 
