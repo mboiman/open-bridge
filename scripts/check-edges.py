@@ -304,18 +304,43 @@ def neighbours(repo_root, node: str):
     return outgoing, incoming
 
 
-def fix_moved(repo_root) -> int:
-    """Rewrite references whose target moved bucket. Text, not a YAML round trip.
+def fix_moved(repo_root):
+    """Rewrite references whose target moved bucket. Returns (changed, skipped).
 
-    Re-serializing would drop every comment in the file: a far larger change
-    than the one being made, and one that hides it in the diff. Only `moved` is
-    rewritten — a dead reference is a decision somebody has to make, not a typo.
+    Text, not a YAML round trip: re-serializing would drop every comment in the
+    file, a far larger change than the one being made and one that hides it in
+    the diff. Only `moved` is rewritten — a dead reference is a decision
+    somebody has to make, not a typo.
+
+    AND ONLY WHAT IS NOT EXCEPTED. `check()` and `stats()` both honoured
+    `edges.yaml`; this did not, so a path an instance had explicitly declared
+    NOT to be repo-relative, with a written reason, was rewritten as if it were.
+
+    It happened, on the run that found this: an instance excepted
+    `pipeline.steps` with the reason "runtime paths of the deployed pipeline,
+    relative to the SERVICE's working directory". The tail match found the
+    sources in the repo and `--fix` rewrote `bin/generate_voice.py` into a path
+    the service cannot resolve. A working config, broken by its own guard, and
+    the exception then reported as stale because after the rewrite it excused
+    nothing.
+
+    Skips are RETURNED, never swallowed: a fix run that declines to touch
+    something has to say so, or the next reader takes silence for "there was
+    nothing to decline".
     """
     root = Path(repo_root)
-    changed = 0
-    for rel, _, target in iter_edges(repo_root):
+    exceptions = load_exceptions(repo_root)
+    changed, skipped = 0, []
+    for rel, key, target in iter_edges(repo_root):
         state, live = classify(repo_root, target)
         if state != "moved" or not live:
+            continue
+        excuse = _excused(exceptions, rel, key)
+        if excuse is not None:
+            skipped.append(
+                f"{rel} :: {key} -> {target} left alone: excepted in "
+                f"{EXCEPTION_FILE} ({str(excuse.get('reason') or '').strip().splitlines()[0]})"
+            )
             continue
         path = root / rel
         text = path.read_text(encoding="utf-8")
@@ -323,7 +348,7 @@ def fix_moved(repo_root) -> int:
             continue
         path.write_text(text.replace(target, live), encoding="utf-8")
         changed += 1
-    return changed
+    return changed, skipped
 
 
 def main(argv=None) -> int:
@@ -356,8 +381,15 @@ def main(argv=None) -> int:
         return 0
 
     if args.fix:
-        changed = fix_moved(root)
+        changed, skipped = fix_moved(root)
         print(f"check-edges: rewrote {changed} moved reference(s)")
+        for line in skipped:
+            print(f"  skipped {line}")
+        if skipped:
+            print(
+                f"check-edges: {len(skipped)} left alone because {EXCEPTION_FILE} "
+                f"says they are not repo-relative"
+            )
         return 0
 
     findings = check(root)
