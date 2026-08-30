@@ -65,6 +65,20 @@ def _is_comment(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
+def _inline_value(line: str, indent: int = 0) -> str:
+    """What stands after `key:` on the same line, quoting respected.
+
+    Splitting at the first colon is the mistake this file has now made three
+    times. On `"cmd:python3 scripts/worklog.py --recent 3":` it hands back
+    `python3 …":` and the key reads as a scalar with a value, which is how one
+    child stopped its whole parent from being indexed.
+    """
+    match = CHILD_KEY.match(line[indent:])
+    if not match:
+        return ""
+    return line[indent + match.end() :].strip()
+
+
 def _unquote(name: str) -> str:
     """The name YAML reports, not the spelling the file needed.
 
@@ -122,7 +136,7 @@ def parse_source(text: str) -> dict:
     for pos, (start, name) in enumerate(starts):
         end = _trim(lines, start, starts[pos + 1][0] if pos + 1 < len(starts) else len(lines))
 
-        inline = lines[start].split(":", 1)[1].strip()
+        inline = _inline_value(lines[start])
         body = [
             line
             for line in lines[start + 1 : end]
@@ -252,7 +266,8 @@ def _looks_nested(lines: list[str], span: tuple[int, int]) -> bool:
     """
     start, end = span
     key = lines[start]
-    inline = key.split(":", 1)[1].strip() if ":" in key else ""
+    indent = len(key) - len(key.lstrip())
+    inline = _inline_value(key, indent)
     if inline and not inline.startswith("#"):
         return False
     return any(
@@ -481,6 +496,11 @@ def check_structure(text: str, blocks=None) -> list[str]:
             findings.append(
                 f"{name}: sliced to its header line alone, and its block value "
                 f"has content"
+            )
+        if block["kind"] == "scalar":
+            findings.append(
+                f"{name}: read as a scalar, and YAML says it is a block "
+                f"{'mapping' if isinstance(value, yaml.MappingNode) else 'sequence'}"
             )
         # One level down as well. Checking only the top level is how a live
         # file kept advertising `"ecosystem.bks.yaml"`, quotes and all, with

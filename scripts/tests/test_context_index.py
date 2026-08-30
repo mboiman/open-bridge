@@ -866,3 +866,35 @@ def test_a_quoted_key_containing_a_colon_is_seen():
     assert "max_bytes: 10" in ci.slice_block(
         text, "items.cmd:python3 scripts/worklog.py --recent 3"
     )
+
+
+def test_a_quoted_key_with_a_colon_is_still_a_block():
+    """Third sighting of one mistake: splitting a key line at the FIRST colon.
+
+    The regex learned about quotes; the shape test did not, so
+    `"cmd:python3 …":` read as a scalar whose value is `python3 …":`. One such
+    child was enough to stop its parent being detected as a section, and the
+    live context-budget.user.yaml came back with its whole `items:` block kept
+    verbatim instead of indexed. Nothing is lost that way, which is exactly why
+    it needs a test rather than a reader noticing.
+    """
+    text = (
+        'items:\n'
+        '  "cmd:python3 scripts/worklog.py --recent 3":\n'
+        '    max_bytes: 130000\n'
+        '  plain:\n'
+        '    max_bytes: 20\n'
+    )
+    keep, sections = ci._detect(text)
+
+    assert sections == ["items"], f"keep={keep} sections={sections}"
+    assert "## items" in ci.render_card(text, None, "b.yaml")
+
+
+def test_structure_guard_reports_a_kind_disagreement():
+    """A scanner that calls a block mapping a scalar has misread the line."""
+    text = "runtime:\n  host: box\n  port: 1\n"
+    wrong = dict(ci.parse_source(text))
+    wrong["runtime"] = dict(wrong["runtime"], kind="scalar")
+
+    assert any("runtime" in f for f in ci.check_structure(text, blocks=wrong))
