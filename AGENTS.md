@@ -149,6 +149,21 @@ The always-on surface as a whole carries a declared ceiling, the same idea as th
 reports and enforces it (bytes gate, token counts inform), and CI fails on an
 always-on file nobody declared.
 
+**Three channels reach a session, and only two are files.** The `@`-imports and
+the Phase 1 reads come off disk. The third is DERIVED: the harness injects
+`name` + `description` of every skill and sub-agent into every session and every
+dispatch, one line each, with no file to point at. Measured as `listing:skills`
+and `listing:agents`, capped on the sum, heaviest entries named in the report
+because a listing grows one description at a time. It is load-bearing, not
+overhead, so `check-reachability.py` reads it too: a description naming a config
+path is a route, and on one instance it was a family's only one.
+
+**A sub-agent's surface is strictly smaller than its parent's:** imports and
+listings, never Phase 1, so no standing order, board or work log. A pointer that
+must reach sub-agents belongs in an `@`-imported file. In an eager standing
+order it is resident for the session, invisible to every sub-agent, and green in
+every guard.
+
 ---
 
 ## Layout — Cluster-Wrappers
