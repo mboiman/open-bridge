@@ -594,3 +594,83 @@ def test_fix_reports_what_it_declined_to_touch(tmp_path):
     changed, skipped = edges.fix_moved(tmp_path)
     assert changed == 0
     assert skipped and "pipeline.steps" in skipped[0]
+
+
+# ---------------------------------------- --fix must rewrite ONE occurrence --
+#
+# The exception gate added earlier sits on the LOOP ITERATION. The write was
+# still a whole-file `text.replace(target, live)`, so an unexcused key naming the
+# same string rewrote the excepted lines too — while the tool printed "left
+# alone" about a value it had just changed. Worse than silent: the log actively
+# misleads whoever checks it.
+#
+# The same replace corrupts correct paths. `live` always ends with
+# `"/" + target`, so any longer path that already resolves and happens to end in
+# `target` gets the replacement spliced into its middle:
+#   work/done/svc/bin/run.py  ->  work/done/svc/work/done/svc/bin/run.py
+#
+# The rewrite is therefore scoped to the LINE of the scalar node at that key
+# path, found with `yaml.compose` — the same loader that keeps source spelling
+# elsewhere in this repo.
+
+
+def _multi(tmp_path):
+    (tmp_path / "infra" / "channels").mkdir(parents=True)
+    (tmp_path / "work" / "svc" / "bin").mkdir(parents=True)
+    (tmp_path / "work" / "svc" / "bin" / "run.py").write_text("x\n", encoding="utf-8")
+    (tmp_path / "infra" / "channels" / "d.yaml").write_text(
+        "pipeline:\n"
+        "  steps:\n"
+        "    - script: bin/run.py\n"
+        "docs:\n"
+        "  helper: bin/run.py\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "edges.yaml").write_text(
+        "exceptions:\n"
+        "  - path: infra/channels/d.yaml\n"
+        "    keys: [pipeline.steps]\n"
+        "    reason: runtime paths, relative to the service working directory\n",
+        encoding="utf-8",
+    )
+    return tmp_path / "infra" / "channels" / "d.yaml"
+
+
+def test_an_unexcused_key_does_not_drag_the_excepted_line_with_it(tmp_path):
+    target = _multi(tmp_path)
+    changed, skipped = edges.fix_moved(tmp_path)
+    body = target.read_text(encoding="utf-8")
+    assert "    - script: bin/run.py" in body, "the excepted line was rewritten anyway"
+    assert "  helper: work/svc/bin/run.py" in body, "the unexcused line was not fixed"
+    assert changed == 1 and skipped
+
+
+def test_a_longer_resolving_path_is_not_spliced(tmp_path):
+    # Under infra/<family>/, because SCAN_GLOBS is `infra/*/*.yaml`. At
+    # infra/d.yaml the file is never scanned and every assertion below passes
+    # for the wrong reason — which is how the first draft of this test read.
+    (tmp_path / "infra" / "channels").mkdir(parents=True)
+    (tmp_path / "work" / "svc" / "bin").mkdir(parents=True)
+    (tmp_path / "work" / "svc" / "bin" / "run.py").write_text("x\n", encoding="utf-8")
+    f = tmp_path / "infra" / "channels" / "d.yaml"
+    f.write_text("good: work/svc/bin/run.py\nbad: bin/run.py\n", encoding="utf-8")
+    assert edges.iter_edges(tmp_path), "fixture is not being scanned at all"
+    edges.fix_moved(tmp_path)
+    body = f.read_text(encoding="utf-8")
+    assert "good: work/svc/bin/run.py" in body, "a correct path was corrupted"
+    assert "bad: work/svc/bin/run.py" in body
+
+
+def test_the_count_matches_the_lines_actually_changed(tmp_path):
+    target = _multi(tmp_path)
+    before = target.read_text(encoding="utf-8").splitlines()
+    changed, _ = edges.fix_moved(tmp_path)
+    after = target.read_text(encoding="utf-8").splitlines()
+    assert changed == sum(1 for a, b in zip(before, after) if a != b)
+
+
+def test_fix_stays_idempotent_with_an_exception_present(tmp_path):
+    _multi(tmp_path)
+    edges.fix_moved(tmp_path)
+    changed, _ = edges.fix_moved(tmp_path)
+    assert changed == 0

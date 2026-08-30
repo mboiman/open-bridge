@@ -758,3 +758,63 @@ def test_an_undeclared_source_still_enters_whole(tree):
     _write(tree, "ecosystem.yaml", "alpha: 1\nbeta: 2\n")
     parts = mc.always_on_parts(tree, mc.load_budget(tree))
     assert parts["ecosystem.yaml"] == "alpha: 1\nbeta: 2\n"
+
+
+# ------------------------------------------- --init --force must not destroy --
+#
+# `--init` writes the UNDECLARED items. With `--force` on a file that already
+# declares things, those items are by definition no longer undeclared — so the
+# rewrite wrote their COMPLEMENT and deleted every declaration it found.
+#
+# Measured against a copy of a live instance's file: 162 lines / 8 380 bytes /
+# 13 declarations became 15 lines / 629 bytes / 0 declarations. Every cap gone,
+# and 147 lines of German prose explaining WHY each cap has its number — the
+# part nobody can reconstruct. One command, no confirmation, no backup.
+#
+# `--force` now means "add what is missing", never "replace with the
+# complement". That is what the docstring always said it was for.
+
+
+def test_force_keeps_every_existing_declaration(tree):
+    _write(
+        tree,
+        "context-budget.user.yaml",
+        "schema_version: 1\nitems:\n"
+        '  "AGENTS.md":\n'
+        "    max_bytes: 999\n"
+        "    note: the reasoning nobody can reconstruct\n",
+    )
+    mc.write_user_budget(tree, mc.collect_rows(tree, mc.load_budget(tree), "bytes"), force=True)
+    body = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    assert "max_bytes: 999" in body
+    assert "the reasoning nobody can reconstruct" in body
+
+
+def test_force_appends_only_what_is_undeclared(tree):
+    _write(tree, "context-budget.user.yaml", 'schema_version: 1\nitems:\n  "AGENTS.md": {}\n')
+    _write(tree, "brandnew.md", "x" * 10)
+    _declare_import(tree, "brandnew.md")
+    mc.write_user_budget(tree, mc.collect_rows(tree, mc.load_budget(tree), "bytes"), force=True)
+    body = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    assert body.count('"AGENTS.md"') == 1, "an existing declaration was duplicated"
+    assert "brandnew.md" in body
+
+
+def test_force_changes_nothing_when_all_is_declared(tree):
+    _write(tree, "context-budget.user.yaml", 'schema_version: 1\nitems:\n  "AGENTS.md": {}\n')
+    before = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    rows = [r for r in mc.collect_rows(tree, mc.load_budget(tree), "bytes") if r["state"] != "undeclared"]
+    mc.write_user_budget(tree, rows, force=True)
+    assert (tree / "context-budget.user.yaml").read_text(encoding="utf-8") == before
+
+
+def test_a_fresh_file_is_still_written_whole(tree):
+    rows = mc.collect_rows(tree, mc.load_budget(tree), "bytes")
+    mc.write_user_budget(tree, rows, force=False)
+    body = (tree / "context-budget.user.yaml").read_text(encoding="utf-8")
+    assert "schema_version: 1" in body and "items:" in body
+
+
+def _declare_import(tree, rel):
+    entry = tree / "CLAUDE.md"
+    entry.write_text(entry.read_text(encoding="utf-8") + f"\n@{rel}\n", encoding="utf-8")

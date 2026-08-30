@@ -83,6 +83,10 @@ assert_eq() {        # <desc> <a> <b>
   if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 — '$2' != '$3'"; fi
 }
 
+assert_neq() {       # <desc> <a> <b>
+  if [ "$2" != "$3" ]; then pass "$1"; else fail "$1 — both are '$2'"; fi
+}
+
 # run_overlay <consumer> <overlay args...> — feeds `yes y` on stdin so the
 # behavioural [y] gates and any prompt are satisfied; captures $OUT + $RC.
 run_overlay() {
@@ -258,6 +262,27 @@ assert_rc "sync with conflicting upstream change succeeds" 0
 assert_out "sync reports a conflict" "conflict"
 assert_grep "local side preserved on conflict" "$TARGET" "LOCAL-CONFLICT"
 assert_nogrep "conflicting file left intact (no merge markers)" "$TARGET" "<<<<<<<"
+
+# The lock must not LAUNDER that kept edit. `materialized_sha256` means "the
+# bytes the overlay wrote"; recording the consumer's own bytes under that name
+# turns a hand-edited file into a pristine one, and `remove` deletes a pristine
+# file without asking (cmd_remove: clean = sha256(dest) == materialized_sha256).
+# One routine conflict-then-keep was enough to arm that.
+livesha="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$TARGET")"
+locksha="$(python3 - "$CON/overlays.lock.yaml" <<'PYEOF'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+for ov in (d.get("overlays") or {}).values():
+    for f in ov.get("files") or []:
+        if f.get("dest", "").endswith("example-docs.yaml"):
+            print(f.get("materialized_sha256") or "")
+            break
+PYEOF
+)"
+assert_neq "kept local edit is not laundered into the lock" "$locksha" "$livesha"
+run_overlay "$CON" remove example-org --yes >/dev/null 2>&1
+assert_file "a kept local edit survives overlay remove" "$TARGET"
+assert_grep "and it is still the consumer's version" "$TARGET" "LOCAL-CONFLICT"
 
 # ───────────────────────────────────────────────────────────────────
 echo

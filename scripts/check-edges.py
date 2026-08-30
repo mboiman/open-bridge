@@ -304,6 +304,35 @@ def neighbours(repo_root, node: str):
     return outgoing, incoming
 
 
+def _scalar_line(text: str, dotted: str):
+    """Line index of the scalar at `dotted`, or None.
+
+    `yaml.compose` keeps source positions, which is the whole reason to use it:
+    the fix has to touch ONE occurrence, and only the parser knows which line
+    that is. A whole-file `text.replace` cannot know, and it showed — it rewrote
+    lines an exception had excused and spliced the replacement into longer paths
+    that were already correct.
+    """
+    if yaml is None:  # pragma: no cover
+        return None
+    try:
+        node = yaml.compose(text)
+    except yaml.YAMLError:
+        return None
+    for part in dotted.split("."):
+        if node is None:
+            return None
+        if isinstance(node, yaml.MappingNode):
+            node = next((v for k, v in node.value if k.value == part), None)
+        elif isinstance(node, yaml.SequenceNode):
+            if not part.isdigit() or int(part) >= len(node.value):
+                return None
+            node = node.value[int(part)]
+        else:
+            return None
+    return node.start_mark.line if isinstance(node, yaml.ScalarNode) else None
+
+
 def fix_moved(repo_root):
     """Rewrite references whose target moved bucket. Returns (changed, skipped).
 
@@ -342,11 +371,25 @@ def fix_moved(repo_root):
                 f"{EXCEPTION_FILE} ({str(excuse.get('reason') or '').strip().splitlines()[0]})"
             )
             continue
+        # ONE occurrence, at the key that was actually classified. The gate above
+        # decided per EDGE; a whole-file replace then acted per FILE, so an
+        # unexcused key dragged every excepted line with it while the run printed
+        # "left alone" about a value it had just changed.
         path = root / rel
         text = path.read_text(encoding="utf-8")
-        if target not in text:
+        line_no = _scalar_line(text, key)
+        if line_no is None:
+            skipped.append(
+                f"{rel} :: {key} -> {target} left alone: the scalar could not be "
+                f"located, and guessing with a whole-file replace is exactly what "
+                f"this stopped doing"
+            )
             continue
-        path.write_text(text.replace(target, live), encoding="utf-8")
+        lines = text.split("\n")
+        if target not in lines[line_no]:
+            continue
+        lines[line_no] = lines[line_no].replace(target, live, 1)
+        path.write_text("\n".join(lines), encoding="utf-8")
         changed += 1
     return changed, skipped
 

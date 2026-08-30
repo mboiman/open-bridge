@@ -368,6 +368,10 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     # runs it, so a non-core classification would have upstream CI call a file
     # that never shipped.
     "scripts/tests/test-precommit-guards.sh",
+    # Registered 2026-08-30 with the push-guard commit-set contract. Same
+    # reason as its neighbours: validate.yml runs it, so a non-core
+    # classification would have upstream CI call a file that never shipped.
+    "scripts/tests/test-push-guard-commit-set.sh",
     "scripts/tests/test_edges.py",
 })
 

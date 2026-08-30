@@ -630,6 +630,32 @@ def write_user_budget(repo_root: Path, rows: list[dict], force: bool = False) ->
         lines.append(f'  "{path}": {{}}')
     if not undeclared:
         lines.append("  {}")
+
+    # A file that already exists is APPENDED to, never replaced. `--init` writes
+    # the UNDECLARED items, so on a file that already declares things those items
+    # are by definition no longer undeclared — and the rewrite wrote their
+    # COMPLEMENT. Measured against a live instance: 162 lines, 8 380 bytes and 13
+    # declarations became 15 lines, 629 bytes and none. Every cap gone, and with
+    # them 147 lines explaining why each cap has its number, which is the half
+    # nobody can reconstruct. One command, no confirmation, no backup.
+    #
+    # `--force` therefore means "add what is missing", which is what the
+    # docstring above always said this was for.
+    if target.exists():
+        if not undeclared:
+            return target
+        existing = target.read_text(encoding="utf-8").rstrip("\n")
+        added = [
+            "",
+            "  # Appended by `measure-context.py --init --force`: items this",
+            "  # instance loads and had not declared. Uncapped on purpose —",
+            "  # visible in every report, failing nothing. Give the ones whose",
+            "  # growth should be heard about a `max_bytes:` AND a reason.",
+        ]
+        added += [f'  "{path}": {{}}' for path in undeclared]
+        target.write_text(existing + "\n" + "\n".join(added) + "\n", encoding="utf-8")
+        return target
+
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
 

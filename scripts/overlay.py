@@ -1397,15 +1397,28 @@ def materialize(consumer: Consumer, cache: str, manifest: dict, defaults: dict,
         if it.state == "local-edit":
             merged, st = three_way(consumer, cache, it, old_sha, interactive)
             if merged is None:
-                # kept local / skipped — preserve live, record live hash.
+                # kept local / skipped — preserve live, and DO NOT launder the
+                # consumer's own bytes into `materialized_sha256`.
+                #
+                # That field means "the bytes the overlay wrote". Recording the
+                # live hash here made a hand-edited file compare EQUAL to it,
+                # and `cmd_remove` reads exactly that comparison to decide
+                # `clean` — so one routine conflict-then-keep turned the user's
+                # edit into a pristine file that a later `remove` deletes
+                # without asking. The orphan prune in this same function reads
+                # the field the same way.
+                #
+                # Keep what the overlay last wrote when we know it; otherwise
+                # omit the key, which makes every later comparison FALSE and
+                # therefore prompts. A field that cannot be trusted is worse
+                # than a field that is absent.
                 counts["locally-modified" if "kept" in st else "conflict"] += 1
-                dest_abs = os.path.join(consumer.root, it.dest)
-                live_sha = sha256_file(dest_abs)
                 prev = prev_files.get(it.dest, {})
+                prev_mat_sha = prev.get("materialized_sha256")
                 file_locks.append({
                     "src": it.src, "dest": it.dest,
                     "source_sha256": it.source_sha,
-                    "materialized_sha256": live_sha,
+                    **({"materialized_sha256": prev_mat_sha} if prev_mat_sha else {}),
                     **({"prompted_fields": prev["prompted_fields"]}
                        if prev.get("prompted_fields") else {}),
                 })
