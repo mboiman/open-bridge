@@ -20,6 +20,10 @@
 # bridge-config.yaml — your real config (upstreams, identity vars).
 /bridge-config.yaml
 
+# context-budget.user.yaml — your per-instance caps (paths of instance files).
+# The CORE caps live in the tracked context-budget.yaml.
+/context-budget.user.yaml
+
 # ecosystem.yaml — your real repo registry (created at onboarding, user-specific).
 /ecosystem.yaml
 

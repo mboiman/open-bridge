@@ -3,6 +3,7 @@ name: security-baseline
 scope: always
 enforcement: advisory
 applies_to: [builder, guard]
+load: eager   # a security floor that waits to be asked for is not a floor
 ---
 # Security Baseline
 

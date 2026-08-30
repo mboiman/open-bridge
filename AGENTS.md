@@ -28,7 +28,10 @@ points at the `rules/` and `docs/` files that carry the mechanics.
 
 1. **This file (`AGENTS.md`)** is the full operating manual. The name is a
    convention; the content applies to all agents.
-2. **Read `bridge-config.yaml`** for user preferences (theme, language, features).
+2. **Read the session slice of `bridge-config.yaml`** with
+   `python3 scripts/bridge-config.py --session` (identity, purpose, user_profile,
+   theme, language, work). The other fifteen blocks belong to the skill that owns
+   them; read a block with `--keys <block>` when that skill runs.
 3. **Read `ecosystem.yaml` if present** — the project registry (repos, packages,
    infrastructure, workspaces). It is created during onboarding and is user-specific
    and gitignored (like `bridge-config.yaml`), so it is absent on a fresh clone. When
@@ -82,64 +85,40 @@ The load-bearing detail for the NEW-USER turn lives in
 
 ## Theme
 
-Themes control all user-facing vocabulary — terms and phrases. They NEVER control tools,
-delegation, or goals, and never define agents. Built-in: `professional` (default, en) and
-`professional-de` (de); set via `bridge-config.yaml` field `theme:`. Resolution: read
-`theme:` → load `themes/{theme}.yaml` (fall back to `professional`) → deep-merge
-`meta.extends` parent → fill defaults from `_schema.yaml`.
-
-**Full details** (resolution steps, custom-theme authoring, vocabulary table):
+Themes control user-facing **vocabulary** only. Never tools, delegation, goals or
+agents. Built-in: `professional` (default, en) and `professional-de`; set via
+`bridge-config.yaml` `theme:`. Resolution order and custom-theme authoring:
 [`rules/theme.md`](rules/theme.md).
-
 ---
 
 ## Agents
 
-The Bridge uses **native Claude Code sub-agents** under `.claude/agents/*.md` — markdown
-definitions with YAML frontmatter (`name`, `description`, `tools`, `model`, optional
-`scope`), auto-discovered at session start, spawned via the `Task` tool with
-`subagent_type: {name}` (other tools: see the Tool Mapping table below). Their purpose:
-offload heavy/parallel/isolated work so raw output (log dumps, file trees, API results)
-never fills the main context — they return structured summaries. Coordinator skills
-dispatch them by workflow stage. Add one by dropping another `{name}.md` into the folder —
-no registration needed.
+Two different things share the word, and confusing them is the usual mistake.
 
-**On non-Claude tools** (Copilot CLI, Gemini CLI, Cursor, Codex): sub-agents aren't
-available in their native API. Skills that would dispatch a sub-agent run that logic
-**inline** instead — the capability is preserved; only the delegation/isolation
-architecture differs (work happens in the main context rather than an isolated one).
+**Sub-agents** (`.claude/agents/*.md`) are *inward*: ephemeral, spawned inside
+your session, they exist so heavy or parallel work (log dumps, file trees, API
+results) never fills the main context, and they return a structured summary. Add
+one by dropping in another `{name}.md`; no registration. On platforms without a
+delegation API the same logic runs inline
+([`docs/tool-mapping.md`](docs/tool-mapping.md)).
 
-The older `/crew` command is retired — create sub-agents by editing `.claude/agents/*.md`
-directly.
-
-**Bridge-Agents** (`agents/`) are the *outward* counterpart to the *inward* sub-agents
-above — don't confuse them. A sub-agent is ephemeral, works for you inside your session, and
-returns a summary; a **Bridge-Agent** is a persistent, addressable A2A endpoint that fronts a
-persona to the world (and to peer bridges) under a human gate. The generic runtime + template
-ship as CORE under `agents/`; each `agents/<name>/` instance is USER. A thin, stateless
-MCP→A2A gateway (`list_bridges`, `get_bridge_card`, `ask_bridge`) ships as CORE under
-`agents/_gateway/`. Full model: [`agents/README.md`](agents/README.md),
-[`agents/_gateway/README.md`](agents/_gateway/README.md),
+**Bridge-Agents** (`agents/`) are *outward*: persistent, addressable A2A
+endpoints that front a persona to the world and to peer bridges, under a human
+gate. The runtime and template ship as CORE; each `agents/<name>/` instance is
+USER. Model: [`agents/README.md`](agents/README.md),
 [`docs/representative-agent.md`](docs/representative-agent.md).
 
+The older `/crew` command is retired — edit `.claude/agents/*.md` directly.
 ---
 
 ## Agent Identity
 
-The orchestrator carries its own identity — distinct from `personas/` (identities the user
-holds) and `mandants/` (recipient groups). Two files in `identity/agent/`: `IDENTITY.md`
-(name, role, backstory — *who am I*) and `SOUL.md` (voice, posture, defaults applied to
-every skill and conversation — *how I behave*).
-
-**CORE ships only the seeds, not a finished voice.** A fresh clone has no live
-`SOUL.md`/`IDENTITY.md` — only CORE companions (`_template.*`, `_soul-deck.yaml`,
-`_schema.yaml`). Onboarding seeds the live files (which carry `scope: user`, stay on the
-`user/*` branch, never promote) and adds the `@`-imports to `CLAUDE.md`. Size cap for
-SOUL.md is 80 lines / 4 KB, enforced by `bridge-audit`. Full guide:
-[`identity/agent/README.md`](identity/agent/README.md). The `SOUL.md` convention was
-pioneered by Peter Steinberger (OpenClaw), standardized by [SoulSpec](https://soulspec.org/),
-and adopted by agents like Nous Research's Hermes (see [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)).
-
+The orchestrator carries its own identity, distinct from `personas/` (identities
+the user holds) and `mandants/` (recipient groups): `identity/agent/IDENTITY.md`
+(who am I) and `SOUL.md` (how I behave, loaded every session). CORE ships only
+the seeds; onboarding writes the live files, which stay on the `user/*` branch
+and never promote. SOUL.md is capped at 80 lines / 4 KB, enforced by
+`bridge-audit`. Guide: [`identity/agent/README.md`](identity/agent/README.md).
 ---
 
 ## Standing Orders
@@ -153,153 +132,104 @@ every dispatch). `protocols/` stays **top-level**
 (CORE content with its own lifecycle) — `standing-orders/` ships CORE defaults;
 user-authored orders live in `standing-orders/user/`.
 
+`scope: always` says an order **applies** always; `load:` says when its **body**
+is read. `load: eager` (the default) reads it at session start; `load: on-trigger`
+keeps only a `summary` and a `triggers` vocabulary in context and fetches the body
+when that vocabulary comes up — the disclosure model skills already use. Stay
+eager only when the order bites while nobody says its own vocabulary. The index a
+session carries is `python3 scripts/standing-orders.py --index`; `--check` refuses
+an order that defers without a trigger, since it would read as enforced and load
+never.
+
+The always-on surface as a whole carries a declared ceiling, the same idea as the
+`SOUL.md` cap: `context-budget.yaml` holds it, `python3 scripts/measure-context.py`
+reports and enforces it (bytes gate, token counts inform), and CI fails on an
+always-on file nobody declared.
+
 ---
 
 ## Layout — Cluster-Wrappers
 
-Config files live in **three semantic cluster-wrappers**. Every config type gets its own
-**folder** — no exceptions, no thresholds. Templates and schemas live inside the folder.
+Config lives in **three semantic cluster-wrappers**, and every config type gets
+its own **folder** — no exceptions, no thresholds:
 
 ```
 identity/    WHO am I, to WHOM do I send    (personas, accounts, mandants, contracts, agent)
 infra/       WHERE does what run, HOW reach (remotes, channels, backups, instances)
-workflow/    WHAT happens when              (calendars, contexts, projects)
+workflow/    WHAT happens when              (calendars, contexts, projects, workloads)
 ```
 
-Top-level (own lifecycle): `protocols/` `work/` `docs/` `rules/` `trackers/` `themes/`
-`skills/` `.claude/`. Root configs: `bridge-config.yaml` `ecosystem.yaml` (both user-created
-at onboarding, gitignored) `bridge-deck.config.yaml`.
+Top-level, own lifecycle: `protocols/` `work/` `docs/` `rules/` `trackers/`
+`themes/` `skills/` `.claude/`.
 
-**Default-to-Folder rule:** every config type lives in **`<wrapper>/<types>/`** — a plural
-folder with `_template.yaml`, optional `_schema.yaml`, and all `<id>.yaml` instances
-together. Companions: `<id>-setup.md` (provisioning notes you need *before* the YAML runs)
-vs `<id>.README.md` (overview of what the YAML *means*). `_`-prefixed files are reserved and
-excluded from discovery; filenames are simple slugs without type-prefix
-(`mandants/team.yaml`). Going from 1 instance to 5 is zero work — the folder already exists.
+**Default-to-Folder:** every config type lives in `<wrapper>/<types>/` — a plural
+folder holding `_template.yaml`, an optional `_schema.yaml`, and all `<id>.yaml`
+instances together. `_`-prefixed files are reserved and excluded from discovery;
+filenames are plain slugs without a type prefix. Going from 1 instance to 5 is
+zero work. **Discovery** is the glob `<wrapper>/<types>/*.yaml` skipping `_`
+files: no flat fallback, no promote logic.
 
-**Discovery** is a simple glob `<wrapper>/<types>/*.yaml` (skip `_`-prefixed) — no flat
-fallback, no promote logic. Onboarding lays down the empty USER structure idempotently, so a
-fresh clone has the instance dirs even when it shipped only CORE templates.
-
-**Full maps:** [`rules/discovery.md`](rules/discovery.md) (reference impl + irregular-plural
-caveats), [`docs/structure.md`](docs/structure.md) (full layout + routing map, current
-allocation, template/schema locations), [`docs/extension-model.md`](docs/extension-model.md)
-(CORE/USER split with schemas). Examples per type: `docs/examples/<type>/`.
-
+Full layout and routing map: [`docs/structure.md`](docs/structure.md) ·
+reference implementation and irregular-plural caveats:
+[`rules/discovery.md`](rules/discovery.md) · examples per type under
+`docs/examples/`.
 ---
 
 ## Personas
 
-A persona represents an identity THE USER HOLDS, stored in `identity/personas/<id>.yaml`.
-Unlike mandants (recipient groups for outgoing messages), a persona carries tax data,
-signature blocks, document-filing destination paths, and vehicle classification. Load a
-persona when a skill, sub-agent, or routing standing-order references one via `persona_ref`.
-Schema + guide: `identity/personas/_template.yaml`, `_schema.yaml`,
-[`docs/personas.md`](docs/personas.md).
-
+A persona is an identity THE USER HOLDS (`identity/personas/<id>.yaml`), carrying
+tax data, signature blocks, filing destinations. Unlike a mandant, which is a
+recipient group. Load one when a skill or routing order references it via
+`persona_ref`. Guide: [`docs/personas.md`](docs/personas.md).
 ---
 
 ## Scope — structural, not declarative
 
 Every file's tier (**core** → open-bridge · **org** → your org overlay · **user**
-→ local) is decided by **where it lives**, not a tag you can forget. Three mechanisms:
+→ local) is decided by **where it lives**, not a tag you can forget:
 
 1. **Whole folder** — the path *is* the tier. `work/`, `imports/` = USER;
-   `docs/`, `themes/`, `trackers/`, `scripts/`, `protocols/standing-orders/*.md` = CORE.
-2. **`_`-prefix** (cluster-wrappers `identity/ infra/ workflow/`) —
-   `_template.yaml`/`_schema.yaml` = CORE, every other instance `*.yaml` = USER.
-3. **Frontmatter — skills and rules.** Skills are flat under `skills/` (open Agent-Skills
-   standard — discovered by Claude Code, Copilot CLI, Codex, Gemini, Cursor via the
-   `.claude/skills` / `.agents/skills` / `.github/skills` symlinks → `skills/`). They can't
-   be foldered, so tier lives in `metadata.scope`, hard-gated by
-   `scripts/validate-skill-scope.py` (CI + pre-commit). It validates that frontmatter and
-   writes the per-instance tier map to `.bridge/skill-scope.md`, never into this file: a
-   table generated from the local skill tree cannot converge across instances. Rules *are* foldered (§ Rules) and still route by path, but every `rules/*.md`
-   must **also** carry a top-level `scope:` matching its folder — hard-gated by
-   `scripts/validate-bridge.py` (CI). Without it an unscoped rule silently inherits `core`
-   from its path and would leak, so the field is a required backstop, not an option.
+   `docs/`, `themes/`, `trackers/`, `scripts/`, `protocols/standing-orders/*.md`
+   = CORE.
+2. **`_`-prefix** inside the cluster wrappers — `_template.yaml` / `_schema.yaml`
+   = CORE, every other `*.yaml` instance = USER.
+3. **Frontmatter**, for the two things that cannot be foldered: skills carry
+   `metadata.scope`, and every `rules/*.md` carries a top-level `scope:` matching
+   its folder. Both are hard-gated in CI. An unscoped rule silently inherits
+   `core` from its path and would leak, so the field is a required backstop, not
+   an option.
 
-**Rules are tiered by folder:** `rules/*.md` = core · `rules/org/**` = org · `rules/user/**`
-= user. Only core `rules/*.md` ship in open-bridge; `rules/org/` + `rules/user/` are added
-by a downstream overlay — additive, like nested AGENTS.md.
-
-**Promote routes mechanically** on these inputs (`rules/operations.md` is the
-SoT; `scripts/categorize-commits.py` classifies by them); the content
-leak-check is the **backstop**, not the primary guard — structure is what keeps
-PII/customer content out of the public OSS upstream.
-
-**Generic CORE skills:** a `scope: core` skill earns its tier by staying generic *inside* —
-it **reads** config (`bridge-config.yaml`, `workflow/`, `infra/`, `identity/`) and never
-embeds instance logic, hardcoded queries, org/project IDs, personas, or thresholds. If it
-needs a new instance knob, add the config key and read it. Detail + anti-pattern:
-[`docs/extension-model.md` § Generic CORE Skills](docs/extension-model.md).
-
+**Promote routes mechanically on these inputs.** The content leak-check is the
+backstop, not the primary guard: structure is what keeps PII out of the public
+upstream. Full model with schemas:
+[`docs/extension-model.md`](docs/extension-model.md).
 ---
 
 ## Skills (Universal)
 
 Skills live in `skills/` at the project root, following the open
-[SKILL.md standard](https://agentskills.io/specification) (AAIF / Linux Foundation).
-Each skill has a `SKILL.md` with YAML frontmatter (`name`, `description`) and a
-decision tree routing to `references/` files. Only load a reference when triggered.
-Every skill declares a single-line `description:` trigger. Always call the skill via the
-Skill tool (or load it from `skills/` directly on tools without one) rather than
-reimplementing the logic.
+[SKILL.md standard](https://agentskills.io/specification). Each has a `SKILL.md`
+with `name` + a single-line `description` trigger, and a decision tree routing to
+`references/` files loaded only when triggered. **Call the skill** (via the Skill
+tool, or by loading it from `skills/` on tools without one) rather than
+reimplementing its logic.
 
-**Discovery symlinks** (committed, so every clone gets them):
+Three committed symlinks (`.claude/skills`, `.agents/skills`, `.github/skills` →
+`skills/`) are the entire discovery mechanism, so every clone gets it.
+Distribution, Windows setup and the plugin path:
+[`docs/skill-distribution-architecture.md`](docs/skill-distribution-architecture.md).
 
-| Symlink | Target | Discovered by |
-|---------|--------|---------------|
-| `.claude/skills` | `→ skills/` | Claude Code |
-| `.agents/skills` | `→ skills/` | Copilot CLI, Gemini CLI, Codex, Cursor |
-| `.github/skills` | `→ skills/` | GitHub Copilot (project skills) |
+> **Never point `~/.claude/skills` at a Bridge repo.** The user level overrides
+> the project level, every Bridge ships the same CORE skill names, so a
+> user-level pointer at instance A silently overrides instance B's own skills
+> inside B — including CORE fixes authored in B, and including A's `scope: org`
+> skills. The failure is silent: plausible output from the wrong instance's
+> skills. One `readlink ~/.claude/skills` at session start buys that (empty is
+> correct). To make a standalone tool available everywhere, ship it as a plugin.
 
-The canonical location remains `skills/` — edit there, the symlinks follow.
-
-> **Never point `~/.claude/skills` at a Bridge repo.** These three committed
-> symlinks are the *entire* discovery mechanism — an instance's skills load
-> whenever the CWD is inside it, and no user-level pointer is needed. The user
-> level overrides the project level on a name collision, and every Bridge ships
-> the same CORE skill names, so a user-level pointer at instance A silently
-> overrides instance B's own skills inside B — including CORE fixes authored in
-> B, and including A's `scope: org` skills. The failure is silent (plausible
-> output from the wrong instance's skills). Skills in an instance belong to that
-> instance; the user level is for skills that belong to the machine. To make a
-> standalone tool skill available in any directory, ship it as a **plugin**.
-> Detail: [`docs/skill-distribution-architecture.md` § Why the user level is not
-> a distribution channel](docs/skill-distribution-architecture.md#why-the-user-level-is-not-a-distribution-channel)
-> · [`docs/multi-instance.md` § Capability Isolation](docs/multi-instance.md#capability-isolation).
-
-> **Windows:** Symlinks require Developer Mode + `git config core.symlinks true`.
-> Easiest: run `bin\setup.ps1` — it re-links **all three** targets (`.claude`,
-> `.agents`, `.github` skills) with a junction fallback (no Developer Mode needed) **and**
-> arms the pre-push guard. If linking by hand, recreate all three as links/junctions
-> (`.claude/skills`, `.agents/skills`, `.github/skills` → `skills/`) — prefer a link over
-> a copy so edits stay in sync.
-> On a default Windows git checkout the committed `.agents/skills` + `.github/skills`
-> symlinks degrade to plain-text files, so non-Claude tools find no skills — see the
-> README (Windows section) for the fix.
-
-| Group | Skills |
-|-------|--------|
-| **Bridge ops** (session lifecycle) | `briefing`, `archive`, `bridge-status`, `bridge-explorer`, `bridge-greeting` |
-| **Bridge maintenance** | `bridge-audit` (drift detection), `bridge-leak-check` (categorized content scan), `bridge-curator` (consolidation pass), `bridge-learn` (learning-loop proposals), `onboard-sim` (adversarial push-guard leak simulation) |
-| **Bridge setup + sync** | `bridge-onboard`, `bridge-promote`, `bridge-sync` (sprint-level batch sync to upstreams), `bridge-contribute` (fork-based upstream PRs), `bridge-overlay` (subscribe to org overlays), `knowledge-repo-init` (pair a knowledge repo), `workspace` (bind repos + config overlays into a project container) |
-| **Communication / meetings** | `debrief` (full / `--quick` / `--all` / `--date`), `meeting-transcription` (recording → transcript pipeline feeding `/debrief`) |
-| **Messaging + scheduling** | `channel`, `schedule`, `calendar`, `mandants` |
-| **Infrastructure** | `remote`, `workload` (declared runs: one file per run, provisioned and reconciled against the live service manager) |
-| **Projects** | `dashboard`, `project-advisor`, `github-projects-manager`, `tracker-sync`, `task-close-postmortem` |
-| **Documents** | `doc-system` |
-| **Authoring / visuals** | `html-canvas` (single-file HTML deliverables), `bridge-dashboard` (Bridge Control Center) |
-| **USER-scoped (`scope: org`)** | downstream `*-bridge` overlays add their own (e.g. customer coordinators, document routers, dashboards) |
-
-The groups above are a human-readable index. The **authoritative tier** (what `/promote` and
-`/bridge-sync` route by) is the per-skill `metadata.scope`. Skills are flat under `skills/`
-and can't be foldered, so scope lives in frontmatter, kept honest by
-`scripts/validate-skill-scope.py` (CI + pre-commit) — the validator is what makes it
-load-bearing instead of drift-prone. USER-scoped skills never land on `main` — see § Promote.
-
-The four tiers and where each one ships:
+**Tier lives in `metadata.scope`**, because skills are flat and cannot be
+foldered. It is what `/promote` and `/bridge-sync` route by, kept honest by
+`scripts/validate-skill-scope.py` (CI + pre-commit).
 
 | Scope | Ships to |
 |-------|----------|
@@ -308,530 +238,330 @@ The four tiers and where each one ships:
 | `personal` | your personal overlay + local |
 | `user` | local only |
 
-**Which skill sits in which tier is per-instance, so it is deliberately not listed
-here.** Your tree carries org skills, personal skills and local-only skills that no
-other Bridge has. Any enumeration baked into this CORE file would diverge from every
-other instance on the day it was written, conflict on every pull from upstream, and
-carry your local skill names upward on promote. Run the validator for the live map:
+**Which skill sits in which tier is per-instance, so it is deliberately not
+listed here** — any enumeration baked into a CORE file diverges from every other
+instance on the day it is written and carries local skill names upward on
+promote. Run the validator for the live map:
 
 ```bash
 python3 scripts/validate-skill-scope.py     # validates, then writes .bridge/skill-scope.md
 ```
 
-That map is derived and gitignored. The authoritative tier is `metadata.scope` in each
-`skills/<name>/SKILL.md`, which is what the routing actually reads
-(`scripts/categorize-commits.py` parses the frontmatter and never a table).
+That map is derived and gitignored; the authoritative tier is the frontmatter,
+which is what the routing actually reads.
 
-> **Historical note:** `bridge-core`, `bridge-ops` (as a skill), `bridge-setup` and
-> `bridge-fleet` are obsolete names from an earlier monolithic shape. The current split is
-> listed above. Ignore stale references in older docs.
-
+**Generic CORE skills:** a `scope: core` skill earns its tier by staying generic
+*inside* — it **reads** config and never embeds instance logic, hardcoded
+queries, org IDs, personas or thresholds. If it needs a new knob, add the config
+key and read it.
+[`docs/extension-model.md`](docs/extension-model.md).
 ---
 
 ## Tool Mapping
 
-If your platform uses different tool names, map them:
-
-| Claude Code | Codex | Copilot CLI | Gemini CLI | Cursor/Windsurf | Purpose |
-|-------------|-------|-------------|------------|----------------|---------|
-| Read | shell read (`sed`, `cat`) | read_file | read_file | open/read file | Read file contents |
-| Write | `apply_patch` | write_file | write_file | create file | Create/overwrite file |
-| Edit | `apply_patch` | edit_file | edit_file | patch file | Patch existing file |
-| Bash | shell command | run_command | run_command | terminal | Execute shell command |
-| Grep | `rg` | search | search | search | Search file contents |
-| Glob | `rg --files` / `find` | find_files | find_files | file search | Find files by pattern |
-| Agent | sub-agent tool if available | — | — | background agent if available | Spawn/delegate work |
-
-> **`—` in the Agent row** means the tool has no delegation API; skills run inline with
-> identical logic (capability preserved — only the isolation architecture differs).
-
-**Codex notes:** Prefer `rg`/`rg --files` for search, `apply_patch` for manual edits, and
-`AGENTS.md` (this file) as the repo-level instruction file. Codex can use the same universal
-skills via `.agents/skills/*/SKILL.md`.
-
+Tool names differ per platform (Read/Write/Edit/Bash/Grep/Glob/Agent here;
+`apply_patch` and shell reads on Codex; `read_file`/`write_file` on Copilot and
+Gemini). The full table, and what a missing delegation API means for skills that
+would dispatch a sub-agent, is in
+[`docs/tool-mapping.md`](docs/tool-mapping.md).
 ---
 
 ## Rules
 
-Rules are tiered by **folder** — the folder *is* the promote tier, and every `rules/*.md`
-must **also** carry a top-level `scope:` in frontmatter matching that folder. The field is a
-required backstop rather than the router: an unscoped rule inherits `core` from its path and
-would leak, so `scripts/validate-bridge.py` fails CI on a missing or invalid one.
+Rules are tiered by **folder**, and the folder *is* the promote tier:
+`rules/` = core (ships everywhere) · `rules/org/` = your org overlay only ·
+`rules/user/` = this instance only. Every `rules/*.md` must **also** carry a
+top-level `scope:` matching its folder — a required backstop, not the router,
+since an unscoped rule inherits `core` from its path and would leak.
+`scripts/validate-bridge.py` fails CI on a missing or invalid one.
 
-- **`rules/`** — CORE framework rules, always-on, ship to every downstream.
-- **`rules/org/`** — org-tier rules (ship to a downstream `*-bridge` overlay only, never open-bridge).
-- **`rules/user/`** — this instance's own rules (never ship anywhere).
-
-Each bridge layers its own rules under `rules/org/` (org) or `rules/user/` (personal) —
-additive, like nested AGENTS.md. Other tools: read `rules/*.md` plus whichever tier folders
-apply to your instance at session start.
-
-**Which rules an instance actually has is derived, never a table here.** Run the validator
-for the live map:
+**Which rules an instance has is derived, never a table here** — a table
+generated from a local tree cannot converge across instances. Run the validator
+for the live map, including the column frontmatter cannot express (whether git
+will track a **new** rule at that path, which in an overlay-subscribed instance
+is the difference between authoring a rule and losing it silently):
 
 ```bash
 python3 scripts/validate-bridge.py     # validates, then writes .bridge/rule-scope.md
 ```
 
-It lists every rule across every tier with its scope, plus whether git will track a **new**
-rule at that path. That second column is the one frontmatter cannot express and the reason
-the map exists: in an instance subscribed to an org overlay, `rules/org/` is a
-materialisation target, so a rule authored into it is invisible to git, skipped by
-`scripts/overlay-export.py`, and never reaches the overlay, with no error anywhere. Like
-`.bridge/skill-scope.md`, the map is derived and gitignored, because a table generated from
-the local tree cannot converge across instances.
+**The rules that fire before you would think to look them up**, since knowing
+they exist is the whole point of naming any of them here:
 
-| Rule | Tier | Purpose |
-|------|------|---------|
-| `session-start.md` | core | **Phase 0 gate** — branch/config detection before ANY response at session start |
-| `operations.md` | core | Session management (Phase 1), commit hygiene, CORE/USER promote routing, work logging |
-| `ci-discipline.md` | core | Verify CI green after every push unprompted; diagnose a red run from its log, not the workflow YAML |
-| `contribute-advisor.md` | core | Suggest upstream contributions when CORE-eligible files are created |
-| `deploy-reconciliation.md` | core | Declared `status:` fields are never trusted — probe the actual remote before any "running/deployed" claim |
-| `discovery.md` | core | Config-type resolution helper — the Default-to-Folder discovery glob over the cluster wrappers |
-| `file-creation.md` | core | Pre-write checklist — anchor on the matching template + schema + a peer example before creating any new YAML/MD |
-| `git-hygiene.md` | core | Git mechanics gates — DCO sign-off, atomic stage+commit, the `skills/` symlink path |
-| `knowledge-growth.md` | core | Meta-rule — where new knowledge belongs (CLAUDE.md vs `rules/` vs `docs/` vs standing-order vs memory) |
-| `language-policy.md` | core | CORE content is authored in English; runtime/output language is a separate per-fork axis |
-| `learning-autonomy.md` | core | The four layers the Bridge can change about itself, and the human gate at each one |
-| `multi-agent-review.md` | core | Three-phase parallel-agent review engine for strategic/high-stakes written communication |
-| `multi-instance-isolation.md` | core | Inbound isolation between Bridge instances — never pull another instance's content in |
-| `org-overlays.md` | core | Fail-closed contract for materializing an org overlay's `scope:org` content into a consumer Bridge |
-| `promote-safety.md` | core | Content-leak prevention before cherry-pick/merge to CORE branches — scope-check for `skills/` and `.claude/agents/` |
-| `push-guard.md` | core | Push-boundary gate blocking `user/*` branches and USER content from reaching a public upstream |
-| `recording-provenance.md` | core | Documenting a recording archives its original out of the inbox + links the source in every derived doc — both halves, never one |
-| `skill-routing.md` | core | Discipline for picking skills over ad-hoc prompts |
-| `task-management-workflow.md` | core | Detailed workflow for task management — reflex pause, plan/build classification, similarity, cluster detection |
-| `theme.md` | core | Theme system — resolution order, built-in themes, custom theme authoring |
-| `visual-output.md` | core | Cross-skill gates for generated visual deliverables — light/dark toggle, source attribution on every figure |
-
-Only the `core` rules above ship in open-bridge. The `rules/org/` and `rules/user/` folders
-do **not** ship in CORE OSS — a downstream `*-bridge` overlay adds its own org-tier rules
-under `rules/org/` (e.g. wiki conventions when a `wiki/` sibling exists) and personal rules
-under `rules/user/`. They are added by overlays, never present in a fresh open-bridge clone.
+- [`session-start.md`](rules/session-start.md) — the Phase 0 gate, before ANY response
+- [`push-guard.md`](rules/push-guard.md) — a `user/*` branch never reaches a public upstream
+- [`promote-safety.md`](rules/promote-safety.md) — content scan before anything moves to CORE
+- [`deploy-reconciliation.md`](rules/deploy-reconciliation.md) — a declared `status:` is never truth
+- [`file-creation.md`](rules/file-creation.md) — template + schema + peer example before any new file
+- [`multi-instance-isolation.md`](rules/multi-instance-isolation.md) — never pull another instance's content in
+- [`ci-discipline.md`](rules/ci-discipline.md) — verify CI green after every push, unprompted
+- [`knowledge-growth.md`](rules/knowledge-growth.md) — where a new piece of knowledge belongs
+- [`secret-placement.md`](rules/secret-placement.md) — no raw secret in a tracked
+  file: reference URIs only (`azure-keyvault://`, `keychain://`, `1password://`),
+  and an `env` block carries the locator, never the value
 
 ### Git & Branches
 
-CORE files (the default branch — `main` here) are generic and ship with the repo: skills,
-templates, schemas, docs, examples, CORE sub-agents, CORE standing-orders, `CLAUDE.md` /
-`README.md` / `AGENTS.md` / `GEMINI.md`. USER files (`user/{name}`) are your concrete
-instances: `bridge-config.yaml`, `ecosystem.yaml`, every `<id>.yaml` under the cluster
-wrappers, `workflow/projects/<slug>.yaml`, `standing-orders/user/`, and all of `work/`. CORE
-and USER touch disjoint paths, so merges are conflict-free by construction. Full per-path
-table: [`docs/structure.md`](docs/structure.md).
+CORE files (the default branch) are generic and ship with the repo. USER files
+(`user/{name}`) are your instances: `bridge-config.yaml`, `ecosystem.yaml`, every
+`<id>.yaml` under the cluster wrappers, `standing-orders/user/`, and all of
+`work/`. The two touch disjoint paths, so merges are conflict-free by
+construction. Per-path table: [`docs/structure.md`](docs/structure.md).
 
-- NEVER commit secrets or credentials on any branch
-- **NEVER push a `user/*` branch (or USER content) to a PUBLIC upstream** (e.g.
-  `bks-lab/open-bridge`). Your private data lives on a **private `origin`**; CORE
-  reaches a public upstream only via `/promote` (a fork-based, content-scanned PR).
-  Cloned the public repo directly? Re-home `origin` to your own private repo (or
-  GitHub *Use this template → Private*) and keep open-bridge as a read-only
-  `upstream`. Enforced behaviourally (onboarding + auto-end-of-work) and
-  deterministically by `scripts/hooks/pre-push`. Full rule:
-  [`rules/push-guard.md`](rules/push-guard.md)
-- Layout reorgs land directly on `user/{name}` — promote later
+- NEVER commit secrets or credentials on any branch.
+- **NEVER push a `user/*` branch (or USER content) to a PUBLIC upstream.** Your
+  private data lives on a private `origin`; CORE reaches a public upstream only
+  via `/promote`, a fork-based content-scanned PR. Cloned the public repo
+  directly? Re-home `origin` to your own private repo and keep open-bridge as a
+  read-only `upstream`. Enforced behaviourally and deterministically by
+  `scripts/hooks/pre-push`: [`rules/push-guard.md`](rules/push-guard.md).
+- Layout reorgs land directly on `user/{name}`; promote later.
+- Git mechanics (DCO sign-off, atomic stage+commit, the `skills/` symlink path):
+  [`rules/git-hygiene.md`](rules/git-hygiene.md).
 
 ### Multiple Instances
 
-Users may run multiple Bridge instances for data isolation between organizations — each a
-separate clone with its own `user/` branch, some pushed to a remote, some local-only to keep
-client data off shared remotes. Don't access or modify another instance's files;
-cross-instance work logging is not supported (each tracks its own `work/log.md`); other
-instances keep their own layout. **Full guide:** [`docs/multi-instance.md`](docs/multi-instance.md).
+Users may run several Bridge instances to keep organizations' data apart. Don't
+access or modify another instance's files; each tracks its own `work/log.md` and
+keeps its own layout. [`docs/multi-instance.md`](docs/multi-instance.md).
 
-### Tier Model (two-pole + optional org overlay)
+### Tier Model
 
-The base model is **two-pole** — open-bridge plus your own freely named private Bridge(s).
-The middle tier is an **optional convention**: an org that wants a shared overlay creates a
-private fork it names itself (`<your-org>/<your-bridge>`), and `scope: org` routes to it.
+Two-pole by default — `bks-lab/open-bridge` (OSS, MIT, generic CORE only) plus
+your own private Bridge. The middle tier is an optional convention: an org that
+wants a shared overlay creates a private fork it names itself, and `scope: org`
+routes there. `bridge-config.yaml.upstreams` is a list; `/promote` routes per
+`scope:`. Full model, including the subscribe direction:
+[`docs/org-overlays.md`](docs/org-overlays.md).
 
-| Tier | Role |
-|---|---|
-| `bks-lab/open-bridge` | OSS project — generic CORE only (this repo) |
-| `<your-org>/<your-bridge>` (optional private fork) | open-bridge + org overlay |
-| `<your-username>/your-bridge` (private fork) | upstream overlay(s) + personal PII |
-
-- **Multi-upstream:** `bridge-config.yaml.upstreams` as a list. `/promote` routes per `scope:` (core → open-bridge, org → your org overlay, user → local).
-- **Promote-safety is repo-specific:** open-bridge has a strict block-list; your org overlay is relaxed.
-- **Licence: MIT.**
-- **open-bridge is English-only.** Every file in this repo (CLAUDE.md, README.md, AGENTS.md, GEMINI.md, docs/, rules/, skills/, themes/, trackers/, examples/) must be entirely in English — no German sentences, headings, or comments in templates/schemas. CORE here is authored in English from the first keystroke — never written in another language and translated later. A downstream fork that contributes CORE upward must translate it to English before it lands; open-bridge itself never translates at promote. Runtime/output language is a separate axis (set per fork via `bridge-config.yaml` `language.conversation` / `language.artifacts`) — a German-speaking user still gets German conversation while these CORE files stay English. **Exception:** locale theme files under `themes/` (e.g. `professional-de.yaml`) legitimately carry non-English *vocabulary translations* — the theme's structural comments/keys stay English, but the user-facing vocabulary values may be in the target language. Full policy: [`rules/language-policy.md`](rules/language-policy.md).
-
-**Org Overlays — the subscribe direction.** `/promote` publishes `scope:org` content *up* to your org overlay; **org overlays** pull it back *down* into a teammate's fresh clone. The `/overlay` skill (`bridge-overlay`) sparse-clones an overlay repo named in a `role: org-overlay` upstream's `materialize:` block and materializes its files as copies pinned to immutable hashes — never touching the public OSS upstream, conflict-free against `git merge main`. Those copies are excluded from git by default (a fork of a public repo is itself public); the overlay's own source repo is the authoritative backup unless the consumer opts a subscription into normal git tracking via `materialize.track_managed_dests: true`. Full guide: [`docs/org-overlays.md`](docs/org-overlays.md).
-
-### Commits & PRs
-
-- Test before merge, user decides merge timing
-- Issues belong in the repo where the code lives
+**open-bridge is English-only** — every file here is authored in English from the
+first keystroke, never written in another language and translated later. Runtime
+and output language is a separate axis, set per fork. The one exception is locale
+theme files, whose *vocabulary values* may be in the target language.
+[`rules/language-policy.md`](rules/language-policy.md).
 
 ### Cross-Repo Work
 
-Before changing code in another repo: (1) read that repo's CLAUDE.md, (2) check its branch
-model, (3) commit changes there not here, (4) return and update the work log.
+Before changing code in another repo: read that repo's CLAUDE.md, check its
+branch model, commit the change there rather than here, then return and update
+the work log. Issues belong in the repo where the code lives. Test before merge;
+the user decides merge timing.
 
 ### Creating new files — schemas first
 
-Before writing **any** new YAML or MD under cluster wrappers, `protocols/`, `skills/`, or
-`trackers/`: read the matching `_template.yaml` + `_schema.yaml`, skim an existing peer file
-for field conventions, verify required keys / naming / expected companions — *then* write.
-Skipping this is the #1 source of drift. Full checklist + per-type table:
-[`rules/file-creation.md`](rules/file-creation.md).
+Before writing **any** new YAML or MD under the cluster wrappers, `protocols/`,
+`skills/` or `trackers/`: read the matching `_template.yaml` + `_schema.yaml`,
+skim a peer file for field conventions, verify required keys, naming and expected
+companions — *then* write. Skipping this is the single largest source of drift.
+Checklist and per-type table: [`rules/file-creation.md`](rules/file-creation.md).
 
 ### Documentation Navigation
 
-Central navigation lives in **a few strong documents**, not per-directory MOCs: `AGENTS.md`
-(this file — the canonical manual), `README.md`, [`docs/structure.md`](docs/structure.md)
-(layout + routing), [`docs/extension-model.md`](docs/extension-model.md) (CORE/USER +
-schemas), [`rules/knowledge-growth.md`](rules/knowledge-growth.md) (where new knowledge
-belongs), and [`docs/memory.md`](docs/memory.md) (the file-based memory model + lean-index
-discipline). When a directory genuinely needs navigation help, use a single industry-standard
-`README.md` (GitHub/IDEs render it automatically) — no custom `_MOC.md` / `index.md`
-conventions. Stand-alone doc files carry `summary` / `type` / `last_updated` / `related`
-frontmatter.
-
-### Key Conventions (quick reference)
-
-- **CORE/USER branch split:** `main` = shared templates, `user/{name}` = personal data. Different paths, conflict-free merges.
-- **Task Management:** `work/log.md` (daily log), `work/board.md` (generated task board), `work/tasks/` (finite tasks) + `work/streams/` (long-runners). Enabled via `work.enabled: true` in bridge-config.yaml.
-- **Sub-agents:** Native Claude Code sub-agents in `.claude/agents/*.md` (frontmatter: `name`, `description`, `tools`, `model`, optional `scope`). Spawned via `Task(subagent_type: …)`.
-- **Standing orders:** `protocols/standing-orders/` — always-on rules injected into every dispatch.
-- **Channels:** Messaging integrations in `infra/channels/*.yaml` (email, Signal, Telegram, iMessage, etc.).
-- **Calendar + Mandants:** Scheduled outbound actions in `workflow/calendars/entries.yaml`, recipient groups in `identity/mandants/*.yaml`.
-- **Project Registry:** Per-project configs in `workflow/projects/*.yaml` — field values, governance rules, state mappings. Read the matching config BEFORE any GitHub/ADO operation.
-
+Navigation lives in a few strong documents, not per-directory maps: this file,
+[`README.md`](README.md), [`docs/structure.md`](docs/structure.md) (layout +
+routing), [`docs/extension-model.md`](docs/extension-model.md) (CORE/USER +
+schemas), [`rules/knowledge-growth.md`](rules/knowledge-growth.md) (where new
+knowledge belongs) and [`docs/memory.md`](docs/memory.md). Where a directory
+needs help, use a plain `README.md`. Stand-alone docs carry `summary` / `type` /
+`last_updated` / `related` frontmatter.
 ---
 
 ## Task Management
 
-**Activated when** `work.enabled: true` in bridge-config.yaml (set `false` to deactivate;
-data under `work/` is preserved). The system is called **Task Management**; the directory
-that holds its data stays named `work/`.
+**Activated when** `work.enabled: true`. The system is **Task Management**; its
+data directory stays named `work/`.
 
-**The model (two orthogonal axes — KIND is the folder, status is the field):**
-
-- **KIND = the folder.** `work/tasks/<slug>/` = a **finite** task (reaches `done`).
-  `work/streams/<slug>/` = a **long-runner** (never `done`, excluded from WIP).
-  `work/done/YYYY-MM/<slug>/` = closed. Moving KIND = `mv` the directory; there is no
-  `kind:` field.
-- **status = the field**, a closed enum: `status ∈ {backlog, doing, review, done}` —
-  CI-validated against `work/templates/_schema.status.yaml`. No synonyms; the enum never
-  grows informally.
-- **`blocked_by:` is a free-text FLAG, not a status.** A blocked task stays `doing` (or
-  `review`) and carries `blocked_by: "<reason>"`. **`declined` is an outcome:** a declined
-  task is `status: done` + `outcome: declined`.
-- **board.md is GENERATED** from the task dirs (sections == the enum + Streams + Done,
-  counts == `ls`) — never hand-curated. Humans edit STATUS.md; the board is regenerated.
-- **WIP cap is a WARNING, never a block.** Session-start warns when `doing + review` in
-  `work/tasks/` exceeds `work.max_active`; new work is never refused. The remedy is to
-  close, reprioritise, or reclassify a task to `work/streams/` (streams never count
-  against WIP).
+**The model, two orthogonal axes.** KIND is the **folder**:
+`work/tasks/<slug>/` is finite, `work/streams/<slug>/` is a long-runner that
+never completes and never counts against WIP, `work/done/YYYY-MM/<slug>/` is
+closed. Moving KIND is a `mv`; there is no `kind:` field. **status is the
+field**, a closed enum `{backlog, doing, review, done}`, CI-validated. No
+synonyms. `blocked_by:` is a free-text **flag**, not a status: a blocked task
+stays `doing` and carries a reason. `declined` is an **outcome**:
+`status: done` + `outcome: declined`. **board.md is GENERATED** from the task
+dirs and never hand-curated; humans edit STATUS.md. The **WIP cap is a warning,
+never a block** — session start warns when `doing + review` exceeds
+`work.max_active`, and the remedy is to close, reprioritise, or reclassify to
+`work/streams/`.
 
 ### Session Start (automatic when enabled)
 
-Read `work/log.md` (last activity, current week) + `work/board.md` (active tasks); create
-either from templates if missing — **never fail on missing work files, create and continue**.
-Ensure today has a day-block. Warn (do not block) if `doing + review` in `work/tasks/`
-exceeds `work.max_active`. Load standing orders with `scope: always`.
+Read the recent slice of the log
+(`python3 scripts/worklog.py --recent 3`) and `work/board.md`, creating either
+from templates if missing — **never fail on a missing work file, create and
+continue**. Ensure
+today has a day-block. Warn, do not block, on the WIP cap. Load the standing-order
+index (§ Standing Orders). Full sequence:
+[`rules/operations.md`](rules/operations.md).
 
 ### Logging
 
-> **Logging is mandatory and continuous — not best-effort.** Every substantive unit of work
-> gets its own `work/log.md` row the moment it lands, in the same turn it happened — not
-> batched at the end. That covers a code change or commit, a bug fixed, a decision made
-> (+ the *why*), a finding worth keeping, a deploy/restart, an issue/PR/board operation. If
-> you did work this turn and there is no row for it, the turn is **not finished** — append
-> the row before you hand back.
+> **Logging is mandatory and continuous, not best-effort.** Every substantive
+> unit of work gets its own `work/log.md` row the moment it lands, in the same
+> turn it happened, never batched at the end. That covers a code change or
+> commit, a bug fixed, a decision made *and why*, a finding worth keeping, a
+> deploy or restart, an issue/PR/board operation. If you did work this turn and
+> there is no row for it, the turn is **not finished**.
 
-Default level `hybrid`: auto-log on triggers (commits, command/skill invocations, repo
-switches, significant results, end of a work block) and remind if >30 min silent. Levels
-`auto` (triggers only) and `manual` (on request) are selectable in bridge-config.yaml.
-Document **insights, not just actions** — log.md is the working memory `/briefing` reads.
+**One frozen row format:** `| YYYY-MM-DD HH:MM | glyph | context | what |`
 
-**Format (one frozen row format):** `| YYYY-MM-DD HH:MM | glyph | context | what |`
-- **Timestamp:** full-ISO date+time via `date '+%Y-%m-%d %H:%M'` — every row **self-dates**, so a
-  stale or unarchived log is never ambiguous; NEVER xx:xx or placeholders. The day-block header
-  stays `## {Weekday} DD.MM` (a display anchor the `/archive` + `/briefing` parsers key off — do
-  NOT add a year there). The old time-only `| HH:MM | … |` row is retired.
-- **glyph:** emoji from `activity_types` in bridge-config.yaml; **context:** repo tag from
-  ecosystem.yaml; chronological append at the end of the current day-block.
+- **Timestamp:** full ISO date+time from `date '+%Y-%m-%d %H:%M'`, so every row
+  self-dates and a stale log is never ambiguous. NEVER a placeholder, never
+  estimated. The day-block header stays `## {Weekday} DD.MM` — a display anchor
+  the `/archive` and `/briefing` parsers key off, so no year there.
+- **glyph** from `activity_types` in config; **context** is the repo tag;
+  appended chronologically inside the current day-block.
 
-Full level semantics: [`docs/work-system.md`](docs/work-system.md) (if present) /
-`bridge-config.yaml` `work:`.
+Document **insights, not just actions**: log.md is the working memory `/briefing`
+reads. Level semantics: [`docs/work-system.md`](docs/work-system.md).
 
 ### Consult before write
 
 The Bridge advises; it does not act autonomously. **Reflex-pause before the first
-*write* of any unit of work** — and a write is not just a productive-folder change
-(`skills/`, `protocols/`, `identity/`, `workflow/`, `infra/`, `work/tasks/<slug>/`,
-`work/streams/<slug>/`, `work/board.md`, `work/log.md`) but **any state change
-anywhere**: a commit or push on *any* repo, a GitHub/ADO issue-or-PR-or-board operation
-(create · close · comment · merge), an outbound message. Reading is always free; the
-pause fires the instant you are about to change state.
+*write* of any unit of work** — and a write is not only a productive-folder
+change but **any state change anywhere**: a commit or push on *any* repo, a
+GitHub/ADO issue-or-PR-or-board operation, an outbound message. Reading is always
+free; the pause fires the instant you are about to change state.
 
-**Escalation cancels the read-only exemption.** A turn that began as read / info /
-analysis is exempt only while it stays read-only. The instant it grows a write — an
-issue you're about to close, a PR you're about to open, a task you're about to
-create — re-enter this gate. Never ride the opening "just have a look" framing into
-real changes.
+**Escalation cancels the read-only exemption.** A turn that began as research is
+exempt only while it stays read-only. The instant it grows a write, re-enter this
+gate. Never ride an opening "just have a look" into real changes.
 
-Four steps; **step 1 is mandatory before the first write, whatever the mode:**
-
-1. **Active-task check** — `ls work/tasks/` + `ls work/streams/` + board.md Doing.
-   Slug / context / stakeholder match → propose *"Fits `<slug>`?"* before creating
-   anything new; ≥3 siblings share a prefix → cluster warning. Skipping this is how
-   duplicate tasks and orphaned streams get born.
-2. **Mode check — plan or build?** PLAN (research / sketch / draft / explore / analyze /
-   evaluate) → answer in chat. BUILD (implement / create-file / deploy / merge / verify /
-   commit / fix / close-issue / open-PR) → allowed after steps 1 + 3. Ambivalent (create /
-   review / audit / consolidate) → ask.
-3. **Class check** ([`board-task-criteria.md`](protocols/standing-orders/board-task-criteria.md)):
-   cross-session pickup OR external recipient → **Class A** (STATUS.md + board row,
-   task-sync runs). Otherwise Class B (log only) or Class C (silent for routine commands).
+1. **Active-task check** — `ls work/tasks/` + `ls work/streams/` + the board's
+   Doing. A slug, context or stakeholder match → propose *"Fits `<slug>`?"*
+   before creating anything new; three siblings sharing a prefix → cluster
+   warning. Skipping this is how duplicate tasks get born.
+2. **Mode check** — PLAN (research, sketch, draft, explore, evaluate) → answer in
+   chat. BUILD (implement, create, deploy, merge, commit, fix, close, open a PR)
+   → allowed after steps 1 and 3. Ambivalent → ask.
+3. **Class check** — cross-session pickup OR an external recipient → **Class A**
+   (STATUS.md + board row + task-sync). Otherwise Class B (log only) or C.
 4. **When in doubt: ONE question.** `[a] fits <slug>` / `[b] new as <proposal>` /
    `[c] chat only` / `[d] just do it`. Do not guess.
 
-**Don't reflex** on: slash commands (`/briefing`, `/archive`, `/bridge-*`); read/info
-queries **that stay read-only** (once one produces a write, the escalation clause fires);
-quick fix <10 min and <3 files; a topic the user already declined this session.
+**Don't reflex** on slash commands, on read/info queries *that stay read-only*, on
+a quick fix under 10 minutes and 3 files, or on a topic the user already declined
+this session. Intent lists, similarity algorithm, cluster detection, class
+examples and repair recipes:
+[`rules/task-management-workflow.md`](rules/task-management-workflow.md).
 
-Full intent lists, similarity algorithm, cluster detection, class A/B/C examples, repair
-recipes: [`rules/task-management-workflow.md`](rules/task-management-workflow.md).
+**Lifecycle, three steps:** `mv` the directory, **regenerate** board.md from the
+dirs, append a log row with a measured timestamp.
 
-**Task buckets:** `work/tasks/<slug>/` = finite tasks in flight · `work/streams/<slug>/` =
-long-running streams that never complete (do **not** count against `max_active`) ·
-`work/done/$(date +%Y-%m)/<slug>/` = closed.
+### Task Sync Routing
 
-**Task lifecycle (3 steps):** (1) `mv work/{from}/{slug} work/{to}/{slug}` (done →
-`work/done/$(date +%Y-%m)/`), (2) **regenerate** board.md from the dirs (never hand-edit it),
-(3) log entry with timestamp. If `doing + review` in `work/tasks/` >= max_active → **WARN
-only** (never blocks) and suggest closing, reprioritising, or moving a long-runner to
-`work/streams/`.
-
-### Task Sync Routing (three-axis model)
-
-Every task lives at the intersection of three orthogonal axes — **project**
+Every task sits at the intersection of three orthogonal axes: **project**
 (`workflow/projects/<slug>.yaml`, board fields), **context**
-(`workflow/contexts/<slug>.yaml`, where we document), **mandant**
-(`identity/mandants/<slug>.yaml`, who gets notified). STATUS.md's `sync:` block declares
-per-task overrides; the resolver merges with context defaults (most specific wins);
-`bridge_only: true` is the explicit local-only fallback. Contexts can opt into stricter
-rules (e.g. `dual_doku: required`). Canonical resolver + schemas:
-[`protocols/standing-orders/task-sync.md`](protocols/standing-orders/task-sync.md),
-`work/templates/STATUS.md`, `workflow/contexts/_schema.yaml`.
+(`workflow/contexts/<slug>.yaml`, where we document) and **mandant**
+(`identity/mandants/<slug>.yaml`, who gets notified). STATUS.md's `sync:` block
+declares per-task overrides, the resolver merges with context defaults, and
+`bridge_only: true` is the explicit local-only fallback. Canonical resolver:
+[`protocols/standing-orders/task-sync.md`](protocols/standing-orders/task-sync.md).
 
-### Trackers (issue / work-item integration)
+### Trackers and the Project Registry
 
-The Bridge reads work items from external trackers via **pluggable provider playbooks** in
-`trackers/*.md` — each a markdown file telling the agent which CLI to run and how to normalize
-output into a shared schema (contract: [`trackers/README.md`](trackers/README.md)). Shipped:
-`github.md` (working, `gh` CLI), `ado.md` (reference, `az` CLI). A new tracker = a new
-`trackers/{name}.md` matching the contract. Enable per provider in `bridge-config.yaml` under
-`integrations.<name>.enabled`; `/briefing` Stream B fans out over enabled providers in
-parallel.
+Work items come from external trackers via pluggable provider playbooks in
+`trackers/*.md`, each normalizing its CLI output into a shared schema
+([`trackers/README.md`](trackers/README.md)). Enable per provider under
+`integrations.<name>.enabled`. Writes go through the
+**`github-projects-manager`** skill, never raw `gh issue create`.
 
-**Write operations** (issues, board moves, governance) go through the
-**`github-projects-manager`** skill, driven by the Project Registry
-(`workflow/projects/<slug>.yaml`); `project-advisor` provides K/W/B governance and
-board-health checks.
-
-- **Before ANY GitHub/ADO operation:** read the matching `workflow/projects/<slug>.yaml` for valid field values + state mappings — **never hardcode field values**.
-- Create issues through `github-projects-manager`, never raw `gh issue create`.
-- After adding to a project: verify the item is actually on the board.
-- Never set issues to "Done" directly — use "In Review" first, user confirms.
-
-### Project Registry (CRITICAL)
-
-Before creating issues, updating fields, or querying boards, **always** read the matching
-project config from `workflow/projects/{slug}.yaml`. It defines:
-- Valid field values (status, priority, type, size — with exact emoji prefixes)
-- Governance level (`strict`/`standard`/`relaxed`) and per-rule overrides
-- State mappings for tracker normalization
-- Review comment templates
-
-**Never hardcode field values.** Never guess emoji prefixes. The config is the source of
-truth. (One instance of the general principle that CORE skills are config-driven — see
-[`docs/extension-model.md` § Generic CORE Skills](docs/extension-model.md).) Template +
-examples in `workflow/projects/_template.yaml` and `docs/examples/projects/` (operational,
-technical, minimal, ADO).
+> **Before ANY GitHub/ADO operation, read the matching
+> `workflow/projects/<slug>.yaml`** for valid field values and state mappings.
+> **Never hardcode a field value, never guess an emoji prefix** — the config is
+> the source of truth. After adding an item to a project, verify it is actually
+> on the board. Never set an issue straight to "Done": use "In Review" and let
+> the user confirm.
 
 ### Commands
 
-In Claude Code, each skill registers its own slash-command trigger via its `description:`
-frontmatter — there are no separate files in `.claude/commands/`. Invoking the skill via the
-`Skill` tool is equivalent to typing the slash-command. Other tools (Codex, Copilot, Gemini,
-Cursor) load the skill from `skills/` directly.
-
-| Command | Backing skill | Action |
-|---------|---------------|--------|
-| `/bridge-status` | `bridge-status` | Status dashboard: ecosystem, agents, work, remotes |
-| `/bridge-explorer` | `bridge-explorer` | Ecosystem + repo-layout + constellation visualizations |
-| `/briefing` | `briefing` | Daily briefing: board, git activity, goals, alerts |
-| `/archive` | `archive` | Archive week + create summary |
-| `/debrief` | `debrief` | Process transcripts: 7-category insights, tasks, protocols (full / `--quick` / `--all` / `--date`) |
-| `/bridge-onboard` | `bridge-onboard` | New user setup or reconfiguration |
-| `/channel` | `channel` | Channel management: list, health, deploy, start/stop |
-| `/remote` | `remote` | Remote management: status, health, logs, restart, sync |
-| `/workload` | `workload` | Declared runs: `declare`, `validate`, `render`, `provision`, `list`, `show`, `reconcile`, `view`, `publish`, `adopt`, `retire` |
-| `/schedule` | `schedule` | Scheduled tasks: list, create, deploy, disable |
-| `/promote` | `bridge-promote` | Promote CORE changes upstream (scope:core → `bks-lab/open-bridge`, scope:org → your optional org overlay) |
-| `/overlay` | `bridge-overlay` | Subscribe to org overlays + materialize scope:org content into the live tree (downstream inverse of `/promote`) |
-| `/contribute` | `bridge-contribute` | Scan user branch for upstream-worthy contributions |
-| `/calendar` | `calendar` | Calendar entries: list, add, cancel, confirm, show, status |
-| `/mandants` | `mandants` | Mandant management: list, add, show, add-person |
-
+Each skill registers its own slash-command through its `description:`
+frontmatter; there are no files in `.claude/commands/`, and invoking a skill via
+the Skill tool is equivalent to typing its command. The CORE set:
+[`docs/commands.md`](docs/commands.md). An instance carries more, and which ones
+is per-instance, so the live list is the skill listing itself.
 ---
 
 ## Remotes — Remote Machines
 
-The user's physical and virtual machines live in **`infra/remotes/*.yaml`** — the single
-source of truth for hardware inventory, network topology (Tailscale + LAN), SSH configs,
-Wake-on-LAN, and per-box services. In Bridge context "remote" means **remote machine**, NOT
-`git remote` — always check `infra/remotes/` first before asking "which PC?". Triggers: a
-machine name, "my PC / my machines / fleet status", "wake / WoL", "ssh to / RDP to", "is
-{name} online". The **`remote`** skill owns this directory and auto-loads on that vocabulary.
-Schema in `infra/remotes/_template.yaml`; per-box setup notes in `<name>-setup.md`.
-
-### Hard rules
-
-- **Tailscale first**, LAN as fallback — LAN fails on VPN or foreign networks
-- **No destructive operation** (shutdown, reboot, format) without per-action `[y]`
-- **Never store credentials** in `infra/remotes/*.yaml` — KeyVault / 1Password URIs only
-- **Honor `wake_on_lan.enabled: false`** — never force wake a machine that opted out
-- **Deploy/bootstrap:** declared `status:` is never trusted, the remote's service manager is — [`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md) (launchd, systemd, watch-path)
-
+Your physical and virtual machines live in `infra/remotes/*.yaml`. In Bridge
+context **"remote" means remote MACHINE, never `git remote`** — check
+`infra/remotes/` before asking "which PC?". The **`remote`** skill owns the
+directory and auto-loads on a machine name, "my PC / fleet status", "wake / WoL",
+"ssh to / RDP to". Schema: `infra/remotes/_template.yaml`.
 ---
 
 ## Workloads — Declared Runs
 
-A **workload** is one thing that runs on one machine: a scheduled report, an
-interval poller, a daemon, an agent, a path watcher, a one-shot. It lives as a
-single declaration in **`workflow/workloads/<id>.yaml`**, and the `workload`
-skill renders the unit from it, provisions it, reconciles it against the live
-service manager, and can draw the result as one self-contained page.
-
-The declaration is the source of truth; the unit on the machine is an artifact
-and may be rebuilt from it at any time. The contract has four parts: WHERE it
-sits (`placement`), WHEN it fires (`schedule`), HOW it runs (`execution`), HOW
-it answers (`response`), plus an optional `reconcile` probe.
-
-### Hard rules
-
-- **There is no `status:` field, and that is deliberate.** A declared status is
-  never the truth; the service manager is
-  ([`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md)).
-- **Recipients are references** (`mandant:` / `person:`), never plaintext
-  addresses: a declaration is a tracked file and travels with the scope router.
-- **`execution.env` carries locators, never values** (`keychain://…`), and the
-  locator is what reaches the unit. The program resolves its own at run time.
-- **Running one by hand proves nothing about the job.** The honest probe runs in
-  the service manager's context, which has its own identity and its own grants.
-
-**The rest, and where:** the data model, the remaining contract rules (two
-ownership signals; a deadline, evidence and `owner: bridge` are mandatory) and
-the case behind each one in [`docs/workloads.md`](docs/workloads.md) · schema,
-template and the contract's regression suite under `workflow/workloads/` · the
-skill's mechanics, `view` and `publish` included, in `skills/workload/SKILL.md`
-· what a drawing may assert in
-[`rules/visual-output.md`](rules/visual-output.md) § Gate 3.
-
+A **workload** is one thing that runs on one machine: a scheduled report, a
+poller, a daemon, a watcher, a one-shot. One declaration per run in
+`workflow/workloads/<id>.yaml`; the `workload` skill renders, provisions and
+reconciles from it. There is deliberately no `status:` field. Data model,
+contract rules and the case behind each: [`docs/workloads.md`](docs/workloads.md).
 ## Channels — Messaging & Outbound Transports
 
-Transport declarations live in **`infra/channels/*.yaml`** (iMessage, email, Telegram, news
-digests, WhatsApp bots, …). Each channel's runtime usually sits on a remote as a
-launchd/systemd unit or on-demand script. Trigger the `/channel` skill on "channel status /
-health / deploy", "new channel for X", "set up bot", or any known channel name; delegate
-scheduled messages to `/schedule`. **Deploy/status semantics:** declared `status:` is never
-truth, the service manager is — [`rules/deploy-reconciliation.md`](rules/deploy-reconciliation.md).
-Schema: `infra/channels/_template.yaml`; detail: [`docs/channels.md`](docs/channels.md).
-
+Transport declarations live in `infra/channels/*.yaml` (iMessage, email,
+Telegram, digests, bots). The `/channel` skill triggers on "channel status /
+health / deploy", "new channel for X", or a known channel name; scheduled sends
+go to `/schedule`. Detail: [`docs/channels.md`](docs/channels.md).
 ---
 
 ## Visualization — Bridge Deck (optional)
 
-Optional read-only pixel-art renderer of your Bridge (agents as walking sprites, calendar +
-mandants tabs). Suggest it as a one-liner when the user asks to visualize their agents — do
-NOT auto-install. Details: [`docs/bridge-deck.md`](docs/bridge-deck.md).
-
+Optional read-only pixel-art renderer of your Bridge. Suggest it as a one-liner
+when the user asks to visualize their agents; never auto-install.
+[`docs/bridge-deck.md`](docs/bridge-deck.md).
 ---
 
 ## Calendar + Mandants
 
-Optional system for scheduled outbound (emails, iMessages, reports, digests) with recipient
-attribution. Three layers: **Mandants** (`identity/mandants/<id>.yaml`) = recipient groups
-(company / household / family / friends / colleagues / individual); **Calendar entries**
-(`workflow/calendars/entries.yaml`) = what/whom/when with `delivery_at`,
-`duration_estimate_min`, and an `origin` block; **Visualization** = bridge-deck Timeline
-(read-only). Enable via `calendar.enabled: true` + `mandants.enabled: true`, then derive
-files from the templates. Commands: `/calendar list|add|show|cancel|confirm|status`,
-`/mandants list|add|show|add-person`.
-
-**Key rules:** calendar/mandants files are read-only from bridge-deck. Calendar job IDs are
-stable as `scheduled:calendar:${id}:slot-${N}`, never absolute timestamps.
-`effective_at = delivery_at − duration_estimate_min`. Full docs:
-[`docs/calendar.md`](docs/calendar.md), [`docs/mandants.md`](docs/mandants.md).
-
+Optional system for scheduled outbound with recipient attribution: **mandants**
+(`identity/mandants/<id>.yaml`) are recipient groups, **calendar entries**
+(`workflow/calendars/entries.yaml`) are what/whom/when. Enable via
+`calendar.enabled` + `mandants.enabled`. Commands `/calendar` and `/mandants`.
+Full model: [`docs/calendar.md`](docs/calendar.md),
+[`docs/mandants.md`](docs/mandants.md).
 ---
 
 ## Backups
 
-Data model in **`infra/backups/topology.yaml`** (`sources` × `targets` × `pipelines`); state
-(last_run, restic snapshot IDs) in `infra/backups/_state.yaml`, written only by the skill.
-Topology is USER data. **Activated** simply by the file existing — no separate switch. CORE
-ships the data model, not an executor: a topology-reader-plus-tool-dispatcher skill (your own
-`backup` skill, or one distributed as a plugin) reads the topology and dispatches
-`rclone-sync` / `rclone-copy` / `restic-backup` / `rsync-via-ssh`.
-
-**Key rules:** `topology.yaml` is the truth — never hardcode paths (one instance of generic
-CORE skills). `_state.yaml` is written only by the skill. Time-Machine pipelines
-(`tool: time-machine`) are passive on macOS — the skill only documents intended state. Drift
-surfaces as a briefing block, never a crash. Validation rules + target/actual comparison:
+Data model in `infra/backups/topology.yaml` (`sources` × `targets` ×
+`pipelines`), state in `_state.yaml`, written only by the skill. Activated by the
+file existing. CORE ships the data model, not an executor. Validation rules and
+target-versus-actual comparison:
 [`infra/backups/README.md`](infra/backups/README.md).
-
 ---
 
 ## Cloud Accounts & Secrets
 
-Cloud-provider accounts and their secret stores live as inventory files in
-**`identity/accounts/<provider>-<scope>.yaml`** — the single source of truth for tenant IDs,
-subscriptions, vault names, resource-group maps, and bootstrap CLI sequences. Complex files
-carry a `<id>.README.md` companion (decision matrix / setup recipes / rotation howto).
-
-### Hard rules
-
-- **Before any cloud op** (`az …`, `wrangler …`, `gcloud …`, `gh api …`, provider REST):
-  read the matching `identity/accounts/<provider>-<tenant>.yaml` for tenant ID, subscription,
-  vault names, and bootstrap snippet — never guess or reconstruct from memory.
-- **No raw secret in YAML.** Only reference URIs (`azure-keyvault://…`, `keychain://…`,
-  `1password://…`); real values live in the vault / keychain.
-
-Full patterns (vocabulary triggers, per-provider recipes, tenant-switch and rotation
-guidance): [`docs/cloud-accounts.md`](docs/cloud-accounts.md).
-
+Cloud accounts and their secret stores live as inventory in
+`identity/accounts/<provider>-<scope>.yaml`. **Before any cloud operation**
+(`az`, `wrangler`, `gcloud`, `gh api`, provider REST) read the matching file for
+tenant, subscription, vault and bootstrap snippet rather than reconstructing it
+from memory. **No raw secret in YAML** — reference URIs only
+([`rules/secret-placement.md`](rules/secret-placement.md)). Per-provider recipes,
+tenant switching, rotation:
+[`docs/cloud-accounts.md`](docs/cloud-accounts.md).
 ---
 
 ## Design System
 
-`DESIGN.md` (repo root) is the open-bridge design-system manifest in
-[Google Labs DESIGN.md alpha](https://github.com/google-labs-code/design.md) format —
-token-level palette, typography, spacing, and component anatomy. **Read before generating
-user-facing visuals:** skills that emit HTML, PDF, slides, certificates, dashboards, or
-styled emails MUST pull colors/typography/spacing tokens from `DESIGN.md` instead of
-inventing palettes (shipped consumers: `html-canvas`, `bridge-dashboard`). **Never
-hand-pick brand colors** — if a token is missing, add it to `DESIGN.md` first (see § "Maintaining
-this file"), then reference it.
-
+`DESIGN.md` is the design-system manifest (palette, typography, spacing,
+component anatomy). **Read it before generating user-facing visuals** — any skill
+emitting HTML, PDF, slides, certificates or styled email pulls its tokens from
+there. **Never hand-pick a brand colour**; if a token is missing, add it to
+[`DESIGN.md`](DESIGN.md) first, then reference it.
 ---
 
 ## Variable Interpolation
 
-`bridge-config.yaml` defines variables under the `identity:` config key. All YAML files under
-the cluster wrappers (`identity/`, `infra/`, `workflow/`), plus `ecosystem.yaml`, can use
-`${variable}`: `${projects_root}`, `${home}` (or `$HOME`), `${onedrive_root}`, and a leading
-`~` → `$HOME`. Unknown variables → warning, file skipped.
+`bridge-config.yaml` defines variables under the `identity:` key. Every YAML
+under the cluster wrappers, plus `ecosystem.yaml`, can use `${variable}`:
+`${projects_root}`, `${home}`, `${onedrive_root}`, and a leading `~` → `$HOME`.
+An unknown variable warns and skips the file.
 
-> **Disambiguation:** `identity:` (config key in `bridge-config.yaml`) ≠ `identity/`
-> (cluster-wrapper folder). Same word, different namespaces. Follow-up cleanup: rename the
-> config key to `profile:` (see [Tier Model](#tier-model-two-pole--optional-org-overlay)).
-
+> **Disambiguation:** `identity:` (a config key) is not `identity/` (a cluster
+> wrapper). Same word, different namespaces.
 ---
 
 ## Promote

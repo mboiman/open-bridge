@@ -3,6 +3,9 @@ name: work-board-reconciliation
 scope: always
 enforcement: advisory
 applies_to: []
+load: on-trigger
+triggers: ["board", "move a task", "regenerate the board", "task status", "done folder"]
+summary: "Folder and STATUS.md are two axes of one task and must never drift; the board is generated, never hand-edited."
 ---
 # Work Board Reconciliation — Folder ↔ STATUS Coherence
 

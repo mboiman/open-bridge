@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=./docs/schemas/context-budget.schema.yaml
+---
+# Context budget — the declared ceiling on what every session loads before it
+# answers anything.
+#
+# WHAT THIS FILE IS FOR. A session opens by loading the `@`-imports named in
+# CLAUDE.md, every standing order carrying `scope: always`, and the Phase 1
+# reads. That body of text is paid on every turn, and roughly half of it never
+# shows up in a client's context listing because it arrives through tool reads
+# rather than imports. Nothing measured it, so it only grew. One file here has
+# never sprawled, `identity/agent/SOUL.md`, and the only thing that
+# distinguishes it is a declared cap that a validator enforces.
+#
+#   python3 scripts/measure-context.py            # report + gate (bytes, offline)
+#   python3 scripts/measure-context.py --method api   # exact token counts
+#
+# WHAT A CAP MEANS. `max_bytes` is not a target and not a prediction. It is the
+# size at which the next person to grow this file has to say why, in a diff a
+# reviewer sees. Caps below sit a little above what each file measures today,
+# so ordinary edits pass and a step change does not.
+#
+# WHAT GATES. Bytes. They are exact, offline, and identical on every machine.
+# Tokens are reported next to them as an estimate and never fail a build:
+# a single bytes-per-token factor across mixed content is too crude to gate on.
+# Run with `--method api` for exact, model-specific counts.
+#
+# PER-INSTANCE ENTRIES belong in `context-budget.user.yaml`, which is not
+# tracked here. It replaces an entry wholesale by key.
+
+schema_version: 1
+
+calibration:
+  # Calibrated against reported context sizes: English prose in this repo runs
+  # near 2.6 bytes per token, German nearer 2.0. Bytes-over-four is not a
+  # usable estimator — it was measured 57 % low on German content. A fork whose
+  # always-on files are not English should override this.
+  bytes_per_token: 2.6
+  # Token counts are model-specific; this is the model `--method api` asks.
+  model: claude-opus-5
+
+items:
+  # ---------------------------------------------------------------- imports --
+  CLAUDE.md:
+    max_bytes: 4000
+    note: The entry file. Thin by design; it routes, it does not explain.
+
+  AGENTS.md:
+    max_bytes: 32000
+    note: >-
+      The operating manual, and still the largest single always-on item. It
+      routes; it does not restate. Every load-bearing pointer in it is a
+      markdown link, which `scripts/check-doc-routes.py` holds to resolving.
+
+  ecosystem.yaml:
+    optional: true
+    note: >-
+      Created at onboarding and gitignored, so absent in a fresh clone. No cap
+      shipped: CORE cannot know how large an instance's registry should be.
+
+  # -------------------------------------------------------- standing orders --
+  # Only the orders that are actually always-on, i.e. `load: eager`. The six
+  # carrying `load: on-trigger` are fetched by their vocabulary and left this
+  # list when the contract landed; `measure-context.py` still names them under
+  # the table, so a deferred body is never mistaken for one that vanished.
+  # The two below stayed eager on purpose: each bites when nobody says its
+  # vocabulary, which is the only criterion that keeps an order eager.
+  protocols/standing-orders/document-work.md:
+    max_bytes: 3000
+  protocols/standing-orders/security-baseline.md:
+    max_bytes: 2000
+
+  # ------------------------------------------------------------ Phase 1 reads --
+  # Named in `rules/operations.md` § Phase 1. They are instance data, absent in
+  # a fresh clone, and CORE ships no cap for them: a board or a log is as long
+  # as that instance's work makes it. Declaring them anyway means an instance
+  # gets them measured without editing a CORE file — an uncapped item is
+  # reported, never a build failure.
+  work/board.md:
+    optional: true
+    source: phase1
+
+  # ------------------------------------------------------------- commands --
+  # Not every always-on payload is a file. These two are computed at the moment
+  # of use, so they can never be stale, and the meter measures what they print
+  # rather than what they read. Both replace something larger: the index stands
+  # in for six deferred order bodies, and the slice for fifteen config blocks
+  # that belong to the skills owning them.
+  "cmd:python3 scripts/standing-orders.py --index":
+    source: phase1
+    max_bytes: 4000
+    note: >-
+      The always-on half of the standing-order load contract. Grows by one line
+      per order, which is the cost the contract is worth paying.
+  "cmd:python3 scripts/bridge-config.py --session":
+    source: phase1
+    max_bytes: 6000
+    note: >-
+      Six of twenty-one blocks. Empty in a fresh clone, since a fresh clone has
+      no bridge-config.yaml, and that is not an error.
+  "cmd:python3 scripts/worklog.py --recent 3":
+    source: phase1
+    note: >-
+      The week header, the rolling TODO and the three most recent day blocks.
+      No cap shipped, for the same reason board.md carries none: CORE cannot
+      know how long an instance's log rows run. Watch this line anyway. On the
+      instance this was built against the whole log measured 405,076 bytes and
+      this slice 247,159, because the rows had become essays rather than rows.
+      A number that large here means `/archive` is overdue, or the rows are.

@@ -129,6 +129,16 @@ SURFACES = [
         "instances": "overlays.lock.yaml",
         "exclude_prefixes": [],
     },
+    {
+        # The declared ceiling on what every session loads before it answers.
+        # Tracked here (CORE caps); the per-instance overlay
+        # context-budget.user.yaml is gitignored and validated by the same
+        # schema when present. Enforced by scripts/measure-context.py.
+        "name": "context-budget",
+        "schema": "docs/schemas/context-budget.schema.yaml",
+        "instances": "context-budget*.yaml",
+        "exclude_prefixes": [],
+    },
 ]
 
 

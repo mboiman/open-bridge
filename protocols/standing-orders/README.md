@@ -19,6 +19,9 @@ name: order-name
 scope: always                 # always | per-repo | per-context
 enforcement: advisory         # advisory | blocking | hook-warned
 applies_to: []                # sub-agent names (empty = all agents)
+load: eager                   # eager | on-trigger (default: eager)
+triggers: []                  # required for on-trigger: what fetches the body
+summary: ""                   # required for on-trigger: the line that stays in context
 ---
 ```
 
@@ -29,6 +32,22 @@ applies_to: []                # sub-agent names (empty = all agents)
 | `always` | Applies in every session, every repo |
 | `per-repo` | Only when a matching repo is active |
 | `per-context` | Only in specific contexts |
+
+### Load
+
+Skills have always worked this way: the description stays in context, the body
+arrives on invocation. Orders now do too.
+
+| Value | Meaning |
+|-------|---------|
+| `eager` | The body is read at session start. The default, so an unmigrated order keeps working exactly as before. |
+| `on-trigger` | Only `summary` and `triggers` stay in context; the body is read when the vocabulary comes up. Requires both fields. |
+
+Keep an order `eager` only when it bites while nobody says its own vocabulary:
+a logging duty, a security floor. Everything else is `on-trigger`. The index a
+session actually carries is `python3 scripts/standing-orders.py --index`;
+`--check` refuses an order that says `on-trigger` and names no trigger, because
+such a file reads as enforced in the tree and is absent from every session.
 
 ### Enforcement
 

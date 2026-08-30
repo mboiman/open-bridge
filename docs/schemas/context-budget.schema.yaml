@@ -1,0 +1,80 @@
+# Context Budget Schema — JSON Schema Draft 2020-12 in YAML
+#
+# Validates `context-budget.yaml`, the declared ceiling on the always-on
+# context a session loads (CORE) and its per-instance overlay
+# `context-budget.user.yaml` (scope: user, never tracked upstream).
+#
+# The measuring surface itself is specified by
+# `scripts/tests/test_measure_context.py`; this schema only guards the shape
+# of the policy the measurer reads.
+#
+# Validation:
+#   check-jsonschema --schemafile docs/schemas/context-budget.schema.yaml \
+#                    context-budget.yaml
+#
+# IDE support: add this line at the top of context-budget.yaml:
+#   # yaml-language-server: $schema=./docs/schemas/context-budget.schema.yaml
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://bks-lab.github.io/open-bridge/schemas/context-budget.yaml"
+title: Context Budget
+description: |
+  Per-item ceilings on the text every session loads before it answers: the
+  `@`-imports, the standing orders carrying `scope: always`, and the Phase 1
+  reads. `max_bytes` gates because bytes are exact everywhere; token counts
+  ride alongside as an estimate and never fail a build.
+
+type: object
+additionalProperties: false
+required: [schema_version, items]
+
+properties:
+  schema_version:
+    const: 1
+
+  calibration:
+    type: object
+    additionalProperties: false
+    properties:
+      bytes_per_token:
+        type: number
+        exclusiveMinimum: 0
+        description: >-
+          Bytes per token for the offline estimate. Language-dependent; near
+          2.6 for English prose, nearer 2.0 for German. Estimate only.
+      model:
+        type: string
+        minLength: 1
+        description: >-
+          Model asked for exact counts under `--method api`. Token counts are
+          model-specific, so the model belongs with the number.
+
+  items:
+    type: object
+    description: One entry per always-on item, keyed by repo-relative path.
+    propertyNames:
+      pattern: "^[^/].*[^/]$"
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      properties:
+        max_bytes:
+          type: integer
+          minimum: 1
+          description: >-
+            The size at which growing this file has to be argued for in a
+            diff. Omit it to track an item without gating it.
+        optional:
+          type: boolean
+          description: >-
+            True when the item legitimately does not exist in every clone
+            (instance data). Absent-and-optional passes; absent-and-required
+            fails, because a declared file that vanished is a finding.
+        source:
+          enum: [import, standing-order, phase1]
+          description: >-
+            Only needed for items no discovery can find — the Phase 1 reads.
+            Imports and standing orders are discovered from the tree.
+        note:
+          type: string
+          minLength: 1
