@@ -1219,6 +1219,71 @@ class WhatARunSaidIsKept(BackendBase):
                       "extra file written alongside the receipt")
 
 
+class AKindWithoutADeadlineIsKeptToo(BackendBase):
+    """The same defect as the class above, in the branch it never reached.
+
+    FOUND BY MIGRATING AGAIN, 2026-08-30, and that is the point of writing it
+    down here rather than as a footnote: the 2026-08-24 fix covered the path
+    that has a deadline, because everything that had migrated by then had one.
+    The first daemon moved on 2026-08-26 and nobody looked, because its wrapper
+    happened to redirect its own output. Two more followed with the same luck.
+
+    The fourth did not. It runs `python3 -m http.server`, which prints every
+    request it serves to stderr. Its old unit named
+    StandardErrorPath and that WAS its access log; the rendered unit names
+    none, so from the moment it moved the log was dead. Measured, not inferred:
+    the last line in that file carries the minute of the cutover, and a request
+    ten minutes later left no byte anywhere.
+
+    A daemon has no deadline by contract, so `redirect` was computed inside the
+    `if deadline:` arm and the other arm ran the command bare. `OUT_FILE` was
+    still defined for it and still capped afterwards, so the guard prepared a
+    file, trimmed it, and never wrote a word into it.
+
+    WHAT THIS COSTS, said plainly, because truncate-per-run is not free for a
+    kind that does not end: a daemon that runs for a month writes into one file
+    for a month, and the cap only bites when it finally exits. That is the same
+    unbounded shape the class above refuses for StandardOutPath. It is accepted
+    here because the alternative on the table is not a bounded file, it is no
+    file: today the output is discarded entirely. Bounded across restarts beats
+    lost always, and a rotation that a foreground guard cannot perform while it
+    is blocked in `wait` is a separate piece of work.
+    """
+
+    def script(self, name="watched-daemon"):
+        a = self.artifact(name)
+        return as_text([f for f in a.files
+                        if not str(f.path).endswith(".plist")][0].content)
+
+    def test_a_daemon_redirects_into_the_file_the_guard_prepared_for_it(self):
+        text = self.script()
+        self.assertIn('> "$OUT_FILE" 2>&1', text,
+                      "a daemon's output goes nowhere: the guard defines "
+                      "OUT_FILE and caps it, but never redirects into it, so "
+                      "everything the run prints is discarded")
+
+    def test_the_daemon_does_not_prepare_a_file_it_never_writes(self):
+        # The two halves must agree. Either the file is written and capped, or
+        # neither: a cap on a file nobody fills is dead code that reads like a
+        # working capture, which is how this went unnoticed for four days.
+        text = self.script()
+        if "OUT_FILE=" in text:
+            self.assertIn('> "$OUT_FILE" 2>&1', text,
+                          "OUT_FILE is defined and capped but never written")
+
+    def test_the_redirect_is_decided_once_for_both_arms(self):
+        # The defect was structural, not a typo: the value lived inside one
+        # arm of `if deadline:`, so the other arm could not use it however
+        # correct it was. Holding the decision above the branch is what stops
+        # the next kind without a deadline from inheriting the same silence.
+        src = io_read()
+        head, _, tail = src.partition("    if deadline:\n        # stderr goes")
+        self.assertIn("redirect = ", head,
+                      "the redirect is still computed inside the deadline arm, "
+                      "so any kind without a deadline runs bare no matter what "
+                      "the value says")
+
+
 def io_read():
     from pathlib import Path
     here = Path(__file__).resolve().parent.parent

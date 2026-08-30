@@ -1964,13 +1964,34 @@ MUTATIONS = (
     Mutation(
         name="a-run-speaks-into-dev-null",
         file="engine/backends/wrapper.py",
-        search='            redirect = \' > "$OUT_FILE" 2>&1\'',
-        replace='            redirect = ""',
+        # Dedented on 2026-08-30 when the decision moved above `if deadline:`.
+        # The anchor is the LITERAL, so the move alone silently unhooked this
+        # mutation and the harness said so: "the anchor appears 0 times, so the
+        # mutation applies to nothing and has been proving nothing". That
+        # sentence is the reason the battery exists, and it is worth one line
+        # here so the next person who reindents this knows what they break.
+        search='        redirect = \' > "$OUT_FILE" 2>&1\'',
+        replace='        redirect = ""',
         test="tests.test_backends.WhatARunSaidIsKept"
              ".test_the_capture_truncates_and_never_appends",
         scar="a service manager gives a unit no output destination, so the run "
              "speaks into /dev/null: a health report that warns its mail never "
              "left and then exits zero loses the only sign that it failed",
+    ),
+    Mutation(
+        name="a-daemon-speaks-into-dev-null",
+        file="engine/backends/wrapper.py",
+        # The SECOND arm, which the mutation above never reached. Softening the
+        # use rather than the value: put the old literal back and the arm
+        # without a deadline runs bare again, exactly as it did until today.
+        search='        add(f"{command}{redirect}")',
+        replace='        add(f"{command}{\' > \\"$RECEIPT_FILE\\" 2>&1\' if receipt else \'\'}")',
+        test="tests.test_backends.AKindWithoutADeadlineIsKeptToo"
+             ".test_a_daemon_redirects_into_the_file_the_guard_prepared_for_it",
+        scar="a daemon has no deadline, so it took the other arm and ran with "
+             "no redirect at all while the guard still defined its output file "
+             "and still capped it: a prepared destination nobody ever wrote "
+             "to, and an access log that died at the minute of its migration",
     ),
     Mutation(
         name="one-verbose-run-has-no-ceiling",

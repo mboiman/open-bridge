@@ -266,16 +266,41 @@ def wrap(w, ctx, inner, *, guard_dir=None, supplied=None, digest: str = "",
         add(f"cd {shlex.quote(str(working_dir))} || exit 72")
     add("started=$(date +%s)")
 
+    # stderr goes in with stdout: the warning this capture exists for is
+    # printed there, and splitting them would need a second file to keep
+    # bounded for no gain.
+    #
+    # DECIDED ABOVE THE BRANCH, and that placement is the whole fix. It used to
+    # live inside the `if deadline:` arm, so a kind that has no deadline ran
+    # bare however correct the value was. A daemon has none by contract, and
+    # the file above was still defined for it and still capped below it: the
+    # guard prepared a destination, trimmed it, and never wrote a word.
+    #
+    # Found on 2026-08-30 by migrating a static file server, a
+    # `python3 -m http.server` whose old unit named StandardErrorPath. That field WAS its access log,
+    # because http.server prints every request it serves to stderr. The last
+    # line in that file carries the minute of the cutover; a request ten
+    # minutes later left no byte anywhere. The three daemons that moved before
+    # it escaped only because their own wrappers redirect, which is luck and
+    # not a guarantee.
+    #
+    # WHAT IT COSTS FOR A KIND THAT DOES NOT END, said out loud rather than
+    # discovered later: truncating at the start bounds the file across runs,
+    # and a daemon has one run that lasts weeks, so the cap below only bites
+    # when it finally exits. That is the same unbounded shape this file refuses
+    # for StandardOutPath a few lines up. It is taken anyway, because the
+    # choice here is not between bounded and unbounded, it is between a bounded
+    # file and NO file. Rotating underneath a guard that is blocked in `wait`
+    # is a different piece of work and does not belong in the branch that
+    # decides where the bytes go.
+    if receipt:
+        redirect = ' > "$RECEIPT_FILE" 2>&1'
+    elif command_present:
+        redirect = ' > "$OUT_FILE" 2>&1'
+    else:
+        redirect = ""
+
     if deadline:
-        # stderr goes in with stdout: the warning this capture exists for is
-        # printed there, and splitting them would need a second file to keep
-        # bounded for no gain.
-        if receipt:
-            redirect = ' > "$RECEIPT_FILE" 2>&1'
-        elif command_present:
-            redirect = ' > "$OUT_FILE" 2>&1'
-        else:
-            redirect = ""
         if group_kill:
             add("# The run needs a process group of its own, or the watchdog can")
             add("# only end the direct child and a grandchild keeps the output")
@@ -357,7 +382,7 @@ def wrap(w, ctx, inner, *, guard_dir=None, supplied=None, digest: str = "",
         add('kill "$WATCHDOG" 2>/dev/null')
         add('wait "$WATCHDOG" 2>/dev/null')
     else:
-        add(f"{command}{' > \"$RECEIPT_FILE\" 2>&1' if receipt else ''}")
+        add(f"{command}{redirect}")
         add("rc=$?")
 
     if command_present and not receipt:
