@@ -1,0 +1,112 @@
+---
+summary: A table of contents for a large declared source, and one block on demand — the progressive disclosure skills always had, applied to registries and config maps.
+type: reference
+last_updated: 2026-08-30
+related:
+  - AGENTS.md
+  - rules/operations.md
+  - context-budget.yaml
+  - docs/schemas/context-budget.schema.yaml
+---
+
+# Context Index
+
+`context-budget.yaml` measures what a session loads before it answers anything,
+and holds each item to a declared ceiling. Measuring cannot make anything
+smaller. This is the half that can.
+
+## The problem it solves
+
+A session needs to know **that** a customer called `northwind` exists and
+roughly what it is. It does not need that customer's fifteen fields until
+somebody names it. Read whole, a registry costs a paragraph per project in
+order to establish that the project exists.
+
+Skills have never worked that way: the name and one line stay resident, the
+body arrives on invocation. Standing orders got the same split when the load
+contract landed. Registries and config maps never did, and every attempt to
+fix one of them separately produced another one-off script.
+
+## The contract
+
+An item in `context-budget.yaml` may declare a `card:` — what the session loads
+**instead of** the file.
+
+```yaml
+ecosystem.yaml:
+  optional: true
+  source: phase1
+  max_bytes: 4000
+  card:
+    kind: index
+    keep: [org, local_root, work_system]
+    sections: [base, customers, internal, partners, workspaces]
+    label: [description, display_name, name]
+```
+
+| Field | Meaning |
+|---|---|
+| `keep` | Top-level keys emitted **verbatim**, comments included. The settings a session needs in front of it, not on request. |
+| `sections` | Top-level maps whose children become one index line each. |
+| `label` | The child field supplying that line. A list is tried in order. |
+| `label_chars` | Where a label is cut, with a visible ellipsis (default 120). |
+
+Everything else present in the file is named under **"also present"**. Kept,
+indexed, or merely named — but never absent. A card that silently omits a key
+is the same failure as a budget that silently omits a file, one layer down:
+the thing does not look missing, it looks like it was never there.
+
+## Using it
+
+```bash
+python3 scripts/context-index.py ecosystem.yaml                  # the card
+python3 scripts/context-index.py ecosystem.yaml --get customers.northwind
+python3 scripts/context-index.py ecosystem.yaml --list           # every path --get takes
+python3 scripts/context-index.py --check                         # the guards, CI runs this
+```
+
+Phase 1 (`rules/operations.md`) runs the first form. The rest is on demand.
+
+## Three decisions worth knowing
+
+**Slices are raw text, never re-serialized YAML.** A round trip through a YAML
+loader is lossy in exactly the direction that matters: comments. In these files
+the comments carry the reasoning — which branch is the running one, which board
+is closed, why a path is not the obvious one. A reader that strips them answers
+the letter of the question and drops the half that stops a wrong action. A
+comment touching an entry travels with it; one separated by a blank line stays
+with the section.
+
+**Fail-open, twice.** A file with no `card:` stays always-on in full, so an
+instance that has never heard of this feature loses nothing. And a file that is
+indexed without a declaration gets its sections detected from its own shape,
+where a map counts as a section only when **all** its children are maps — a
+block of mixed settings is configuration and stays resident, because
+`work.enabled` decides whether Phase 1 runs at all.
+
+**A YAML comment stops being a guardrail the day its file stops being read
+whole.** The card cannot carry comments that sit inside indexed sections, so it
+reports how many bytes those are rather than letting a migration discover it
+later. If such a comment is load-bearing, it belongs in a rule, a standing
+order, or a field — all three of which travel.
+
+## What the guards catch
+
+`--check` runs three, over every declared card, and CI runs `--check`:
+
+- **The declaration** — a name in `keep:` or `sections:` that the source does
+  not have. This is the failure surface the feature adds: the typo is absorbed
+  in silence, the real key falls through to "also present", its content stops
+  being resident, and the card still renders and still passes its cap.
+- **The round trip** — every path the index advertises has to slice to
+  something. A pointer reads as a promise that the content is one call away,
+  and the caller stops looking anywhere else.
+- **Coverage** — every top-level key of the source is findable in the card.
+
+## The cost
+
+An `@`-import is resident for the whole session; a Phase 1 read is ordinary
+conversation and can be compacted away later. Indexing a source moves it from
+the first kind to the second. The card is small enough to re-run and `--get` is
+always there, but the trade is real and is the reason this is declared per item
+rather than applied to everything that looks large.

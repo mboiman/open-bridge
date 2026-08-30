@@ -32,12 +32,16 @@ what the slice exists to stop:
    it in full, which is what they are for
 2. Create today's day-block if missing (from `work/templates/day.md`;
    header `## {Weekday} DD.MM`)
-3. Load standing orders: run `python3 scripts/standing-orders.py --index` and
+3. Read the registry index: `python3 scripts/context-index.py ecosystem.yaml`
+   (settings verbatim, one line per repo/customer/workspace). Fetch an entry
+   with `--get <name>` when the work names one. Skip silently when the file is
+   absent, which is the normal state before onboarding
+4. Load standing orders: run `python3 scripts/standing-orders.py --index` and
    read the bodies it marks `eager`. For the rest the index carries a summary
    and a trigger vocabulary; read that body when its vocabulary comes up. The
    index is computed at the moment of use, so it is never stale
-4. Check CORE updates: `git log HEAD..main --oneline` — offer merge if new
-5. On "continue", "morning", "status": show summary, don't ask questions.
+5. Check CORE updates: `git log HEAD..main --oneline` — offer merge if new
+6. On "continue", "morning", "status": show summary, don't ask questions.
    When `bridge-config.yaml` `purpose.statement` is non-empty, **lead the
    summary with** `This Bridge is for {statement}.` so the session opens
    oriented around the instance's north-star. Empty statement → omit the

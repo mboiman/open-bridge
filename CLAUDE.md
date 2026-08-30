@@ -1,7 +1,5 @@
 @AGENTS.md
 
-@ecosystem.yaml
-
 # Claude Code specifics
 
 The canonical, tool-agnostic operating manual for this repo is the **~800-line
@@ -11,10 +9,21 @@ above via `@AGENTS.md`, so the full manual — session-start gate, rules, task m
 standing orders, commands — is already in your context. This file only adds the
 Claude-Code-specific bits.
 
-`@ecosystem.yaml` auto-loads the project registry (created at onboarding, gitignored, so the
-import does nothing / is skipped when the file is absent on a fresh clone). Onboarding appends
-further `@`-imports here as it seeds
-the live USER files (e.g. `identity/agent/SOUL.md` + `IDENTITY.md`).
+The project registry (`ecosystem.yaml`, created at onboarding, gitignored) is no longer
+`@`-imported. It is **indexed**: Phase 1 runs
+`python3 scripts/context-index.py ecosystem.yaml`, which emits the settings verbatim and one
+line per repo, customer and workspace; the entry itself arrives with `--get <name>` when
+somebody names one. The registry is the always-on file that grows with the instance rather
+than with this repo, and reading it whole meant carrying a paragraph about every project in
+order to know that the project exists. Details: [`docs/context-index.md`](docs/context-index.md).
+
+That trade has a real cost worth naming: an `@`-import is resident for the whole session,
+while a Phase 1 read is ordinary conversation and can be compacted away later. The card is
+small enough to re-run, and `--get` is always available; a file large enough to matter here is
+too large to keep resident on that argument alone.
+
+Onboarding appends further `@`-imports here as it seeds the live USER files
+(e.g. `identity/agent/SOUL.md` + `IDENTITY.md`).
 
 **Run the Phase-0 session-start gate before responding.** Belt-and-suspenders, so the gate
 survives even if the import above fails to resolve:
