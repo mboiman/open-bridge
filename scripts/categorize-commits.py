@@ -340,6 +340,14 @@ SCRIPTS_CORE_ALLOWLIST = frozenset({
     "scripts/tests/test_measure_context.py",
     "scripts/tests/test_standing_orders.py",
     "scripts/tests/test_worklog.py",
+    # Registered 2026-08-30 with the context index. Same reason as the block
+    # above: validate.yml runs the suite and the `--check` guard, so a
+    # non-core classification would have upstream CI call files that never
+    # shipped.
+    "scripts/context-index.py",
+    "scripts/lib/context_index.py",
+    "scripts/tests/test-context-index.sh",
+    "scripts/tests/test_context_index.py",
 })
 
 

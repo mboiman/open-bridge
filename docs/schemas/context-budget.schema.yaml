@@ -78,3 +78,49 @@ properties:
         note:
           type: string
           minLength: 1
+        card:
+          type: object
+          additionalProperties: false
+          description: >-
+            What the session loads INSTEAD of this file: a table of contents
+            plus a way to fetch one block. Declared here rather than beside
+            the source, so the shape and the ceiling it has to respect are one
+            decision in one place. `scripts/context-index.py` renders it and
+            `measure-context.py` measures what it renders. Omit the block and
+            the file stays always-on in full, which is the fail-open default.
+          properties:
+            kind:
+              const: index
+              description: >-
+                The only kind so far. Named rather than implied, so a second
+                one does not have to be told apart by guessing at the keys.
+            keep:
+              type: array
+              items: {type: string, minLength: 1}
+              description: >-
+                Top-level keys emitted VERBATIM, comments included. For the
+                settings a session needs in front of it rather than on
+                request.
+            sections:
+              type: array
+              items: {type: string, minLength: 1}
+              description: >-
+                Top-level maps whose children become one index line each.
+                A name here that the source does not have is a finding
+                (`context-index.py --check`), not a silent omission.
+            label:
+              oneOf:
+                - {type: string, minLength: 1}
+                - type: array
+                  items: {type: string, minLength: 1}
+              description: >-
+                The child field supplying an entry's one line. A list is tried
+                in order: entry families disagree about the name (`description`
+                for a repo, `display_name` for a customer), and an index whose
+                lines are empty is just a list of names.
+            label_chars:
+              type: integer
+              minimum: 20
+              description: >-
+                Where a label is cut, with a visible ellipsis. The full entry
+                is one `--get` away; a truncation nobody can see is not.
