@@ -314,6 +314,31 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
     return rows
 
 
+def always_on_text(repo_root: Path, budget: dict) -> str:
+    """Everything a session loads before it answers, concatenated.
+
+    Same discovery as `collect_rows`, on purpose. A second definition of
+    always-on would let something claim residency in a file no session reads,
+    which is the failure the budget exists to make impossible.
+    """
+    root = Path(repo_root)
+    parts = []
+    for row in collect_rows(root, budget, "bytes"):
+        path = row["path"]
+        if path.startswith(CMD_PREFIX):
+            text = run_command_item(root, path)
+        else:
+            target = root / path
+            text = (
+                target.read_text(encoding="utf-8", errors="replace")
+                if target.is_file()
+                else None
+            )
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
 # -------------------------------------------------------------- the report --
 
 def effective_method(rows: list[dict], requested: str) -> str:

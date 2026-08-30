@@ -45,11 +45,18 @@ items:
     note: The entry file. Thin by design; it routes, it does not explain.
 
   AGENTS.md:
-    max_bytes: 32000
+    max_bytes: 33000
     note: >-
       The operating manual, and still the largest single always-on item. It
       routes; it does not restate. Every load-bearing pointer in it is a
       markdown link, which `scripts/check-doc-routes.py` holds to resolving.
+      RAISED from 32000 on 2026-08-30, and the argument belongs in the diff a
+      reviewer sees, which is what this cap is for. The 1,378 bytes bought the
+      config-family index: one row per family, each naming the path and what
+      brings a session to it. `scripts/check-reachability.py` found five
+      families that existed in the tree and were named in nothing a session
+      loads, so the list is now load-bearing rather than decorative, and CI
+      fails when it falls behind the tree.
 
   ecosystem.yaml:
     optional: true

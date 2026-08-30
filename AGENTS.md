@@ -156,14 +156,34 @@ always-on file nobody declared.
 Config lives in **three semantic cluster-wrappers**, and every config type gets
 its own **folder** — no exceptions, no thresholds:
 
-```
-identity/    WHO am I, to WHOM do I send    (personas, accounts, mandants, contracts, agent)
-infra/       WHERE does what run, HOW reach (remotes, channels, backups, instances)
-workflow/    WHAT happens when              (calendars, contexts, projects, workloads)
-```
+`identity/` WHO am I, to WHOM do I send · `infra/` WHERE does what run, HOW
+reach · `workflow/` WHAT happens when. Every family below is a route: read the
+folder when its subject comes up, and its `_template.yaml` says what belongs in
+one. `scripts/check-reachability.py` fails CI when a family in the tree is named
+in nothing a session loads, so this list cannot quietly fall behind the tree —
+five families were missing from it when that check was first run.
 
-Top-level, own lifecycle: `protocols/` `work/` `docs/` `rules/` `trackers/`
-`themes/` `skills/` `.claude/`.
+| Family | Read it when |
+|---|---|
+| `identity/personas/` | an identity the user HOLDS: signature, tax data, filing paths |
+| `identity/mandants/` | who RECEIVES an outgoing message |
+| `identity/accounts/` | a cloud tenant, subscription or vault reference |
+| `identity/contracts/` | a customer contract: term, rate, notice |
+| `identity/agent/` | this orchestrator's own name, role and voice |
+| `infra/remotes/` | a machine: ssh, wake, services, "which PC" |
+| `infra/channels/` | an outbound transport: mail, chat, bot, digest |
+| `infra/backups/` | what is backed up where, and whether it is fresh |
+| `infra/instances/` | another Bridge this one should know about |
+| `infra/transcriptions/` | recording → transcript topology |
+| `infra/utilities/` | a supply contract at a location: power, gas, water, heat |
+| `workflow/calendars/` | a scheduled outbound action |
+| `workflow/contexts/` | where a piece of work gets documented |
+| `workflow/projects/` | a board's field values and state map, before ANY tracker call |
+| `workflow/workloads/` | one declared run on one machine |
+| `workflow/workspaces/` | a named binding of repos + config overlays |
+
+Top-level, own lifecycle: `rules/` `protocols/standing-orders/` `skills/`
+`trackers/` `themes/` `.claude/agents/` `work/` `docs/`.
 
 **Default-to-Folder:** every config type lives in `<wrapper>/<types>/` — a plural
 folder holding `_template.yaml`, an optional `_schema.yaml`, and all `<id>.yaml`
