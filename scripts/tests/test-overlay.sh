@@ -174,6 +174,13 @@ for d in $EX_DESTS; do [ -f "$CON/$d" ] || { allok=0; echo "      missing dest: 
 assert_eq "every example dest materialized" "$allok" 1
 assert_file "ecosystem fragment copied" "$CON/ecosystem.example-org.yaml"
 assert_grep "@import wired into CLAUDE.md" "$CON/CLAUDE.md" "@ecosystem.example-org.yaml"
+# ADJACENT to the core import, not appended at the end of the file. The wiring
+# anchors on a literal line, and an anchor nobody asserts on rots in silence:
+# the insert falls through to its end-of-file fallback, the import still works,
+# and nothing says the placement changed. That is exactly how this assertion
+# came to be — the anchor was `@ecosystem.yaml` and outlived that line.
+IMPLINE="$(grep -n '@ecosystem.example-org.yaml' "$CON/CLAUDE.md" | head -1 | cut -d: -f1)"
+assert_eq "@import sits next to the core import, not at EOF" "$([ "${IMPLINE:-99}" -le 4 ] && echo yes || echo no)" "yes"
 # inline scope:org survives on each materialized dest
 scopeok=1
 for d in $EX_DESTS; do grep -qF "scope: org" "$CON/$d" || { scopeok=0; echo "      no scope:org in $d"; }; done
@@ -285,8 +292,11 @@ assert_absent "cache dir removed" "$CON/.bridge/overlays/example-org"
 emptylock="$(python3 -c 'import yaml,sys;d=yaml.safe_load(open(sys.argv[1]));print(len((d or {}).get("overlays") or {}))' "$CON/overlays.lock.yaml" 2>/dev/null || echo 0)"
 assert_eq "lock entry dropped" "$emptylock" 0
 # nothing else touched: remove strips only the overlay @import, the core
-# @ecosystem.yaml import survives (CLAUDE.md is otherwise intact).
-assert_grep "core @ecosystem.yaml import survives remove" "$CON/CLAUDE.md" "@ecosystem.yaml"
+# @AGENTS.md import survives (CLAUDE.md is otherwise intact). The canary used
+# to be @ecosystem.yaml, which stopped being an import when the registry
+# became an index (docs/context-index.md); @AGENTS.md is the import that is
+# always there.
+assert_grep "core @AGENTS.md import survives remove" "$CON/CLAUDE.md" "@AGENTS.md"
 
 # ───────────────────────────────────────────────────────────────────
 echo

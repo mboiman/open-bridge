@@ -2,7 +2,7 @@
 #
 # This is a FRAGMENT, not a full ecosystem.yaml. The overlay engine copies it
 # verbatim to the consumer root as `ecosystem.example-org.yaml` and registers it
-# as an @import in CLAUDE.md (next to @ecosystem.yaml). It is NEVER block-merged
+# as an @import in CLAUDE.md (next to @AGENTS.md). It is NEVER block-merged
 # into the consumer's own ecosystem.yaml — the @import keeps the two registries
 # separate, so a consumer's `org:` / `local_root:` / `work_system:` are untouched.
 #

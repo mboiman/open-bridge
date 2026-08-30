@@ -485,7 +485,14 @@ class Consumer:
         inserted = False
         for ln in lines:
             out.append(ln)
-            if not inserted and ln.strip() == "@ecosystem.yaml":
+            # Anchor on @AGENTS.md, the one import CLAUDE.md always has. It
+            # used to be @ecosystem.yaml, which stopped being an import when
+            # the registry became an index (docs/context-index.md); the insert
+            # then fell through to its end-of-file fallback, which still works
+            # and silently moves the import away from its neighbours. The
+            # overlay suite now asserts the placement, so the next anchor to
+            # outlive its line says so instead of degrading quietly.
+            if not inserted and ln.strip() == "@AGENTS.md":
                 out.append(token + "\n")
                 inserted = True
         if not inserted:
