@@ -898,3 +898,41 @@ def test_structure_guard_reports_a_kind_disagreement():
     wrong["runtime"] = dict(wrong["runtime"], kind="scalar")
 
     assert any("runtime" in f for f in ci.check_structure(text, blocks=wrong))
+
+
+# ------------------------------------------ a section that is not a mapping --
+#
+# `sections:` names top-level MAPS, whose children become the card's one-line
+# entries. Declare a name whose value is a SEQUENCE and render_card iterates
+# `children`, which parse_source leaves empty for a list: a bare `## name`
+# heading, zero rows, the entries missing from the count, and absent from "Also
+# present" too — while all four guards stay green.
+#
+# Live on an instance on 2026-08-30: `github_projects` (8 boards) declared as a
+# section rendered as an empty heading. Removing the declaration restored a
+# working pointer, `Also present, fetch by name: github_projects (list of 8).`
+# So the declaration was strictly WORSE than no declaration, which is the one
+# direction a fail-open design must never be able to go.
+
+
+def test_a_sequence_declared_as_a_section_is_a_finding():
+    body = "alpha:\n  - one\n  - two\n"
+    findings = ci.check_declaration(body, {"kind": "index", "sections": ["alpha"]})
+    assert findings and "alpha" in findings[0]
+
+
+def test_a_scalar_declared_as_a_section_is_a_finding():
+    findings = ci.check_declaration("alpha: 1\n", {"kind": "index", "sections": ["alpha"]})
+    assert findings and "alpha" in findings[0]
+
+
+def test_a_mapping_declared_as_a_section_is_fine():
+    body = "alpha:\n  one:\n    description: x\n"
+    assert ci.check_declaration(body, {"kind": "index", "sections": ["alpha"]}) == []
+
+
+def test_a_sequence_in_keep_is_not_a_finding():
+    # `keep:` slices the block whole, so a list is perfectly valid there. Only
+    # `sections:` needs children to render anything.
+    body = "alpha:\n  - one\n"
+    assert ci.check_declaration(body, {"kind": "index", "keep": ["alpha"]}) == []

@@ -50,12 +50,13 @@ from lib.standing_orders import (  # noqa: E402  (path setup must precede this i
     eager_paths,
     load_order,
     render_index,
+    unreadable_orders,
 )
 
 __all__ = [
     "DEFAULT_LOAD", "ORDERS_DIR", "SUMMARY_MAX_CHARS", "VALID_LOAD",
     "check_orders", "collect_orders", "eager_paths", "load_order",
-    "render_index", "main",
+    "render_index", "unreadable_orders", "main",
 ]
 
 def main(argv=None) -> int:
@@ -76,7 +77,7 @@ def main(argv=None) -> int:
     orders = collect_orders(root)
 
     if args.check:
-        violations = check_orders(orders)
+        violations = check_orders(orders, unreadable_orders(root))
         if violations:
             print("standing-orders: contract violations", file=sys.stderr)
             for violation in violations:
