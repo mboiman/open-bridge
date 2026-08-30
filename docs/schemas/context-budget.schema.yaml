@@ -71,10 +71,14 @@ properties:
             (instance data). Absent-and-optional passes; absent-and-required
             fails, because a declared file that vanished is a finding.
         source:
-          enum: [import, standing-order, phase1]
+          enum: [import, standing-order, phase1, listing]
           description: >-
             Only needed for items no discovery can find — the Phase 1 reads.
-            Imports and standing orders are discovered from the tree.
+            Imports, standing orders and listings are discovered from the tree.
+            `listing` marks the derived surface: `listing:skills` and
+            `listing:agents` are not files but the name-plus-description block
+            the harness injects into every session and every sub-agent
+            dispatch, one line per entry.
         note:
           type: string
           minLength: 1

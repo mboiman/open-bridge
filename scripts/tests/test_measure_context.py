@@ -590,3 +590,127 @@ def test_init_writes_what_the_shipped_schema_requires(tree):
 
     for key in schema.get("required", []):
         assert key in written, f"--init omits {key!r}, which the schema requires"
+
+
+# ---------------------------------------------------------------- listings --
+#
+# The third residency channel. `name` + `description` of every skill and every
+# sub-agent is injected into EVERY session and every sub-agent dispatch, and
+# nothing measured a byte of it. Found on a live instance: 111 skills, 73 400
+# bytes, larger than every `@`-import in that tree combined.
+#
+# It is not dead weight either. 33 config-family paths were named ONLY in a
+# skill description there, and one family was reachable exclusively through
+# one, so `always_on_parts` has to carry it or the reachability contract calls
+# a family unreachable that a session can in fact find.
+
+
+def _skill(tree: Path, slug: str, description: str, name: str | None = None) -> None:
+    front = f"name: {name or slug}\ndescription: {description}\n"
+    _write(tree, f"skills/{slug}/SKILL.md", f"---\n{front}---\n\nbody\n")
+
+
+def _declare_listing(tree: Path, key: str, body: str) -> None:
+    budget = tree / "context-budget.yaml"
+    budget.write_text(
+        budget.read_text(encoding="utf-8") + f"  {key}:\n{body}", encoding="utf-8"
+    )
+
+
+@pytest.fixture
+def listed(tree: Path) -> Path:
+    _skill(tree, "remote", "Wake, reach and repair a machine in infra/remotes/.")
+    _skill(tree, "channel", "Outbound transports declared in infra/channels/.")
+    _write(tree, "skills/README.md", "not a skill\n")
+    _write(
+        tree,
+        ".claude/agents/archivist.md",
+        "---\nname: archivist\ndescription: Batches document intake.\n---\n\nbody\n",
+    )
+    return tree
+
+
+def test_a_described_skill_becomes_one_line(listed):
+    text = mc.render_listing(listed, "listing:skills")
+    assert "**remote** — Wake, reach and repair a machine in infra/remotes/." in text
+
+
+def test_a_skill_without_a_description_is_not_listed(listed):
+    _write(listed, "skills/quiet/SKILL.md", "---\nname: quiet\n---\n\nbody\n")
+    assert "quiet" not in mc.render_listing(listed, "listing:skills")
+
+
+def test_a_file_without_frontmatter_is_skipped_not_fatal(listed):
+    _write(listed, "skills/raw/SKILL.md", "no frontmatter here\n")
+    text = mc.render_listing(listed, "listing:skills")
+    assert "raw" not in text and "remote" in text
+
+
+def test_a_folded_description_collapses_to_one_line(listed):
+    _write(
+        listed,
+        "skills/folded/SKILL.md",
+        "---\nname: folded\ndescription: >-\n  first line\n  second line\n---\n\nbody\n",
+    )
+    text = mc.render_listing(listed, "listing:skills")
+    assert "**folded** — first line second line" in text
+    # One entry, one line. A description that kept its newlines would make the
+    # listing's line count a lie and hide a runaway entry in the middle of it.
+    assert len([ln for ln in text.splitlines() if ln.startswith("- **")]) == 3
+
+
+def test_the_name_falls_back_to_the_directory(listed):
+    _write(listed, "skills/unnamed/SKILL.md", "---\ndescription: has no name key.\n---\n")
+    assert "**unnamed** — has no name key." in mc.render_listing(listed, "listing:skills")
+
+
+def test_an_absent_family_renders_none_not_empty(tree):
+    # None and "" are different findings: a family nobody has yet, versus a
+    # family whose every entry lost its description. Only the second is a bug.
+    assert mc.render_listing(tree, "listing:skills") is None
+
+
+def test_listings_are_discovered_from_the_tree(listed):
+    assert mc.discover_listings(listed) == ["listing:agents", "listing:skills"]
+
+
+def test_an_absent_family_is_not_discovered(tree):
+    assert mc.discover_listings(tree) == []
+
+
+def test_an_undeclared_listing_is_measured_and_flagged(listed):
+    rows = {r["path"]: r for r in mc.collect_rows(listed, mc.load_budget(listed), "bytes")}
+    assert rows["listing:skills"]["state"] == "undeclared"
+    assert rows["listing:skills"]["bytes"] > 0
+
+
+def test_a_declared_listing_gates_on_its_cap(listed):
+    _declare_listing(listed, "listing:skills", "    source: listing\n    max_bytes: 10\n")
+    rows = {r["path"]: r for r in mc.collect_rows(listed, mc.load_budget(listed), "bytes")}
+    assert rows["listing:skills"]["state"] == "over"
+
+
+def test_a_listing_within_its_cap_is_ok(listed):
+    _declare_listing(listed, "listing:skills", "    source: listing\n    max_bytes: 5000\n")
+    rows = {r["path"]: r for r in mc.collect_rows(listed, mc.load_budget(listed), "bytes")}
+    assert rows["listing:skills"]["state"] == "ok"
+
+
+def test_the_listing_is_part_of_the_always_on_surface(listed):
+    # The reachability contract reads exactly this. A family named only in a
+    # skill description is findable, and a surface that omits the listing would
+    # report it unreachable.
+    parts = mc.always_on_parts(listed, mc.load_budget(listed))
+    assert "infra/channels/" in parts["listing:skills"]
+
+
+def test_a_listing_row_carries_its_largest_entries(listed):
+    _skill(listed, "huge", "H" * 400)
+    rows = {r["path"]: r for r in mc.collect_rows(listed, mc.load_budget(listed), "bytes")}
+    assert rows["listing:skills"]["largest"][0][0] == "huge"
+
+
+def test_the_report_names_the_largest_entries(listed):
+    _skill(listed, "huge", "H" * 400)
+    rows = mc.collect_rows(listed, mc.load_budget(listed), "bytes")
+    assert "huge" in mc.render_report(rows, "bytes", 2.4)

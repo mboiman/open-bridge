@@ -66,6 +66,26 @@ CMD_PREFIX = "cmd:"
 # anything is a different kind of file than the one anybody reviewed it as.
 CMD_ALLOWED_PREFIX = "python3 scripts/"
 
+LISTING_PREFIX = "listing:"
+
+# The third residency channel, and the only DERIVED one: the harness injects
+# `name` + `description` of every skill and every sub-agent into every session
+# AND into every sub-agent dispatch, without any of it being a file the budget
+# could point at. Measured on a live instance: 111 skills, 73 400 bytes, larger
+# than every `@`-import in that tree combined, and declared nowhere.
+#
+# It is not dead weight. On that same instance 33 config-family paths were named
+# ONLY in a skill description, and one family was reachable exclusively through
+# one. So this belongs in `always_on_parts` as well as in the table: a surface
+# that omits the listing makes the reachability contract report a family
+# unreachable that a session can in fact find.
+LISTINGS = {
+    "skills": ("skills", "*/SKILL.md"),
+    "agents": (".claude/agents", "*.md"),
+}
+
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.S)
+
 DEFAULT_BYTES_PER_TOKEN = 2.4
 DEFAULT_MODEL = "claude-opus-5"
 
@@ -236,6 +256,93 @@ def run_command_item(repo_root: Path, key: str):
     return done.stdout if done.returncode == 0 else None
 
 
+def _described(path: Path):
+    """(name, one-line description) for one listing entry, or None.
+
+    Parsed with the YAML loader rather than a regex because a description is
+    routinely a folded scalar, and a regex that keeps the fold would make the
+    listing's line count a lie: one entry would occupy several lines and a
+    runaway one could hide in the middle of them.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        return None
+    try:
+        front = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(front, dict):
+        return None
+    description = front.get("description")
+    if not isinstance(description, str) or not description.strip():
+        # No description, no listing entry: the harness lists what has one.
+        return None
+    # The directory carries the identity when frontmatter does not. A skill is
+    # addressed by its folder, so dropping one for a missing `name:` would
+    # under-report a surface this exists to stop under-reporting.
+    stem = path.parent.name if path.name == "SKILL.md" else path.stem
+    name = front.get("name")
+    name = str(name).strip() if isinstance(name, (str, int, float)) else ""
+    return (name or stem, " ".join(description.split()))
+
+
+def listing_entries(repo_root: Path, key: str):
+    """Every described entry of one listing family, or None when absent.
+
+    None and `[]` are different findings: a family this tree does not have, and
+    a family whose every entry lost its description. Only the second is a bug,
+    and at zero bytes they would look identical.
+    """
+    family = key[len(LISTING_PREFIX):].strip()
+    known = LISTINGS.get(family)
+    if known is None:
+        sys.exit(
+            f"error: budget item {key!r} names no listing family.\n"
+            f"       Known: {', '.join(sorted(LISTINGS))}."
+        )
+    base, pattern = known
+    root = Path(repo_root)
+    if not (root / base).is_dir():
+        return None
+    entries = []
+    for path in sorted((root / base).glob(pattern)):
+        entry = _described(path)
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def _listing_line(name: str, description: str) -> str:
+    return f"- **{name}** \u2014 {description}\n"
+
+
+def render_listing(repo_root: Path, key: str):
+    """The listing as the session carries it, or None when the family is absent."""
+    entries = listing_entries(repo_root, key)
+    if entries is None:
+        return None
+    return "".join(_listing_line(name, desc) for name, desc in entries)
+
+
+def discover_listings(repo_root: Path) -> list[str]:
+    """The listing families this tree actually has.
+
+    Discovered, never merely declared. An instance that never writes the budget
+    entry would otherwise carry the whole listing unmeasured, which is exactly
+    the state this feature was written to end.
+    """
+    root = Path(repo_root)
+    return [
+        LISTING_PREFIX + family
+        for family, (base, _) in sorted(LISTINGS.items())
+        if (root / base).is_dir()
+    ]
+
+
 def item_state(row: dict, policy, exists: bool) -> str:
     """ok | over | uncapped | undeclared | absent | missing."""
     if policy is None:
@@ -267,13 +374,29 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
         discovered.setdefault(rel, "import")
     for rel in discover_standing_orders(root):
         discovered.setdefault(rel, "standing-order")
+    for rel in discover_listings(root):
+        discovered.setdefault(rel, "listing")
 
     rows = []
     for path in sorted(set(discovered) | set(items)):
         policy = items.get(path)
         source = discovered.get(path) or (policy or {}).get("source") or "phase1"
         body_bytes = None
-        if path.startswith(CMD_PREFIX):
+        largest = None
+        if path.startswith(LISTING_PREFIX):
+            entries = listing_entries(root, path)
+            exists = entries is not None
+            text = render_listing(root, path) if exists else None
+            source = (policy or {}).get("source") or "listing"
+            if entries:
+                largest = sorted(
+                    (
+                        (name, len(_listing_line(name, desc).encode("utf-8")))
+                        for name, desc in entries
+                    ),
+                    key=lambda pair: (-pair[1], pair[0]),
+                )[:5]
+        elif path.startswith(CMD_PREFIX):
             text = run_command_item(root, path)
             exists = text is not None
             source = (policy or {}).get("source") or "command"
@@ -301,6 +424,7 @@ def collect_rows(repo_root: Path, budget: dict, method: str) -> list[dict]:
             "method": method,
             "max_bytes": (policy or {}).get("max_bytes"),
             "body_bytes": body_bytes,
+            "largest": largest,
         }
         if exists:
             row["bytes"] = len(text.encode("utf-8"))
@@ -330,7 +454,9 @@ def always_on_parts(repo_root: Path, budget: dict) -> dict[str, str]:
     parts: dict[str, str] = {}
     for row in collect_rows(root, budget, "bytes"):
         path = row["path"]
-        if path.startswith(CMD_PREFIX):
+        if path.startswith(LISTING_PREFIX):
+            text = render_listing(root, path)
+        elif path.startswith(CMD_PREFIX):
             text = run_command_item(root, path)
         else:
             target = root / path
@@ -426,6 +552,21 @@ def render_report(
                 f"{_cell(row['body_bytes'])} bytes, {_cell(deferred_bytes)} "
                 f"reachable with `context-index.py {row['path']} --get <path>`"
             )
+
+    listings = [r for r in rows if r.get("largest")]
+    if listings:
+        out += [
+            "",
+            f"{len(listings)} listing(s) are DERIVED, not read: the harness "
+            f"injects one line per entry into every session and every sub-agent "
+            f"dispatch. There is no file to cap, so the cap is on the sum and "
+            f"the heaviest entries are named here \u2014 a listing grows one "
+            f"description at a time, and that is the growth nobody notices:",
+            "",
+        ]
+        for row in listings:
+            entries = ", ".join(f"{n} ({_cell(b)} B)" for n, b in row["largest"])
+            out.append(f"- `{row['path']}` \u2014 heaviest: {entries}")
 
     failing = [r for r in rows if r["state"] in FAILING]
     out.append("")

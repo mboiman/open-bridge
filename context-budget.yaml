@@ -76,6 +76,38 @@ items:
       sections: [base, customers, internal, partners, workspaces]
       label: [description, display_name, name]
 
+  # ---------------------------------------------------------------- listings --
+  # DERIVED, not read. The harness injects `name` + `description` of every
+  # skill and every sub-agent into every session, and into every sub-agent
+  # dispatch, and until this entry existed none of it was measured anywhere.
+  # It is the one always-on cost that grows with how much the Bridge can DO
+  # rather than with how much it has been told, and it is invisible in every
+  # client's context listing because it never was a file.
+  #
+  # The cap is on the sum because there is no file to cap. The report names the
+  # heaviest entries instead, since a listing grows one description at a time
+  # and the sum is the last place that growth shows up.
+  #
+  # Instances run far larger listings than CORE: one measured 111 skills at
+  # 73 400 bytes, more than every `@`-import in that tree combined. An instance
+  # raises these in `context-budget.user.yaml` — WITH a reason, the same
+  # discipline every other cap here carries.
+  "listing:skills":
+    source: listing
+    max_bytes: 30000
+    note: >-
+      36 skills, 24 965 bytes at the time of writing, mean 693. The cap leaves
+      room for roughly seven more before it bites, which is deliberate: it
+      should bite while a description can still be shortened rather than after
+      the surface has doubled.
+  "listing:agents":
+    source: listing
+    max_bytes: 4000
+    note: >-
+      One sub-agent ships in CORE. The entry exists at one instance so the
+      SECOND one is measured the day it lands, rather than the day somebody
+      wonders where the context went.
+
   # -------------------------------------------------------- standing orders --
   # Only the orders that are actually always-on, i.e. `load: eager`. The six
   # carrying `load: on-trigger` are fetched by their vocabulary and left this
