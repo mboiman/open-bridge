@@ -54,7 +54,6 @@ items:
   ecosystem.yaml:
     optional: true
     source: phase1
-    max_bytes: 4000
     note: >-
       Created at onboarding and gitignored, so absent in a fresh clone. It used
       to be an `@`-import read in full, and it is the one always-on file that

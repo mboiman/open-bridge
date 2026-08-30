@@ -37,9 +37,16 @@ except ImportError:  # pragma: no cover - PyYAML is a documented dependency
 DEFAULT_LABEL = ("description", "display_name", "name")
 DEFAULT_LABEL_CHARS = 120
 CLI = "python3 scripts/context-index.py"
+ALSO_PRESENT = "Also present, fetch by name: "
 
-# A top-level key: column zero, not a comment, not a document marker.
-TOP_KEY = re.compile(r"^([^\s#][^:]*):(?:\s|$)")
+# A top-level key: column zero, not a comment, not a document marker, and NOT
+# a list item. `- name: public` at column zero is legal YAML and was read as a
+# key called `- name` until a sweep over 120 real files said otherwise. The
+# damage was not the invented key but what it did to its neighbour: the real
+# key's block ended at the first list item, so it sliced to its header line
+# alone — eleven bytes on a live bridge-config.yaml — and the round-trip guard
+# called that clean, because one line is still something.
+TOP_KEY = re.compile(r"^(?!-\s)([^\s#][^:]*):(?:\s|$)")
 
 
 # ------------------------------------------------------------- structure --
@@ -59,7 +66,7 @@ def _child_key(line: str, indent: int):
         return None
     if line[indent : indent + 1].isspace():
         return None
-    match = re.match(r"^([^\s#][^:]*):(?:\s|$)", line[indent:])
+    match = re.match(r"^(?!-\s)([^\s#][^:]*):(?:\s|$)", line[indent:])
     return match.group(1).strip() if match else None
 
 
@@ -175,32 +182,46 @@ def resolve_card(text: str, card) -> dict:
     index, and therefore never has to choose between adopting this feature and
     keeping its registry readable.
     """
-    blocks = parse_source(text)
-    if card:
-        resolved = dict(card)
-        resolved.setdefault("keep", [])
-        resolved.setdefault("sections", [])
-    else:
-        lines = text.split("\n")
-        keep, sections = [], []
-        for name, block in blocks.items():
-            children = block["children"]
-            # ALL children, not any. A map whose children are mixed is a block
-            # of settings, and settings are what a session needs in front of
-            # it — `work.enabled` decides whether Phase 1 runs at all. When the
-            # shape is ambiguous, auto-detection carries more, never less.
-            if (
-                block["kind"] == "map"
-                and children
-                and all(_looks_nested(lines, span) for span in children.values())
-            ):
-                sections.append(name)
-            elif block["kind"] in ("scalar", "map"):
-                keep.append(name)
-        resolved = {"kind": "index", "keep": keep, "sections": sections}
+    resolved = dict(card or {})
+    auto_keep, auto_sections = _detect(text)
+
+    # ABSENT is not EMPTY, and each field defaults on its own. `sections: []`
+    # is a decision and stays empty; an absent `sections:` means "you work it
+    # out". Both matter: a bare `card: {kind: index}` that resolved to two
+    # empty lists would render every key under "also present" — a list of
+    # names, which is the thing this feature exists to beat — while still
+    # passing its cap and every guard. And declaring only `keep:` would
+    # silently switch indexing off.
+    if resolved.get("keep") is None:
+        resolved["keep"] = [k for k in auto_keep if k not in (resolved.get("sections") or [])]
+    if resolved.get("sections") is None:
+        resolved["sections"] = [s for s in auto_sections if s not in resolved["keep"]]
+
+    resolved.setdefault("kind", "index")
     resolved.setdefault("label", DEFAULT_LABEL)
     resolved.setdefault("label_chars", DEFAULT_LABEL_CHARS)
     return resolved
+
+
+def _detect(text: str) -> tuple[list[str], list[str]]:
+    """(keep, sections) read off the file's own shape."""
+    lines = text.split("\n")
+    keep, sections = [], []
+    for name, block in parse_source(text).items():
+        children = block["children"]
+        # ALL children, not any. A map whose children are mixed is a block of
+        # settings, and settings are what a session needs in front of it —
+        # `work.enabled` decides whether Phase 1 runs at all. When the shape is
+        # ambiguous, detection carries more, never less.
+        if (
+            block["kind"] == "map"
+            and children
+            and all(_looks_nested(lines, span) for span in children.values())
+        ):
+            sections.append(name)
+        elif block["kind"] in ("scalar", "map"):
+            keep.append(name)
+    return keep, sections
 
 
 def _looks_nested(lines: list[str], span: tuple[int, int]) -> bool:
@@ -330,7 +351,7 @@ def render_card(text: str, card, rel_path: str) -> str:
                 described.append(f"{name} (list of {count})")
             else:
                 described.append(name)
-        out.append("Also present, fetch by name: " + ", ".join(described) + ".")
+        out.append(ALSO_PRESENT + ", ".join(described) + ".")
         out.append("")
 
     lost = uncarried_comment_bytes(text, resolved)
@@ -380,32 +401,92 @@ def check_declaration(text: str, card=None) -> list[str]:
                 findings.append(
                     f"{field}: '{name}' is declared and not in the source"
                 )
+    both = set(card.get("keep") or []) & set(card.get("sections") or [])
+    for name in sorted(both):
+        findings.append(
+            f"keep/sections: '{name}' is declared in both, which is two answers "
+            f"to one question"
+        )
     return findings
 
 
-def declared_cards(repo_root) -> dict:
-    """Every `path -> card` declared in the budget, user overlay last."""
+def check_structure(text: str, blocks=None) -> list[str]:
+    """The scanner's answer against YAML's, which already knows it.
+
+    This module reads the file as lines so it can keep comments, and a line
+    scanner can be wrong in ways a round trip cannot see: the failure that
+    prompted this guard invented a key AND truncated its neighbour to a header
+    line, and `check_round_trip` called it clean, because one line is still
+    something.
+
+    The oracle is `yaml.compose`, not `yaml.safe_load`, and that is the whole
+    difference between a guard and a nuisance. `safe_load` hands back RESOLVED
+    values: `on:` becomes the boolean True, so every GitHub workflow looked
+    like the scanner had invented a key it had read perfectly well. Compose
+    keeps the source spelling and, more usefully, says whether a value was
+    written in flow style — so `required: [a, b]` is one line legitimately and
+    a block mapping squeezed onto one line is not. Written without that
+    distinction, this guard's first outing produced 54 findings across 255 real
+    files and not one of them was real.
+    """
     if yaml is None:  # pragma: no cover
-        return {}
-    root = Path(repo_root)
-    cards: dict[str, dict] = {}
-    for name in ("context-budget.yaml", "context-budget.user.yaml"):
-        path = root / name
-        if not path.is_file():
+        return []
+    try:
+        node = yaml.compose(text)
+    except yaml.YAMLError as exc:
+        return [f"source is not valid YAML: {exc}"]
+    if not isinstance(node, yaml.MappingNode):
+        return []
+
+    truth: dict[str, object] = {}
+    for key_node, value_node in node.value:
+        if isinstance(key_node, yaml.ScalarNode):
+            truth[key_node.value] = value_node
+
+    blocks = parse_source(text) if blocks is None else blocks
+    findings = []
+    for name in truth:
+        if name not in blocks:
+            findings.append(f"{name}: in the source and invisible to the scanner")
+    for name in blocks:
+        if name not in truth:
+            findings.append(f"{name}: invented by the scanner, YAML has no such key")
+
+    for name, value in truth.items():
+        block = blocks.get(name)
+        if not block or not isinstance(value, (yaml.MappingNode, yaml.SequenceNode)):
             continue
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for rel, item in (data.get("items") or {}).items():
-            if (item or {}).get("card"):
-                cards[rel] = item["card"]
-    return cards
+        if not value.value or value.flow_style:
+            continue
+        if block["end"] - block["start"] < 2:
+            findings.append(
+                f"{name}: sliced to its header line alone, and its block value "
+                f"has content"
+            )
+    return findings
 
 
 def check_coverage(text: str, rendered: str = "") -> list[str]:
-    """Every top-level key has to be findable in the card, in some form."""
+    """Every top-level key has to be findable in the card, in some form.
+
+    Matched as a section heading, a kept block's own key line, or a name in the
+    "also present" line — never as a substring. `org` occurs inside
+    `example-org`, so a substring test finds keys that are not there, and a
+    guard that cannot fail is not a guard.
+    """
+    present: set[str] = set()
+    for line in rendered.split("\n"):
+        if line.startswith("## "):
+            present.add(line[3:].strip())
+        elif line.startswith(ALSO_PRESENT):
+            names = line[len(ALSO_PRESENT):].rstrip(".")
+            present.update(part.strip().split(" ")[0] for part in names.split(","))
+        elif line[:1] not in (" ", "\t", "#", "-", "") and ":" in line:
+            present.add(line.split(":", 1)[0].strip())
     return [
         f"{name}: present in the source and absent from the card"
         for name in parse_source(text)
-        if name not in rendered
+        if name not in present
     ]
 
 
@@ -421,14 +502,36 @@ def card_for(repo_root, rel_path: str):
     """
     if yaml is None:  # pragma: no cover
         return None
+    return (_merged_items(repo_root).get(rel_path) or {}).get("card")
+
+
+def declared_cards(repo_root) -> dict:
+    """Every `path -> card` the budget declares, overlay applied."""
+    return {
+        rel: item["card"]
+        for rel, item in _merged_items(repo_root).items()
+        if (item or {}).get("card")
+    }
+
+
+def _merged_items(repo_root) -> dict:
+    """CORE items with the per-instance overlay laid over them, WHOLESALE.
+
+    The same rule `measure-context.py` uses, and it has to be the same rule: an
+    overlay entry replaces a CORE entry entirely, so an instance that redeclares
+    an item without a `card:` has removed the card. Merging per key here while
+    the meter replaces per item would mean the gate measures one card and the
+    session gets another.
+    """
+    if yaml is None:  # pragma: no cover
+        return {}
     root = Path(repo_root)
-    card = None
+    items: dict = {}
     for name in ("context-budget.yaml", "context-budget.user.yaml"):
         path = root / name
         if not path.is_file():
             continue
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        item = (data.get("items") or {}).get(rel_path) or {}
-        if item.get("card"):
-            card = item["card"]
-    return card
+        for rel, item in (data.get("items") or {}).items():
+            items[rel] = item or {}
+    return items

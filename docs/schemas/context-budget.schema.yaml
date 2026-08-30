@@ -100,14 +100,19 @@ properties:
               description: >-
                 Top-level keys emitted VERBATIM, comments included. For the
                 settings a session needs in front of it rather than on
-                request.
+                request. ABSENT means detected from the file's shape; an empty
+                list means deliberately none. The two are not the same, and
+                each field defaults on its own.
             sections:
               type: array
               items: {type: string, minLength: 1}
               description: >-
                 Top-level maps whose children become one index line each.
-                A name here that the source does not have is a finding
-                (`context-index.py --check`), not a silent omission.
+                Absent means detected, as with `keep`. A name here that the
+                source does not have is a finding (`context-index.py
+                --check`), not a silent omission — which is why CORE ships
+                `card: {kind: index}` bare: naming sections there would fail
+                on the first instance whose registry legitimately lacks one.
             label:
               oneOf:
                 - {type: string, minLength: 1}

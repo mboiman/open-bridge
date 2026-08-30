@@ -36,7 +36,13 @@ An item in `context-budget.yaml` may declare a `card:` — what the session load
 ecosystem.yaml:
   optional: true
   source: phase1
-  max_bytes: 4000
+  card:
+    kind: index          # bare: the shape is detected from the file
+```
+
+Declaring the shape is optional and per field:
+
+```yaml
   card:
     kind: index
     keep: [org, local_root, work_system]
@@ -50,6 +56,13 @@ ecosystem.yaml:
 | `sections` | Top-level maps whose children become one index line each. |
 | `label` | The child field supplying that line. A list is tried in order. |
 | `label_chars` | Where a label is cut, with a visible ellipsis (default 120). |
+
+**Absent is not empty.** An absent `keep:` or `sections:` is detected from the
+file's shape; an empty list is a decision and stays empty. Each field defaults
+on its own, so declaring only `keep:` does not silently switch indexing off.
+CORE ships the bare form, because naming sections there would fail the
+`--check` guard on the first instance whose registry legitimately has no
+`partners:`.
 
 Everything else present in the file is named under **"also present"**. Kept,
 indexed, or merely named — but never absent. A card that silently omits a key
@@ -92,16 +105,35 @@ order, or a field — all three of which travel.
 
 ## What the guards catch
 
-`--check` runs three, over every declared card, and CI runs `--check`:
+`--check` runs four, over every declared card, and CI runs `--check`:
 
 - **The declaration** — a name in `keep:` or `sections:` that the source does
-  not have. This is the failure surface the feature adds: the typo is absorbed
-  in silence, the real key falls through to "also present", its content stops
-  being resident, and the card still renders and still passes its cap.
+  not have, or one declared in both. This is the failure surface the feature
+  adds: the typo is absorbed in silence, the real key falls through to "also
+  present", its content stops being resident, and the card still renders and
+  still passes its cap.
+- **The structure** — the line scanner's answer against `yaml.compose`, which
+  already knows it. This is the strongest of the four, and it exists because
+  the other three could not see the worst bug the feature has had: a list item
+  at column zero (`- name: public`, legal YAML) was read as a top-level key,
+  which ended its neighbour's block at that line. The real key then sliced to
+  its header alone — eleven bytes on a live `bridge-config.yaml` — and the
+  round trip called it clean, because one line is still something.
+  `compose` rather than `safe_load` on purpose: `safe_load` resolves `on:` to
+  the boolean `True`, and it hides whether a value was written in flow style,
+  so `required: [a, b]` looks like a truncation. Without both distinctions this
+  guard's first outing produced 54 findings over 255 real files, none of them
+  real.
 - **The round trip** — every path the index advertises has to slice to
   something. A pointer reads as a promise that the content is one call away,
   and the caller stops looking anywhere else.
-- **Coverage** — every top-level key of the source is findable in the card.
+- **Coverage** — every top-level key of the source is findable in the card,
+  matched as a heading, a kept key line or a name in "also present" — never as
+  a substring, since `org` occurs inside `example-org`.
+
+The suite also runs all three content guards over **every YAML file in the
+repo** on each CI run. The fixture is what the author imagined; the tree is
+what actually exists, and the difference has been this feature's whole yield.
 
 ## The cost
 

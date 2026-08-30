@@ -61,6 +61,7 @@ def _check(ci, root: Path, only: str | None) -> int:
         text = target.read_text(encoding="utf-8")
         for finding in (
             ci.check_declaration(text, card)
+            + ci.check_structure(text)
             + ci.check_round_trip(text, card)
             + ci.check_coverage(text, rendered=ci.render_card(text, card, rel))
         ):

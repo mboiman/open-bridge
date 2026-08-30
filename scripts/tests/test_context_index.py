@@ -566,3 +566,225 @@ def test_check_on_a_tree_with_no_cards_is_green(tmp_path):
         "schema_version: 1\nitems: {}\n", encoding="utf-8"
     )
     assert run_cli(tmp_path, "--check").returncode == 0
+
+
+# ------------------------------------------- structure, against an oracle --
+#
+# The parser is a line scanner, and the whole feature rests on it agreeing with
+# YAML about where a block starts and ends. Found by sweeping 120 real files:
+# a list item at column zero is legal YAML and was read as a top-level key.
+
+LIST_AT_COLUMN_ZERO = """\
+org: example-org
+
+upstreams:
+- name: public
+  url: https://example.org/a
+- name: private
+  url: https://example.org/b
+
+customers:
+  one:
+    description: The first.
+"""
+
+
+def test_a_column_zero_list_item_is_not_a_top_level_key():
+    blocks = ci.parse_source(LIST_AT_COLUMN_ZERO)
+
+    assert "- name" not in blocks, "a list item was read as a key"
+    assert set(blocks) == {"org", "upstreams", "customers"}
+
+
+def test_a_key_owning_a_column_zero_list_slices_whole():
+    """The damaging half. The invented key ENDS the real one's block, so the
+    real key slices to its header line alone — 11 bytes on a live
+    bridge-config.yaml — while the round-trip guard reported clean, because
+    one line is still 'something'."""
+    block = ci.slice_block(LIST_AT_COLUMN_ZERO, "upstreams")
+
+    assert "name: public" in block
+    assert "name: private" in block
+    assert "customers:" not in block
+
+
+def test_structure_guard_agrees_with_yaml(source):
+    """An independent oracle. PyYAML already knows the answer, so the cheapest
+    honest check of a hand-written scanner is to ask both and compare."""
+    assert ci.check_structure(source) == []
+    assert ci.check_structure(LIST_AT_COLUMN_ZERO) == []
+
+
+def test_structure_guard_reports_an_invented_key(source):
+    """MUTATION. Feed it the wrong answer and it has to say so."""
+    wrong = dict(ci.parse_source(source))
+    wrong["- name"] = {"kind": "map", "start": 0, "end": 1, "children": {}}
+    findings = ci.check_structure(source, blocks=wrong)
+
+    assert any("- name" in f for f in findings)
+
+
+def test_structure_guard_reports_a_missing_key(source):
+    wrong = {k: v for k, v in ci.parse_source(source).items() if k != "customers"}
+    findings = ci.check_structure(source, blocks=wrong)
+
+    assert any("customers" in f for f in findings)
+
+
+def test_structure_guard_reports_a_block_truncated_to_its_header():
+    """The span half. A key whose value is a map or a list has to slice to more
+    than its own line; anything less is a truncation the round trip cannot
+    see, because a header line is still non-empty."""
+    wrong = dict(ci.parse_source(LIST_AT_COLUMN_ZERO))
+    start = wrong["upstreams"]["start"]
+    wrong["upstreams"] = dict(wrong["upstreams"], end=start + 1)
+    findings = ci.check_structure(LIST_AT_COLUMN_ZERO, blocks=wrong)
+
+    assert any("upstreams" in f for f in findings)
+
+
+# ------------------------------------------- declaration and card defaults --
+
+
+def test_a_bare_kind_index_auto_detects(source):
+    """`card: {kind: index}` means INDEX THIS, shape detected.
+
+    Empty keep and empty sections would put every key under "also present" and
+    render a card that is a list of names — the thing this feature exists to
+    beat — while still passing its cap and every guard. CORE ships exactly this
+    bare form, because naming sections there would fire on the first instance
+    whose registry legitimately lacks one."""
+    card = ci.render_card(source, {"kind": "index"}, "ecosystem.yaml")
+
+    assert "org: example-org" in card, "settings have to be kept"
+    assert "## base" in card, "entry families have to be indexed"
+    assert "Your own Bridge instance." in card
+
+
+def test_an_explicitly_empty_sections_list_stays_empty(source):
+    """Absent is not the same as empty. Declaring `sections: []` is a choice."""
+    card = ci.render_card(source, {"kind": "index", "keep": ["org"], "sections": []},
+                          "ecosystem.yaml")
+
+    assert "## base" not in card
+    assert "base" in card  # named under "also present", never dropped
+
+
+def test_a_key_in_both_keep_and_sections_is_a_finding(source):
+    """Kept whole AND indexed is two answers to one question."""
+    findings = ci.check_declaration(source, {"keep": ["base"], "sections": ["base"]})
+    assert any("base" in f for f in findings)
+
+
+def test_coverage_does_not_accept_a_substring_match():
+    """`org` occurs inside `example-org`, so a substring test finds a key that
+    is not there. A guard that cannot fail is not a guard."""
+    text = "org: example-org\ncustomers:\n  one:\n    description: x\n"
+    rendered = "# e.yaml — index\n\nSomething about example-org.\n"
+
+    assert any("org" == f.split(":")[0] for f in ci.check_coverage(text, rendered=rendered))
+
+
+def test_the_user_overlay_replaces_a_card_wholesale(tmp_path):
+    """Same semantics the meter uses. If the two halves disagreed, the gate
+    would measure one card and the session would get another."""
+    (tmp_path / "ecosystem.yaml").write_text(SOURCE, encoding="utf-8")
+    (tmp_path / "context-budget.yaml").write_text(
+        "schema_version: 1\n"
+        "items:\n"
+        "  ecosystem.yaml:\n"
+        "    card:\n"
+        "      kind: index\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "context-budget.user.yaml").write_text(
+        "items:\n  ecosystem.yaml:\n    max_bytes: 99999\n", encoding="utf-8"
+    )
+
+    assert ci.card_for(tmp_path, "ecosystem.yaml") is None
+
+
+# --------------------------------- the structure guard's own false alarms --
+#
+# Both found by sweeping 255 real files with the guard freshly written. A guard
+# whose first outing is 54 false alarms teaches its reader to ignore it, which
+# is a worse state than not having written it.
+
+
+def test_a_flow_list_on_one_line_is_not_a_truncation():
+    """`required: [a, b]` has content AND lives on one line, legitimately.
+
+    Every `_schema.yaml` in both trees tripped this — the guard was reading
+    "the value has content" as "the value needs more than one line".
+    """
+    text = "required: [schema_version, items]\nother: 1\n"
+    assert ci.check_structure(text) == []
+
+
+def test_a_flow_mapping_on_one_line_is_not_a_truncation():
+    text = "runtime: {host: box, port: 8791}\nother: 1\n"
+    assert ci.check_structure(text) == []
+
+
+def test_a_yaml_1_1_boolean_key_is_not_an_invented_key():
+    """`on:` is the GitHub-workflow trigger and YAML 1.1 resolves it to True.
+
+    Comparing against `safe_load` made the scanner look like it invented a key
+    it read perfectly well. The oracle has to be asked for the source spelling,
+    not for the resolved value.
+    """
+    text = "name: ci\non:\n  push:\n    branches: [main]\njobs:\n  a:\n    runs-on: x\n"
+    findings = ci.check_structure(text)
+
+    assert not any("invented" in f for f in findings), findings
+
+
+def test_a_block_mapping_truncated_to_its_header_is_still_caught():
+    """The true positive has to survive both corrections."""
+    text = "upstreams:\n  a:\n    url: x\nother: 1\n"
+    wrong = dict(ci.parse_source(text))
+    wrong["upstreams"] = dict(wrong["upstreams"], end=wrong["upstreams"]["start"] + 1)
+
+    assert any("upstreams" in f for f in ci.check_structure(text, blocks=wrong))
+
+
+# ------------------------------------------------ the whole tree as corpus --
+
+
+def test_every_yaml_in_this_repo_parses_consistently():
+    """Run all three guards over every YAML this repo ships.
+
+    The fixture above is what the author imagined; this is what the tree
+    actually contains, and the difference has been the whole yield of this
+    feature so far. A sweep like this found the column-zero list item that a
+    hand-written fixture never would have, and it found it in files that were
+    already in production.
+
+    Kept in the suite rather than run once, because the corpus grows: the next
+    file with an unusual shape arrives as a normal commit, not as a bug report.
+    """
+    import yaml as _yaml
+
+    checked = 0
+    problems: list[str] = []
+    for path in sorted(REPO_ROOT.rglob("*.y*ml")):
+        if ".git/" in str(path) or "/node_modules/" in str(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            if not isinstance(_yaml.safe_load(text), dict):
+                continue
+        except (UnicodeDecodeError, _yaml.YAMLError):
+            continue  # a template with placeholders is not this guard's business
+        checked += 1
+        rel = str(path.relative_to(REPO_ROOT))
+        card = ci.render_card(text, None, rel)
+        for finding in (
+            ci.check_structure(text)
+            + ci.check_round_trip(text, None)
+            + ci.check_coverage(text, rendered=card)
+        ):
+            problems.append(f"{rel}: {finding}")
+
+    assert checked > 50, f"corpus too small to mean anything ({checked} files)"
+    assert problems == [], "\n".join(problems[:15])
